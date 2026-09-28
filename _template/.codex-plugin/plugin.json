@@ -1,0 +1,6 @@
+{
+  "name": "agent-template",
+  "version": "0.0.0",
+  "description": "Template — replace with one sentence describing what the agent does",
+  "skills": "./skills/"
+}

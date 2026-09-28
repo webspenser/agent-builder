@@ -1,0 +1,7 @@
+{
+  "name": "agent-builder",
+  "owner": { "name": "Webspenser" },
+  "plugins": [
+    { "name": "agent-builder", "source": "./", "description": "Build your own AI agent on the Webspenser Agent Standard — a guided wizard, a template, and a validator." }
+  ]
+}

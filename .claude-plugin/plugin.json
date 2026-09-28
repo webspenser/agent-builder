@@ -1,0 +1,8 @@
+{
+  "name": "agent-builder",
+  "version": "1.0.0",
+  "description": "Build your own AI agent on the Webspenser Agent Standard — a guided wizard, a template, and a validator.",
+  "author": { "name": "Webspenser" },
+  "repository": "https://github.com/webspenser/agent-builder",
+  "license": "Apache-2.0"
+}

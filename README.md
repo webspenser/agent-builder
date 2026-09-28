@@ -1,103 +1,72 @@
-# Webspenser Agent Library
+# Agent Builder
 
-A library of **portable agent specifications** — self-contained folders that
-define an AI agent's identity, skills, sub-agent roles, and working
-artifacts once, in a form that Claude Code, Gemini CLI, Codex, Cursor,
-and comparable hosts can all load without duplication.
+Build your own AI agent on the **Webspenser Agent Standard** — a guided
+wizard, a template, and a validator, packaged as a plugin.
 
-An agent specification here is not code. It is a directory of markdown
-that any capable model can pick up and execute, plus thin adapter files
-that let each host find it.
+An agent here is a folder of plain markdown: one `AGENT.md` that
+defines who it is and how it works, skills for its repeated
+procedures, optional sub-agent roles, the context it needs about your
+world, and evals that say what it must never do. The same folder runs
+on Claude Code, Gemini CLI, and Codex.
 
-## Why this exists
+## Install
 
-Agent definitions tend to get written against one vendor's conventions
-and then rewritten for the next. This library keeps a single source of
-truth per agent and pushes provider differences into pointer files that
-carry no behavior, so the same agent runs everywhere and drifts nowhere.
+**Claude Code** (supported)
 
-A specification is also portable in the ordinary sense: copy the folder
-somewhere else, or hand it to a client, and it still works.
+    /plugin marketplace add webspenser/agent-builder
+    /plugin install agent-builder@agent-builder
 
-## Layout
+**Gemini CLI** and **Codex** — manifests ship, not yet verified:
 
-```
-agent-library/
-  README.md
-  CONVENTIONS.md            # the portable-agent standard, one page
-  docs/superpowers/specs/   # design specs (framework, then one per agent)
-  _template/                # empty skeleton — copy this to start an agent
-  <agent-name>/
-    AGENT.md                # single source of truth
-    install.sh              # links adapters into host-expected locations
-    adapters/               # CLAUDE.md, GEMINI.md, AGENTS.md — pointers only
-    skills/                 # reusable procedures, SKILL.md format
-    subagents/              # role contracts
-    templates/              # blank artifacts the agent produces
-    samples/                # filled gold-standard examples
-    context/                # inputs the agent consumes
-    evals/                  # given-X-expect-Y checks
-```
+    gemini extensions install https://github.com/webspenser/agent-builder
+    codex plugin marketplace add webspenser/agent-builder   # unverified
 
-## Using an agent
+## Build an agent
 
-```bash
-cd <agent-name>
-./install.sh            # symlink all three adapters (CLAUDE.md, GEMINI.md,
-                        # AGENTS.md) plus .claude/skills and .claude/agents
-./install.sh --copy     # the same set as independent copies, for handoff
-./install.sh --dry-run  # print what would happen, write nothing
-```
+Open your host in the folder where the agent should live and run:
 
-It detects nothing and asks nothing: every run writes all three adapter
-files, so the folder is ready for whichever host opens it. Then open the
-folder with any supported host and follow `AGENT.md`.
+    /agent-builder:new-agent
 
-## Capability tiers
+By default it creates the agent in a new `./<name>` folder there; it
+asks before using any other place.
 
-Agents declare the capability each workflow step needs, so weaker hosts
-run a reduced agent rather than failing:
+It interviews you one question at a time — purpose, name, personal or
+distributable, then the agent section by section — writes the files as
+it goes, and finishes when the validator passes. Personal agents are
+for you alone; distributable agents are ones others install.
 
-| Tier | Host capability | Behavior |
-|---|---|---|
-| 1 — Full | Sub-agent dispatch + skill autoloading | Sub-agents run dispatched and isolated |
-| 2 — Reduced | No dispatch | Same role contracts run inline as sequential phases |
-| 3 — Minimum | Single context | `AGENT.md` alone, skills pasted in as needed |
+## Validate
 
-No step on any agent's critical path may require tier 1. Dispatch buys
-parallelism and context isolation, never correctness.
+    /agent-builder:validate-agent            # inside the host
+    bin/validate-agent.sh path/to/agent      # from a clone of this repo
 
-## Creating a new agent
+In CI, from any agent repo:
 
-1. Read `CONVENTIONS.md`.
-2. Copy `_template/` to `<agent-name>/`.
-3. Write the design spec first, in `docs/superpowers/specs/`.
-4. Fill in `AGENT.md`, then skills, then sub-agent contracts.
-5. Write `evals/cases.md` before you consider it done.
-
-## Agents
-
-| Agent | Purpose | Status |
-|---|---|---|
-| `sales-partner` | Interviews a business, then runs a five-stage lead pipeline — prospect, research, approach, sales call, follow-up — over a CRM | Built |
-
-## Verifying
-
-```bash
-tests/run-all.sh
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- uses: webspenser/agent-builder/validate@v1
+  with:
+    path: .
+    require-bump-against: origin/main   # optional: enforce version bumps
 ```
 
-The single command that verifies the whole repo. It runs the validator's
-own test suite (`tests/test-validate-agent.sh`), the installer's test
-suite (`tests/test-install.sh`), and then `tests/validate-agent.sh`
-against every agent directory that has an `AGENT.md` — currently
-`_template/` and `sales-partner/`. It prints `ALL GREEN` and exits `0`
-only when every suite passes and every agent conforms to
-`CONVENTIONS.md`; otherwise it prints `FAILURES ABOVE` and exits
-non-zero. Run it before committing any change anywhere in the repo.
+## What's here
 
-## Specs
+| Path | What it is |
+|---|---|
+| `STANDARD.md` | The Agent Standard 1.0 |
+| `_template/` | The skeleton every agent starts from |
+| `skills/` | `new-agent` (the wizard) and `validate-agent` |
+| `bin/validate-agent.sh` | The validator |
+| `validate/` | The GitHub Action |
+| `docs/writing-an-agent.md` | How to write a good agent by hand |
+| `sales-partner/` | The first agent; moving to its own repo |
 
-- [Portable Agent Specification Format](docs/superpowers/specs/2026-09-01-portable-agent-spec-design.md) — the framework every agent conforms to
-- [Sales Partner Agent](docs/superpowers/specs/2026-09-01-sales-partner-agent-design.md) — the first agent
-- [Agent Library Bootstrap Implementation Plan](docs/superpowers/plans/2026-09-01-agent-library-bootstrap.md) — the plan that built this repo; see its top note on where the CRM contract's final shape lives
+## Developing the builder
+
+    tests/run-all.sh     # must end ALL GREEN before any commit
+
+## License
+
+Apache-2.0.
