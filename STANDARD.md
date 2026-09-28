@@ -242,6 +242,17 @@ Claude rejects a directory in `agents`, which is why each file is
 listed. The one-entry marketplace lets the repo install on its own for
 local testing.
 
+## Release rule
+
+Any change to an agent's files ships with a `version` bump, applied to
+`agent.yaml` and all four host manifests together — hosts update a
+GitHub-sourced plugin only when its version changes. The validator
+enforces this against a git ref when asked:
+
+    bin/validate-agent.sh <agent-dir> --require-bump origin/main
+
+An agent that did not exist at the ref needs no bump.
+
 ## Validation
 
 ```bash

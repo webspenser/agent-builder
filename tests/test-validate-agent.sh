@@ -180,4 +180,32 @@ out=$(AGENT_VALIDATOR_PYTHON=/nonexistent/python3 $V "$FIX/v1-nopy" 2>&1)
 if printf '%s\n' "$out" | grep -q '^FAIL: python3 is required'; then
   _report ok "missing python reported clearly"; else _report no "missing python not reported clearly"; fi
 
+echo "-- release rule"
+G="$FIX/bump-repo"
+mkdir -p "$G"
+git -C "$G" init -q
+make_valid_v1_agent "$G/agent"
+git -C "$G" add -A && git -C "$G" -c user.email=t@t -c user.name=t commit -qm base
+BASE=$(git -C "$G" rev-parse HEAD)
+
+# Unchanged since the ref: passes.
+assert_pass $V "$G/agent" --require-bump "$BASE"
+# Changed without a bump: fails.
+echo "extra" >> "$G/agent/AGENT.md"
+assert_fail $V "$G/agent" --require-bump "$BASE"
+# Flag before the directory works too.
+assert_fail $V --require-bump "$BASE" "$G/agent"
+# Changed with a bump everywhere: passes.
+for f in agent.yaml .claude-plugin/plugin.json gemini-extension.json .codex-plugin/plugin.json; do
+  sed -i.bak 's/0\.1\.0/0.1.1/' "$G/agent/$f"; rm -f "$G/agent/$f.bak"
+done
+assert_pass $V "$G/agent" --require-bump "$BASE"
+# A brand-new agent (no agent.yaml at the ref) passes.
+make_valid_v1_agent "$G/newagent"
+assert_pass $V "$G/newagent" --require-bump "$BASE"
+# An unknown ref fails with a clear message.
+out=$($V "$G/agent" --require-bump no-such-ref 2>&1)
+if printf '%s\n' "$out" | grep -q "^FAIL: --require-bump: unknown git ref 'no-such-ref'"; then
+  _report ok "unknown ref reported"; else _report no "unknown ref not reported"; fi
+
 finish

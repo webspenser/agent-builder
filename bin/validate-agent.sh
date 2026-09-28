@@ -3,7 +3,14 @@
 # Usage: bin/validate-agent.sh <agent-dir> [--require-bump <git-ref>]
 set -uo pipefail
 
-DIR="${1:-}"
+DIR=""
+BUMP_REF=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --require-bump) BUMP_REF="${2:-}"; shift 2 ;;
+    *) DIR="$1"; shift ;;
+  esac
+done
 [ -n "$DIR" ] && [ -d "$DIR" ] || { echo "FAIL: not a directory: ${DIR:-<none>}"; exit 1; }
 
 ERRORS=0
@@ -95,6 +102,21 @@ if [ -f "$DIR/agent.yaml" ]; then
   fi
 else
   echo "WARN: $DIR has no agent.yaml — checked as pre-1.0"
+fi
+
+# Release rule: files changed since the ref require a version bump.
+if [ -n "$BUMP_REF" ]; then
+  if ! git -C "$DIR" rev-parse --verify --quiet "$BUMP_REF^{commit}" >/dev/null 2>&1; then
+    fail "--require-bump: unknown git ref '$BUMP_REF'"
+  elif git -C "$DIR" cat-file -e "$BUMP_REF:./agent.yaml" 2>/dev/null; then
+    old_ver=$(git -C "$DIR" show "$BUMP_REF:./agent.yaml" | grep -m1 '^version:' | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//')
+    new_ver=$(grep -m1 '^version:' "$DIR/agent.yaml" 2>/dev/null | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//')
+    changed=$(git -C "$DIR" diff --name-only "$BUMP_REF" -- . | head -1)
+    untracked=$(git -C "$DIR" ls-files --others --exclude-standard -- . | head -1)
+    if { [ -n "$changed" ] || [ -n "$untracked" ]; } && [ "$old_ver" = "$new_ver" ]; then
+      fail "files changed since $BUMP_REF but version is still $new_ver — bump it in agent.yaml and all four host manifests"
+    fi
+  fi
 fi
 
 if [ "$ERRORS" -eq 0 ]; then echo "OK: $DIR conforms"; exit 0; fi
