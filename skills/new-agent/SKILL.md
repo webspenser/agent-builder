@@ -28,14 +28,18 @@ The template lives at `_template/` in this plugin's root
    first unfinished step.
 3. **Mode.** Ask: *personal* (only you use it; we fill your details in
    after building) or *distributable* (others install it; your details
-   never go in it).
-4. **Scaffold.** Copy the template folder to the target. Set
+   never go in it). Then ask: "Whose name or organization should appear
+   as the publisher?" If the user gives none, stop and ask again — never
+   fill it from git config, the host account, or a guess.
+4. **Scaffold.** Copy the template with
+   `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
+   hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
    `standard: "1.0"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
-   user's name or organization. Set the title in `AGENT.md` and the
+   publisher the user named in step 3. Set the title in `AGENT.md` and the
    three `adapters/` files to the agent's display name.
 5. **Specification, section by section.** For each, ask, draft,
    confirm, write:

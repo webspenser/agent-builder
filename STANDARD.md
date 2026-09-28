@@ -17,7 +17,7 @@ grows with the builder's sub-projects — 1.0 packaging (this version),
 1.1 instance rules, 1.2 capability contracts and adapters. An agent
 declares the version it follows in `agent.yaml`; the validator
 understands `1.x` and fails any other. A folder with no `agent.yaml` is
-a pre-1.0 agent: it is checked by the rules above only and passes with
+a pre-1.0 agent: it is checked by the pre-1.0 rules below only and passes with
 a warning.
 
 ## Directory layout
@@ -28,9 +28,9 @@ agent-builder/
   STANDARD.md               # the Agent Standard
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
-    agent.yaml               # identity + standard version (1.0)
-    .claude-plugin/           # plugin.json, marketplace.json
-    .codex-plugin/            # plugin.json
+    agent.yaml              # identity + standard version (1.0)
+    .claude-plugin/         # plugin.json, marketplace.json
+    .codex-plugin/          # plugin.json
     gemini-extension.json
     AGENT.md                # single source of truth
     install.sh              # links adapters into host-expected locations

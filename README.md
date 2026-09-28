@@ -19,12 +19,16 @@ on Claude Code, Gemini CLI, and Codex.
 **Gemini CLI** and **Codex** — manifests ship, not yet verified:
 
     gemini extensions install https://github.com/webspenser/agent-builder
+    codex plugin marketplace add webspenser/agent-builder   # unverified
 
 ## Build an agent
 
 Open your host in the folder where the agent should live and run:
 
     /agent-builder:new-agent
+
+By default it creates the agent in a new `./<name>` folder there; it
+asks before using any other place.
 
 It interviews you one question at a time — purpose, name, personal or
 distributable, then the agent section by section — writes the files as
