@@ -3,7 +3,7 @@
 **Date:** 2026-09-28
 **Status:** Approved in conversation, pending spec review
 **Implements:** sub-project 1 of [Agent Distribution Architecture](./2026-09-27-agent-distribution-architecture-design.md)
-**Repo:** `webspenser/agent-library`
+**Repo:** `webspenser/agent-builder`
 
 ## Purpose
 
@@ -19,7 +19,8 @@ CI.
 |---|---|---|
 | Standard versioning | Grows per sub-project: **1.0** packaging (this spec), **1.1** instance rules (sub-project 3), **1.2** capability contracts and adapters (sub-project 4) | Each addition is additive; 1.0 ships with the builder instead of waiting on later work. Amends the umbrella spec, which bundled all three into 1.0 |
 | Standard document | `CONVENTIONS.md` becomes `STANDARD.md`, headed "Agent Standard 1.0" | The name says what it is; the version is visible at the top |
-| Plugin name | `agent-library` (skills appear as `/agent-library:new-agent`) | Matches the repo; no rename needed |
+| Names | Repo renamed `webspenser/agent-library` → `webspenser/agent-builder`; plugin `agent-builder` (skills appear as `/agent-builder:new-agent`). The name `webspenser/agent-library` is then reused for the public catalog (sub-project 6) | "Builder" is what this repo is; "library" fits the catalog of published agents. No users yet, so renaming costs nothing |
+| Compatibility | None kept: files move freely, no shims | No existing users |
 | Validator location | `bin/validate-agent.sh` (moved from `tests/`) | The plugin, the Action, and users all call it; it is a product, not a test |
 | Parsing | `python3` standard library for JSON; `agent.yaml` read line by line | Present on macOS and GitHub runners; no dependency to install |
 | Pre-1.0 agents | An agent with no `agent.yaml` is checked by the pre-1.0 rules only and passes with a warning | `sales-partner` stays valid here until sub-project 2 extracts it |
@@ -92,8 +93,8 @@ bin/validate-agent.sh <agent-dir> [--require-bump <git-ref>]
 - Output contract unchanged: `OK: <dir> conforms` and exit 0, or one
   `FAIL:` line per problem, a count, and exit 1.
 
-`tests/validate-agent.sh` stays as a one-line shim that calls
-`bin/validate-agent.sh`, so existing docs and habits keep working.
+`tests/validate-agent.sh` is removed, not shimmed — there are no
+existing users; every reference moves to `bin/validate-agent.sh`.
 
 ## Template — `_template/`
 
@@ -107,8 +108,8 @@ and the four host manifests, filled to match it, with an empty
 The repo root is the plugin:
 
 ```
-agent-library/
-  .claude-plugin/plugin.json        # name agent-library, version 1.0.0
+agent-builder/
+  .claude-plugin/plugin.json        # name agent-builder, version 1.0.0
   .claude-plugin/marketplace.json   # one entry, source "./"
   gemini-extension.json             # contextFileName: STANDARD.md
   .codex-plugin/plugin.json         # skills: ./skills/
@@ -184,7 +185,7 @@ same checks by reading the files and reports in the same format.
 A composite action any agent repo can use:
 
 ```yaml
-- uses: webspenser/agent-library/validate@v1
+- uses: webspenser/agent-builder/validate@v1
   with:
     path: .                    # agent folder, default "."
     require-bump-against: ""   # e.g. origin/main on pull requests
@@ -197,9 +198,9 @@ releases of the builder.
 ## Documentation
 
 - `README.md` rewritten for the builder's users: what it is, install on
-  Claude (`/plugin marketplace add webspenser/agent-library`, then
-  `/plugin install agent-library@agent-library`), Gemini and Codex
-  marked unverified, `/agent-library:new-agent`, validating in CI.
+  Claude (`/plugin marketplace add webspenser/agent-builder`, then
+  `/plugin install agent-builder@agent-builder`), Gemini and Codex
+  marked unverified, `/agent-builder:new-agent`, validating in CI.
 - `docs/writing-an-agent.md` — the practices the wizard follows, for
   people who build by hand.
 
@@ -215,7 +216,7 @@ releases of the builder.
   content tests, and the validator on `_template/` and every agent
   folder; still ends `ALL GREEN`.
 - Manual acceptance: install the builder from a local path, run
-  `/agent-library:new-agent` in an empty folder for a small personal
+  `/agent-builder:new-agent` in an empty folder for a small personal
   agent, and confirm the result validates.
 
 ## Out of scope
