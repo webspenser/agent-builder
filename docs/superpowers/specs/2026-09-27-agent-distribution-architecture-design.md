@@ -201,9 +201,11 @@ diff, and applies it only after the user confirms; then it updates
 
 `CONVENTIONS.md` becomes the **Agent Standard**, versioned with semantic
 versioning: minor for optional additions, major when an agent must
-change to conform. The first versioned release is **1.0** and includes
-`agent.yaml`, capability contracts and adapters, and the instance rules
-in this document. The unversioned `CONVENTIONS.md` is pre-1.0.
+change to conform. The standard grows with the sub-projects (decided
+2026-09-28): **1.0** packaging — `agent.yaml` and host manifests
+(sub-project 1); **1.1** the instance rules (sub-project 3); **1.2**
+capability contracts and adapters (sub-project 4). The unversioned
+`CONVENTIONS.md` is pre-1.0.
 
 ### Agent manifest
 
