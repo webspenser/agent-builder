@@ -58,7 +58,7 @@ clients); skill overrides in instances (updates become unsafe).
 
 | Layer | Repo | Holds | Never holds |
 |---|---|---|---|
-| **Builder** | `webspenser/agent-library` | The versioned standard, `_template/`, the `new-agent` wizard, the validator, best-practice docs | Agents, user data |
+| **Builder** | `webspenser/agent-builder` | The versioned standard, `_template/`, the `new-agent` wizard, the validator, best-practice docs | Agents, user data |
 | **Package** | One per agent, e.g. `webspenser/sales-partner` | `agent.yaml`, `AGENT.md`, skills, sub-agent contracts, templates, samples, capability contracts, shipped adapters, blank `context/` defaults, host manifests | Any user's filled context, credentials |
 | **Instance** | One per user and agent — its own repo, or a subfolder of the user's workspace repo | `instance.yaml`, filled `context/`, custom adapters, host pointer files and settings, optional schedule workflow | Agent logic (plugin mode), credentials |
 
@@ -201,9 +201,11 @@ diff, and applies it only after the user confirms; then it updates
 
 `CONVENTIONS.md` becomes the **Agent Standard**, versioned with semantic
 versioning: minor for optional additions, major when an agent must
-change to conform. The first versioned release is **1.0** and includes
-`agent.yaml`, capability contracts and adapters, and the instance rules
-in this document. The unversioned `CONVENTIONS.md` is pre-1.0.
+change to conform. The standard grows with the sub-projects (decided
+2026-09-28): **1.0** packaging — `agent.yaml` and host manifests
+(sub-project 1); **1.1** the instance rules (sub-project 3); **1.2**
+capability contracts and adapters (sub-project 4). The unversioned
+`CONVENTIONS.md` is pre-1.0.
 
 ### Agent manifest
 
@@ -237,7 +239,7 @@ Manifest rules found in the spikes, enforced by the validator:
 
 ### Builder plugin
 
-Installable on all three hosts from `webspenser/agent-library`:
+Installable on all three hosts from `webspenser/agent-builder`:
 
 - `new-agent` — the wizard. Asks what the agent is for, chooses
   personal or distributable mode, walks the template (identity and
@@ -248,14 +250,14 @@ Installable on all three hosts from `webspenser/agent-library`:
   contract.
 - `_template/` and best-practice docs (the standard, writing a
   capability contract, writing an adapter).
-- A GitHub Action, `webspenser/agent-library/validate@v1`, so any agent
+- A GitHub Action, `webspenser/agent-builder/validate@v1`, so any agent
   repo can run the validator in CI.
 
 Later: `upgrade-agent`, once a standard 2.0 exists.
 
 ## Catalogs
 
-- **Public catalog** — a small repo (`webspenser/agents`) holding the
+- **Public catalog** — a small repo (`webspenser/agent-library`) holding the
   Claude and Codex marketplace files that list the builder and every
   public agent, each sourced from its own repo. Gemini users install
   each repo by URL; the catalog's README lists them.
@@ -294,7 +296,7 @@ Antigravity is a host to research later (see Spike findings).
 | 3 | **Instance** | Sub-projects 1–2 | `instance.yaml` schema in the standard; context-resolution and write rules in the standard and in sales-partner; `setup` skill (interview, pointer files, settings); migration mechanism |
 | 4 | **Tools and credentials** | Sub-project 3 | Capability-contract and adapter format in the standard; sales-partner contracts for `scraper`, `web_research`, `email_drafts`; Attio and HubSpot CRM adapters; setup's binding walk-through, probes, enforcement declarations, deny rules |
 | 5 | **Runtime** | Sub-project 4 | `schedules` wired to Claude routines on the instance repo; the unattended-run rule enforced by setup; later, a GitHub Actions runner for all hosts |
-| 6 | **Catalogs** | Sub-project 2 | Public `webspenser/agents` and a private catalog; install docs |
+| 6 | **Catalogs** | Sub-project 2 | Public `webspenser/agent-library` and a private catalog; install docs |
 
 Sub-project 6 can run any time after 2.
 
