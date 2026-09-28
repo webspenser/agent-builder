@@ -3,14 +3,20 @@
 # Usage: bin/validate-agent.sh <agent-dir> [--require-bump <git-ref>]
 set -uo pipefail
 
+USAGE="Usage: validate-agent.sh <agent-dir> [--require-bump <git-ref>]"
 DIR=""
+DIR_SET=0
 BUMP_REF=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    -h|--help) echo "$USAGE"; exit 0 ;;
     --require-bump)
-      if [ $# -lt 2 ]; then echo "FAIL: --require-bump requires a git ref"; exit 1; fi
+      if [ $# -lt 2 ] || [ -z "$2" ]; then echo "FAIL: --require-bump requires a git ref"; exit 1; fi
       BUMP_REF="$2"; shift 2 ;;
-    *) DIR="$1"; shift ;;
+    -*) echo "FAIL: unknown option '$1'"; echo "$USAGE"; exit 1 ;;
+    *)
+      if [ "$DIR_SET" -eq 1 ]; then echo "FAIL: unexpected argument '$1'"; echo "$USAGE"; exit 1; fi
+      DIR="$1"; DIR_SET=1; shift ;;
   esac
 done
 [ -n "$DIR" ] && [ -d "$DIR" ] || { echo "FAIL: not a directory: ${DIR:-<none>}"; exit 1; }
@@ -27,8 +33,20 @@ SUBAGENT_HEADINGS=(
   "Stop conditions" "Handoff" "Inline fallback"
 )
 ADAPTER_MAX_LINES=25
-BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve symlinks to this script (portable: no GNU `readlink -f`).
+SELF="$0"
+while [ -L "$SELF" ]; do
+  target=$(readlink "$SELF")
+  case "$target" in
+    /*) SELF="$target" ;;
+    *) SELF="$(dirname "$SELF")/$target" ;;
+  esac
+done
+BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 PYTHON="${AGENT_VALIDATOR_PYTHON:-python3}"
+CHECKER="$BIN_DIR/lib/check_manifests.py"
+PY_MISSING="python3 is required for Agent Standard 1.0 checks (set AGENT_VALIDATOR_PYTHON to its path)"
+have_python() { command -v "$PYTHON" >/dev/null 2>&1; }
 
 # Required directories
 for d in adapters skills subagents templates samples context evals; do
@@ -84,6 +102,12 @@ while IFS= read -r f; do
   [ -z "$extra" ] || fail "$f: frontmatter has keys other than name/description: $(echo "$extra" | head -1)"
 done < <(find "$DIR/skills" -name SKILL.md 2>/dev/null)
 
+# Sub-agent contracts sit directly in subagents/, never nested.
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  fail "subagents/${f#"$DIR/subagents/"}: contracts must sit directly in subagents/"
+done < <(find "$DIR/subagents" -mindepth 2 -name '*.md' 2>/dev/null)
+
 # Sub-agent contracts: required headings present AND in order
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -91,16 +115,18 @@ while IFS= read -r f; do
   expected=$(printf '%s\n' "${SUBAGENT_HEADINGS[@]}")
   filtered=$(echo "$found" | grep -Fx -f <(printf '%s\n' "${SUBAGENT_HEADINGS[@]}") || true)
   [ "$filtered" = "$expected" ] || fail "$f: headings missing or out of order"
-done < <(find "$DIR/subagents" -name '*.md' 2>/dev/null)
+done < <(find "$DIR/subagents" -maxdepth 1 -name '*.md' 2>/dev/null)
 
 # Agent Standard 1.0: agent.yaml and host manifests
 if [ -f "$DIR/agent.yaml" ]; then
-  if command -v "$PYTHON" >/dev/null 2>&1; then
+  if have_python; then
+    out=$("$PYTHON" "$CHECKER" "$DIR" 2>&1); rc=$?
     while IFS= read -r line; do
       [ -n "$line" ] && fail "${line#FAIL: }"
-    done < <("$PYTHON" "$BIN_DIR/lib/check_manifests.py" "$DIR" 2>&1)
+    done <<< "$out"
+    [ "$rc" -eq 0 ] || fail "manifest checker crashed (exit $rc)"
   else
-    fail "python3 is required for Agent Standard 1.0 checks (set AGENT_VALIDATOR_PYTHON to its path)"
+    fail "$PY_MISSING"
   fi
 else
   echo "WARN: $DIR has no agent.yaml — checked as pre-1.0"
@@ -111,14 +137,23 @@ if [ -n "$BUMP_REF" ]; then
   if ! git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fail "--require-bump: $DIR is not inside a git repository"
   elif ! git -C "$DIR" rev-parse --verify --quiet "$BUMP_REF^{commit}" >/dev/null 2>&1; then
-    fail "--require-bump: unknown git ref '$BUMP_REF'"
+    fail "--require-bump: unknown git ref '$BUMP_REF' (in CI, check out with fetch-depth: 0)"
   elif git -C "$DIR" cat-file -e "$BUMP_REF:./agent.yaml" 2>/dev/null; then
-    old_ver=$(git -C "$DIR" show "$BUMP_REF:./agent.yaml" | grep -m1 '^version:' | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//')
-    new_ver=$(grep -m1 '^version:' "$DIR/agent.yaml" 2>/dev/null | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//')
-    changed=$(git -C "$DIR" diff --name-only "$BUMP_REF" -- . | head -1)
-    untracked=$(git -C "$DIR" ls-files --others --exclude-standard -- . | head -1)
-    if { [ -n "$changed" ] || [ -n "$untracked" ]; } && [ "$old_ver" = "$new_ver" ]; then
-      fail "files changed since $BUMP_REF but version is still $new_ver — bump it in agent.yaml and all four host manifests"
+    if ! have_python; then
+      [ -f "$DIR/agent.yaml" ] || fail "$PY_MISSING"  # otherwise already reported above
+    else
+      # One parser for both sides: check_manifests.py --get.
+      old_ver=$(git -C "$DIR" show "$BUMP_REF:./agent.yaml" | "$PYTHON" "$CHECKER" --get version - 2>&1); old_rc=$?
+      new_ver=$("$PYTHON" "$CHECKER" --get version "$DIR/agent.yaml" 2>&1); new_rc=$?
+      if [ "$old_rc" -ne 0 ] || [ "$new_rc" -ne 0 ]; then
+        fail "--require-bump: could not read version from agent.yaml (exit $old_rc/$new_rc)"
+      else
+        changed=$(git -C "$DIR" diff --name-only "$BUMP_REF" -- . | head -1)
+        untracked=$(git -C "$DIR" ls-files --others --exclude-standard -- . | head -1)
+        if { [ -n "$changed" ] || [ -n "$untracked" ]; } && [ "$old_ver" = "$new_ver" ]; then
+          fail "files changed since $BUMP_REF but version is still $new_ver — bump it in agent.yaml and all four host manifests"
+        fi
+      fi
     fi
   fi
 fi

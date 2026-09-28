@@ -180,6 +180,107 @@ out=$(AGENT_VALIDATOR_PYTHON=/nonexistent/python3 $V "$FIX/v1-nopy" 2>&1)
 if printf '%s\n' "$out" | grep -q '^FAIL: python3 is required'; then
   _report ok "missing python reported clearly"; else _report no "missing python not reported clearly"; fi
 
+# no_traceback <label> <output> — the output holds a FAIL line and no Python traceback.
+no_traceback() {
+  if printf '%s\n' "$2" | grep -q 'Traceback'; then _report no "$1: traceback"
+  elif printf '%s\n' "$2" | grep -q '^FAIL:'; then _report ok "$1: FAIL without traceback"
+  else _report no "$1: no FAIL line"; fi
+}
+
+echo "-- wrong-typed manifests (I1)"
+make_valid_v1_agent "$FIX/v1-arr"; echo '[]' > "$FIX/v1-arr/gemini-extension.json"
+out=$($V "$FIX/v1-arr" 2>&1); rc=$?
+[ "$rc" -ne 0 ] && _report ok "[] manifest exits non-zero" || _report no "[] manifest passed"
+no_traceback "[] manifest" "$out"
+if printf '%s\n' "$out" | grep -qF 'FAIL: gemini-extension.json: must be a JSON object'; then
+  _report ok "[] manifest named"; else _report no "[] manifest not named: $out"; fi
+
+make_valid_v1_agent "$FIX/v1-agentsnull"
+sed -i.bak 's#"agents":\[\]#"agents":null#' "$FIX/v1-agentsnull/.claude-plugin/plugin.json"
+out=$($V "$FIX/v1-agentsnull" 2>&1); rc=$?
+[ "$rc" -ne 0 ] && _report ok "agents null exits non-zero" || _report no "agents null passed"
+no_traceback "agents null" "$out"
+if printf '%s\n' "$out" | grep -qF 'FAIL: .claude-plugin/plugin.json: agents must be a list of file paths'; then
+  _report ok "agents null named"; else _report no "agents null not named: $out"; fi
+
+make_valid_v1_agent "$FIX/v1-owner"
+sed -i.bak 's#"owner":{"name":"Test"}#"owner":"me"#' "$FIX/v1-owner/.claude-plugin/marketplace.json"
+out=$($V "$FIX/v1-owner" 2>&1); rc=$?
+[ "$rc" -ne 0 ] && _report ok "owner string exits non-zero" || _report no "owner string passed"
+no_traceback "owner string" "$out"
+
+make_valid_v1_agent "$FIX/v1-plugin-str"
+sed -i.bak 's#"plugins":\[{"name":"demo-agent","source":"./"}\]#"plugins":["demo-agent"]#' \
+  "$FIX/v1-plugin-str/.claude-plugin/marketplace.json"
+out=$($V "$FIX/v1-plugin-str" 2>&1); rc=$?
+[ "$rc" -ne 0 ] && _report ok "plugins[0] string exits non-zero" || _report no "plugins[0] string passed"
+no_traceback "plugins[0] string" "$out"
+
+make_valid_v1_agent "$FIX/v1-latin1"
+printf '{"name":"demo-agent","description":"caf\351"}\n' > "$FIX/v1-latin1/.codex-plugin/plugin.json"
+out=$($V "$FIX/v1-latin1" 2>&1); rc=$?
+[ "$rc" -ne 0 ] && _report ok "non-UTF-8 exits non-zero" || _report no "non-UTF-8 passed"
+no_traceback "non-UTF-8" "$out"
+if printf '%s\n' "$out" | grep -qF 'FAIL: .codex-plugin/plugin.json: not valid UTF-8'; then
+  _report ok "non-UTF-8 named"; else _report no "non-UTF-8 not named: $out"; fi
+
+# The checker failing is never a pass (fail-closed).
+make_valid_v1_agent "$FIX/v1-pyfalse"
+out=$(AGENT_VALIDATOR_PYTHON=false $V "$FIX/v1-pyfalse" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF 'FAIL: manifest checker crashed'; then
+  _report ok "crashed checker fails closed"; else _report no "crashed checker (rc=$rc): $out"; fi
+
+echo "-- agent.yaml quoting (minor 1)"
+make_valid_v1_agent "$FIX/v1-hash"
+for f in .claude-plugin/plugin.json gemini-extension.json .codex-plugin/plugin.json; do
+  sed -i.bak 's/"description":"A demo agent"/"description":"Your #1 helper"/' "$FIX/v1-hash/$f"
+done
+sed -i.bak 's/^description:.*/description: "Your #1 helper"   # tagline/' "$FIX/v1-hash/agent.yaml"
+out=$($V "$FIX/v1-hash" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && _report ok "quoted value keeps '#'" || _report no "quoted '#' value failed: $out"
+
+echo "-- --get (minor 2)"
+CM=bin/lib/check_manifests.py
+printf '%s\n' 'name: x' 'version : 1.2.0   # spaced' > "$FIX/get.yaml"
+got=$(python3 "$CM" --get version "$FIX/get.yaml" 2>&1)
+[ "$got" = "1.2.0" ] && _report ok "--get reads a spaced key" || _report no "--get gave '$got'"
+got=$(printf 'version: "2.0.0"\n' | python3 "$CM" --get version - 2>&1)
+[ "$got" = "2.0.0" ] && _report ok "--get reads stdin" || _report no "--get stdin gave '$got'"
+
+echo "-- arguments (minor 3)"
+make_valid_v1_agent "$FIX/v1-args"
+out=$($V "$FIX/v1-args" extra 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF "FAIL: unexpected argument 'extra'"; then
+  _report ok "second positional rejected"; else _report no "second positional (rc=$rc): $out"; fi
+out=$($V "$FIX/v1-args" --bogus 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF "FAIL: unknown option '--bogus'"; then
+  _report ok "unknown option rejected"; else _report no "unknown option (rc=$rc): $out"; fi
+for h in -h --help; do
+  out=$($V "$h" 2>&1); rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^Usage: '; then
+    _report ok "$h prints usage"; else _report no "$h (rc=$rc): $out"; fi
+done
+out=$($V "$FIX/v1-args" --require-bump "" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF "FAIL: --require-bump requires a git ref"; then
+  _report ok "empty --require-bump rejected"; else _report no "empty --require-bump (rc=$rc): $out"; fi
+
+echo "-- symlinked validator (minor 4)"
+mkdir -p "$FIX/linkbin"
+ln -s "$PWD/$V" "$FIX/linkbin/validate-agent"
+make_valid_v1_agent "$FIX/v1-link"
+out=$("$FIX/linkbin/validate-agent" "$FIX/v1-link" 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^OK:'; then
+  _report ok "symlinked validator works"; else _report no "symlinked validator (rc=$rc): $out"; fi
+
+echo "-- nested sub-agent files (minor 5)"
+make_valid_v1_agent "$FIX/v1-nested"
+mkdir -p "$FIX/v1-nested/subagents/team"
+printf '%s\n' '## Purpose' '## Trigger' '## Inputs' '## Outputs' '## Tools allowed' \
+  '## Stop conditions' '## Handoff' '## Inline fallback' > "$FIX/v1-nested/subagents/team/role.md"
+out=$($V "$FIX/v1-nested" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF 'FAIL: subagents/team/role.md: contracts must sit directly in subagents/'; then
+  _report ok "nested sub-agent rejected"; else _report no "nested sub-agent (rc=$rc): $out"; fi
+
 echo "-- release rule"
 G="$FIX/bump-repo"
 mkdir -p "$G"
@@ -205,7 +306,7 @@ make_valid_v1_agent "$G/newagent"
 assert_pass $V "$G/newagent" --require-bump "$BASE"
 # An unknown ref fails with a clear message.
 out=$($V "$G/agent" --require-bump no-such-ref 2>&1)
-if printf '%s\n' "$out" | grep -q "^FAIL: --require-bump: unknown git ref 'no-such-ref'"; then
+if printf '%s\n' "$out" | grep -qF "FAIL: --require-bump: unknown git ref 'no-such-ref' (in CI, check out with fetch-depth: 0)"; then
   _report ok "unknown ref reported"; else _report no "unknown ref not reported"; fi
 
 # --require-bump with no following value: fails fast instead of hanging.
@@ -216,6 +317,24 @@ if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF "FAIL: --require-bump requ
 else
   _report no "--require-bump with no value did not fail fast (rc=$rc): $out"
 fi
+
+# Spaced `version :` keys do not break the bump check (one parser).
+S="$FIX/spaced-repo"
+mkdir -p "$S"; git -C "$S" init -q
+make_valid_v1_agent "$S/agent"
+sed -i.bak 's/^version: /version : /' "$S/agent/agent.yaml"; rm -f "$S/agent/agent.yaml.bak"
+git -C "$S" add -A && git -C "$S" -c user.email=t@t -c user.name=t commit -qm base
+SBASE=$(git -C "$S" rev-parse HEAD)
+echo "extra" >> "$S/agent/AGENT.md"
+for f in agent.yaml .claude-plugin/plugin.json gemini-extension.json .codex-plugin/plugin.json; do
+  sed -i.bak 's/0\.1\.0/0.1.1/' "$S/agent/$f"; rm -f "$S/agent/$f.bak"
+done
+out=$($V "$S/agent" --require-bump "$SBASE" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && _report ok "spaced version bump accepted" || _report no "spaced version bump (rc=$rc): $out"
+sed -i.bak 's/0\.1\.1/0.1.0/' "$S/agent/agent.yaml"; rm -f "$S/agent/agent.yaml.bak"
+out=$($V "$S/agent" --require-bump "$SBASE" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF 'but version is still 0.1.0'; then
+  _report ok "spaced version, no bump, fails"; else _report no "spaced no-bump (rc=$rc): $out"; fi
 
 # Agent directory not inside a git repository: a clear message, not "unknown git ref".
 NOTGIT="$FIX/not-a-repo"
