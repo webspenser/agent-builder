@@ -1,0 +1,14 @@
+name: Validate agent (Agent Standard)
+description: Checks an agent folder against the Webspenser Agent Standard.
+inputs:
+  path:
+    description: Agent folder to validate
+    default: "."
+  require-bump-against:
+    description: Git ref (e.g. origin/main); fail if the agent changed since it without a version bump. Needs a checkout with history (fetch-depth 0).
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: '"$GITHUB_ACTION_PATH/run.sh" "${{ inputs.path }}" "${{ inputs.require-bump-against }}"'
