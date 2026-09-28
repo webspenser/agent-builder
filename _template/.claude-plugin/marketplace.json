@@ -1,0 +1,7 @@
+{
+  "name": "agent-template",
+  "owner": { "name": "Replace with your name or organization" },
+  "plugins": [
+    { "name": "agent-template", "source": "./", "description": "Template — replace with one sentence describing what the agent does" }
+  ]
+}

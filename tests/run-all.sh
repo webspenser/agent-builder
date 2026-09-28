@@ -16,5 +16,11 @@ for d in _template */; do
   bin/validate-agent.sh "$d" || STATUS=1
 done
 
+echo "== template is Agent Standard 1.0"
+TEMPLATE_OUTPUT=$(bin/validate-agent.sh _template 2>&1)
+if echo "$TEMPLATE_OUTPUT" | grep -q '^WARN:'; then
+  echo "FAIL: _template is still pre-1.0"; STATUS=1
+fi
+
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"
 exit "$STATUS"
