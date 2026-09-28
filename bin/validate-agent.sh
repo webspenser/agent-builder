@@ -7,7 +7,9 @@ DIR=""
 BUMP_REF=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --require-bump) BUMP_REF="${2:-}"; shift 2 ;;
+    --require-bump)
+      if [ $# -lt 2 ]; then echo "FAIL: --require-bump requires a git ref"; exit 1; fi
+      BUMP_REF="$2"; shift 2 ;;
     *) DIR="$1"; shift ;;
   esac
 done
@@ -106,7 +108,9 @@ fi
 
 # Release rule: files changed since the ref require a version bump.
 if [ -n "$BUMP_REF" ]; then
-  if ! git -C "$DIR" rev-parse --verify --quiet "$BUMP_REF^{commit}" >/dev/null 2>&1; then
+  if ! git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    fail "--require-bump: $DIR is not inside a git repository"
+  elif ! git -C "$DIR" rev-parse --verify --quiet "$BUMP_REF^{commit}" >/dev/null 2>&1; then
     fail "--require-bump: unknown git ref '$BUMP_REF'"
   elif git -C "$DIR" cat-file -e "$BUMP_REF:./agent.yaml" 2>/dev/null; then
     old_ver=$(git -C "$DIR" show "$BUMP_REF:./agent.yaml" | grep -m1 '^version:' | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^["'\'']//; s/["'\'']$//')

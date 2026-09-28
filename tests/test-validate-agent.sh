@@ -208,4 +208,20 @@ out=$($V "$G/agent" --require-bump no-such-ref 2>&1)
 if printf '%s\n' "$out" | grep -q "^FAIL: --require-bump: unknown git ref 'no-such-ref'"; then
   _report ok "unknown ref reported"; else _report no "unknown ref not reported"; fi
 
+# --require-bump with no following value: fails fast instead of hanging.
+# Guarded with a 10s alarm so a regression to the old shift-2 bug can't hang the suite.
+out=$(perl -e 'alarm 10; exec @ARGV' -- "$V" "$G/agent" --require-bump 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF "FAIL: --require-bump requires a git ref"; then
+  _report ok "--require-bump with no value fails fast"
+else
+  _report no "--require-bump with no value did not fail fast (rc=$rc): $out"
+fi
+
+# Agent directory not inside a git repository: a clear message, not "unknown git ref".
+NOTGIT="$FIX/not-a-repo"
+make_valid_v1_agent "$NOTGIT"
+out=$($V "$NOTGIT" --require-bump HEAD 2>&1)
+if printf '%s\n' "$out" | grep -q "^FAIL: --require-bump: $NOTGIT is not inside a git repository"; then
+  _report ok "non-repo dir reported clearly"; else _report no "non-repo dir not reported clearly"; fi
+
 finish
