@@ -61,7 +61,10 @@ In CI, from any agent repo:
 | `bin/validate-agent.sh` | The validator |
 | `validate/` | The GitHub Action |
 | `docs/writing-an-agent.md` | How to write a good agent by hand |
-| `sales-partner/` | The first agent; moving to its own repo |
+
+## Agents built with this
+
+- [Sales Partner](https://github.com/webspenser/sales-partner) — interviews a business, then runs a five-stage lead pipeline over a CRM.
 
 ## Developing the builder
 

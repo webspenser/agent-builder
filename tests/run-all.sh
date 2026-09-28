@@ -8,7 +8,6 @@ echo "== validator tests"; tests/test-validate-agent.sh || STATUS=1
 echo "== install tests";   tests/test-install.sh        || STATUS=1
 echo "== builder manifests"; tests/test-builder-manifests.sh || STATUS=1
 echo "== action";  tests/test-action.sh || STATUS=1
-echo "== sales-partner content"; tests/test-sales-partner-content.sh || STATUS=1
 
 for d in */; do  # _template/ is matched here
   d="${d%/}"

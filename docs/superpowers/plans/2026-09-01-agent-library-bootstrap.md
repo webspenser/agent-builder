@@ -4,8 +4,8 @@
 
 > **Note on the CRM contract:** it evolved during execution from six
 > operations to eleven, each addition closing a hole a review found.
-> [`docs/superpowers/specs/2026-09-01-sales-partner-agent-design.md`](../specs/2026-09-01-sales-partner-agent-design.md)
-> and [`sales-partner/context/crm-contract.md`](../../../sales-partner/context/crm-contract.md)
+> [`docs/superpowers/specs/2026-09-01-sales-partner-agent-design.md`](https://github.com/webspenser/sales-partner/blob/main/docs/superpowers/specs/2026-09-01-sales-partner-agent-design.md)
+> and [`sales-partner/context/crm-contract.md`](https://github.com/webspenser/sales-partner/blob/main/context/crm-contract.md)
 > are the live authority on the contract's final shape. The per-task text
 > below (Task 6 especially, and the "ten operations" reference near line
 > 790) records what was asked at the time, not the final state — it is
@@ -28,7 +28,7 @@ live tool surface.
 
 **Specs:**
 - [Portable Agent Specification Format](../specs/2026-09-01-portable-agent-spec-design.md)
-- [Sales Partner Agent](../specs/2026-09-01-sales-partner-agent-design.md)
+- [Sales Partner Agent](https://github.com/webspenser/sales-partner/blob/main/docs/superpowers/specs/2026-09-01-sales-partner-agent-design.md)
 
 ## Global Constraints
 
