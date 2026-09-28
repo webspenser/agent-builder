@@ -12,4 +12,11 @@ assert_contains validate/action.yml 'using: composite'
 assert_contains validate/action.yml 'require-bump-against'
 assert_contains validate/action.yml '$GITHUB_ACTION_PATH/run.sh'
 
+RUN_LINES=$(grep '^\s*run:' validate/action.yml || true)
+if printf '%s' "$RUN_LINES" | grep -q '\${{'; then
+  _report no "validate/action.yml run: line free of \${{ (script injection)"
+else
+  _report ok "validate/action.yml run: line free of \${{ (script injection)"
+fi
+
 finish

@@ -11,4 +11,7 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: '"$GITHUB_ACTION_PATH/run.sh" "${{ inputs.path }}" "${{ inputs.require-bump-against }}"'
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_REQUIRE_BUMP: ${{ inputs.require-bump-against }}
+      run: '"$GITHUB_ACTION_PATH/run.sh" "$INPUT_PATH" "$INPUT_REQUIRE_BUMP"'
