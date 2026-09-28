@@ -43,6 +43,7 @@ see Access below.
 | Tools | Neutral capability contracts in the package; adapters per provider; bindings in the instance | "Create a record" is the same act on Attio, HubSpot, or Airtable |
 | Credentials | Only in the host (connectors, MCP config, plugin secure settings, environment, CI secrets) | Never in any repo |
 | First runtime | Claude Code routines on the instance repo | Least to operate for clients |
+| Plugin-mode entry (Claude) | A SessionStart hook gated on `instance.yaml` | Confirmed in spike S1; silent outside instances |
 | Host-neutral runtime | GitHub Actions running a headless CLI on the instance repo | No Webspenser server to run; later sub-project |
 | Wizard | A skill inside the host (`new-agent`) | Works on every host; no extra software |
 | Licensing | Builder and standard: Apache-2.0. Each agent: chosen per repo | Open-source posture; client data never lives in published repos |
@@ -121,8 +122,14 @@ package folder *is* the instance, so the rule holds trivially.
 ### Host wiring written by setup
 
 - `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` pointer files that name the
-  agent and point at its entry instructions (exact mechanism per host is
-  spike S1/S2).
+  agent and point at its entry instructions.
+- In plugin mode on Claude, the entry point is the package's
+  **SessionStart hook** (S1): it walks up from the session's working
+  directory to the nearest `instance.yaml` and, only if its `agent:`
+  names this package, injects the package's `AGENT.md` plus the
+  instance folder path as session context. Outside an instance of this
+  agent it outputs nothing. A `start` skill that reads
+  `${CLAUDE_PLUGIN_ROOT}/AGENT.md` is the manual fallback.
 - `.claude/settings.json`: the catalog under `extraKnownMarketplaces`,
   the agent under `enabledPlugins` (so cloud sessions and routines load
   it), and `permissions.deny` rules from the enforcement step.
@@ -217,6 +224,17 @@ Host manifests — `.claude-plugin/plugin.json`, `gemini-extension.json`,
 `.codex-plugin/plugin.json` — are static and repeat name, version, and
 description; the validator fails when any of the four disagree.
 
+Manifest rules found in the spikes, enforced by the validator:
+
+- The Claude manifest's `agents` field lists each sub-agent file
+  (`"./subagents/<role>.md"`); a directory path is rejected by Claude.
+- Each agent repo also carries a one-entry
+  `.claude-plugin/marketplace.json` with `"source": "./"`, so the repo
+  installs on its own for local testing and for users who add it
+  directly.
+- Every release bumps `version` in all four manifests; hosts update
+  GitHub-sourced plugins only on a version change.
+
 ### Builder plugin
 
 Installable on all three hosts from `webspenser/agent-library`:
@@ -256,11 +274,15 @@ secrets; Webspenser never holds client credentials.
 | Host | Plugin mode | Source mode | Scheduled runs |
 |---|---|---|---|
 | Claude Code | Supported | Supported | Routines (sub-project 5); GitHub Actions later |
-| Gemini CLI | Supported | Supported | GitHub Actions only (later) |
-| Codex | Supported | Supported | GitHub Actions only (later) |
+| Gemini CLI | Manifest shipped, unverified | Unverified | — |
+| Codex | Manifest shipped, unverified | Unverified | GitHub Actions only (later) |
 | Others | — | Best effort via `AGENTS.md` | — |
 
-Tests cover the supported hosts' manifests only.
+"Unverified" means the manifest is shipped and validated but no model
+run has confirmed behavior. Gemini moves to Supported only after a run
+with a Gemini API key confirms extension context and skill discovery;
+Codex after its S2 check. Tests cover every shipped manifest.
+Antigravity is a host to research later (see Spike findings).
 
 ## Sub-projects, in order
 
@@ -290,7 +312,37 @@ Sub-project 6 can run any time after 2.
   reaches the bound connectors, and honors `permissions.deny` with no
   approval prompts.
 
+## Spike findings (2026-09-28)
+
+Run with a throwaway toy plugin on Claude Code 2.1.284 and Gemini CLI
+0.55.1; nothing kept.
+
+- **S1 — answered.** A SessionStart hook in the plugin injected
+  `AGENT.md` into headless (`claude -p`) sessions. Gated on
+  `instance.yaml`, it stayed silent in an unrelated folder, fired in the
+  instance folder, and fired from a subfolder of the instance with the
+  correct instance path. `${CLAUDE_PLUGIN_ROOT}` expands inside a
+  skill, which read `AGENT.md` from the plugin. Plugin sub-agents load
+  at runtime (`toy-agent:toy-helper`) when listed file by file; a
+  directory in `agents` fails validation. A repo can serve as its own
+  one-entry marketplace (`"source": "./"`).
+- **S2 — partial.** `gemini-extension.json` validates, and a whole repo
+  links as one extension (`gemini extensions link <path> --consent`;
+  `extensions install` hung in a non-interactive shell). No model run
+  was possible: Google returned `UNSUPPORTED_CLIENT` for the Gemini
+  Code Assist for individuals tier and directs individuals to
+  Antigravity. Headless runs also require a trusted folder
+  (`--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true`). Codex was not
+  tested. Result: Gemini and Codex are "unverified" in Host support.
+- **S3 — deferred** to sub-project 5; not needed for the builder or the
+  catalog.
+
 ## Risks
+
+- Google is moving individual users from Gemini CLI to Antigravity; the
+  Gemini path may need to target a different host. Mitigation: the
+  Gemini manifest is one small static file; retest before claiming
+  support.
 
 - A host changes its plugin format. Mitigation: the manifests are thin,
   static, and covered by the validator; source mode always works.
