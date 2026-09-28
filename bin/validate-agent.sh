@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Checks that a directory conforms to CONVENTIONS.md.
-# Usage: tests/validate-agent.sh <agent-dir>
+# Checks that a directory conforms to the Agent Standard (STANDARD.md).
+# Usage: bin/validate-agent.sh <agent-dir> [--require-bump <git-ref>]
 set -uo pipefail
 
 DIR="${1:-}"

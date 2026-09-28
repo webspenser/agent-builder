@@ -10,10 +10,10 @@ echo "== sales-partner content"; tests/test-sales-partner-content.sh || STATUS=1
 
 for d in _template */; do
   d="${d%/}"
-  case "$d" in docs|tests|.git) continue ;; esac
+  case "$d" in docs|tests|bin|skills|validate|.git) continue ;; esac
   [ -f "$d/AGENT.md" ] || continue
   echo "== validating $d"
-  tests/validate-agent.sh "$d" || STATUS=1
+  bin/validate-agent.sh "$d" || STATUS=1
 done
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"

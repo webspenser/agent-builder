@@ -1,20 +1,20 @@
-# Agent Specification Conventions
+# Agent Standard 1.0
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
 sub-agent contracts. Provider differences — how Claude Code, Gemini CLI,
 Codex, Cursor, or any other host discovers and wires up the agent — live
 only in `adapters/`, which carry no behavior of their own. This document
-is the standard `tests/validate-agent.sh` enforces; if this file and the
+is the standard `bin/validate-agent.sh` enforces; if this file and the
 script ever disagree, the script is the ground truth and this file is a
 bug.
 
 ## Directory layout
 
 ```
-agent-library/
+agent-builder/
   README.md                 # what this folder is, how to use a spec
-  CONVENTIONS.md            # the portable-agent standard, one page
+  STANDARD.md               # the Agent Standard
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
     AGENT.md                # single source of truth
@@ -125,7 +125,7 @@ no-naming rule below, never another contract's name. The frontmatter
 sits above the eight headings and does not disturb their order.
 
 Three rules apply on top of the heading shape. Unlike the heading
-presence and order above, `tests/validate-agent.sh` does not check any
+presence and order above, `bin/validate-agent.sh` does not check any
 of these three, nor the frontmatter above — it only parses the eight
 headings, never the frontmatter and never the content underneath them —
 so these are conventions a human or reviewer enforces, not ones the
@@ -198,7 +198,7 @@ only works with dispatch is a workflow that only works on one host.
 ## Validation
 
 ```bash
-tests/validate-agent.sh <agent-dir>
+bin/validate-agent.sh <agent-dir>
 ```
 
 Exits `0` and prints `OK: <agent-dir> conforms` when the directory
