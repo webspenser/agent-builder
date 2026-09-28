@@ -10,7 +10,7 @@ echo "== builder manifests"; tests/test-builder-manifests.sh || STATUS=1
 echo "== action";  tests/test-action.sh || STATUS=1
 echo "== sales-partner content"; tests/test-sales-partner-content.sh || STATUS=1
 
-for d in _template */; do
+for d in */; do  # _template/ is matched here
   d="${d%/}"
   case "$d" in docs|tests|bin|skills|validate|.git) continue ;; esac
   [ -f "$d/AGENT.md" ] || continue
