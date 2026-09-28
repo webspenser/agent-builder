@@ -18,6 +18,8 @@ SUBAGENT_HEADINGS=(
   "Stop conditions" "Handoff" "Inline fallback"
 )
 ADAPTER_MAX_LINES=25
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON="${AGENT_VALIDATOR_PYTHON:-python3}"
 
 # Required directories
 for d in adapters skills subagents templates samples context evals; do
@@ -81,6 +83,19 @@ while IFS= read -r f; do
   filtered=$(echo "$found" | grep -Fx -f <(printf '%s\n' "${SUBAGENT_HEADINGS[@]}") || true)
   [ "$filtered" = "$expected" ] || fail "$f: headings missing or out of order"
 done < <(find "$DIR/subagents" -name '*.md' 2>/dev/null)
+
+# Agent Standard 1.0: agent.yaml and host manifests
+if [ -f "$DIR/agent.yaml" ]; then
+  if command -v "$PYTHON" >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && fail "${line#FAIL: }"
+    done < <("$PYTHON" "$BIN_DIR/lib/check_manifests.py" "$DIR" 2>&1)
+  else
+    fail "python3 is required for Agent Standard 1.0 checks (set AGENT_VALIDATOR_PYTHON to its path)"
+  fi
+else
+  echo "WARN: $DIR has no agent.yaml — checked as pre-1.0"
+fi
 
 if [ "$ERRORS" -eq 0 ]; then echo "OK: $DIR conforms"; exit 0; fi
 echo "$ERRORS problem(s) in $DIR"; exit 1

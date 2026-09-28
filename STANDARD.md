@@ -9,6 +9,17 @@ is the standard `bin/validate-agent.sh` enforces; if this file and the
 script ever disagree, the script is the ground truth and this file is a
 bug.
 
+## Versioning
+
+The standard uses semantic versioning: a minor release adds optional
+rules, a major release changes what an agent must do to conform. It
+grows with the builder's sub-projects — 1.0 packaging (this version),
+1.1 instance rules, 1.2 capability contracts and adapters. An agent
+declares the version it follows in `agent.yaml`; the validator
+understands `1.x` and fails any other. A folder with no `agent.yaml` is
+a pre-1.0 agent: it is checked by the rules above only and passes with
+a warning.
+
 ## Directory layout
 
 ```
@@ -17,6 +28,10 @@ agent-builder/
   STANDARD.md               # the Agent Standard
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
+    agent.yaml               # identity + standard version (1.0)
+    .claude-plugin/           # plugin.json, marketplace.json
+    .codex-plugin/            # plugin.json
+    gemini-extension.json
     AGENT.md                # single source of truth
     install.sh              # links adapters into host-expected locations
     adapters/
@@ -194,6 +209,38 @@ run a reduced agent rather than failing:
 No step on any agent's critical path may require tier 1. Dispatch buys
 parallelism and context isolation, never correctness — a workflow that
 only works with dispatch is a workflow that only works on one host.
+
+## Agent manifest
+
+Every 1.0 agent has `agent.yaml` at its root:
+
+```yaml
+name: sales-partner            # kebab-case; the plugin / extension name
+version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
+description: One sentence, what the agent does
+standard: "1.0"                # the Agent Standard version followed
+```
+
+All four keys are required, one `key: value` per line; quotes and
+trailing comments are allowed. Later versions add keys; a 1.0 validator
+ignores keys it does not know. The folder name is not checked — a clone
+may live under any name.
+
+## Host manifests
+
+Four static files let each host install the agent. None carries
+behavior; each repeats the agent's identity.
+
+| File | Required content |
+|---|---|
+| `.claude-plugin/plugin.json` | `name`, `version`, `description` equal to `agent.yaml`; `agents` lists every file in `subagents/` as `"./subagents/<role>.md"` — files only, no directories, none missing or extra |
+| `.claude-plugin/marketplace.json` | `name` equal to the agent name; `owner.name`; exactly one plugin entry with the agent's name and `"source": "./"` |
+| `gemini-extension.json` | `name`, `version`, `description` equal to `agent.yaml`; `"contextFileName": "AGENT.md"` |
+| `.codex-plugin/plugin.json` | `name`, `version`, `description` equal to `agent.yaml`; `"skills": "./skills/"` |
+
+Claude rejects a directory in `agents`, which is why each file is
+listed. The one-entry marketplace lets the repo install on its own for
+local testing.
 
 ## Validation
 

@@ -22,6 +22,27 @@ make_valid_agent() {
   echo '# Cases' > "$d/evals/cases.md"
 }
 
+make_valid_v1_agent() { # make_valid_v1_agent <dir> [name] [version]
+  local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}"
+  make_valid_agent "$d"
+  mkdir -p "$d/.claude-plugin" "$d/.codex-plugin"
+  printf '%s\n' "name: $name" "version: $ver" \
+    "description: A demo agent" 'standard: "1.0"' > "$d/agent.yaml"
+  local agents="" f
+  for f in "$d"/subagents/*.md; do
+    [ -e "$f" ] || continue
+    agents="$agents${agents:+,}\"./subagents/$(basename "$f")\""
+  done
+  printf '{"name":"%s","version":"%s","description":"A demo agent","agents":[%s]}\n' \
+    "$name" "$ver" "$agents" > "$d/.claude-plugin/plugin.json"
+  printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' \
+    "$name" "$name" > "$d/.claude-plugin/marketplace.json"
+  printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' \
+    "$name" "$ver" > "$d/gemini-extension.json"
+  printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' \
+    "$name" "$ver" > "$d/.codex-plugin/plugin.json"
+}
+
 # A fully conforming directory passes.
 make_valid_agent "$FIX/good"
 assert_pass bin/validate-agent.sh "$FIX/good"
@@ -81,5 +102,82 @@ mkdir -p "$FIX/skill-unterminated/skills/thing"
 printf '%s\n' '---' 'name: thing' 'description: Use when doing a thing' \
   > "$FIX/skill-unterminated/skills/thing/SKILL.md"
 assert_fail bin/validate-agent.sh "$FIX/skill-unterminated"
+
+echo "-- Agent Standard 1.0"
+V=bin/validate-agent.sh
+
+# A pre-1.0 agent (no agent.yaml) passes with a WARN line.
+make_valid_agent "$FIX/pre10"
+assert_pass $V "$FIX/pre10"
+out=$($V "$FIX/pre10" 2>&1)
+if printf '%s\n' "$out" | grep -q '^WARN: .* has no agent.yaml'; then _report ok "pre-1.0 WARN"; else _report no "pre-1.0 WARN missing"; fi
+
+# A valid 1.0 agent passes, including one with a sub-agent listed.
+make_valid_v1_agent "$FIX/v1"
+assert_pass $V "$FIX/v1"
+make_valid_agent "$FIX/v1-sub"
+printf '%s\n' '## Purpose' '## Trigger' '## Inputs' '## Outputs' '## Tools allowed' \
+  '## Stop conditions' '## Handoff' '## Inline fallback' > "$FIX/v1-sub/subagents/role.md"
+make_valid_v1_agent "$FIX/v1-sub"
+assert_pass $V "$FIX/v1-sub"
+
+# agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
+make_valid_v1_agent "$FIX/v1-loose"
+printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "1.0"' \
+  'capabilities:' '  - crm' > "$FIX/v1-loose/agent.yaml"
+assert_pass $V "$FIX/v1-loose"
+
+# agent.yaml problems.
+make_valid_v1_agent "$FIX/v1-nokey"; sed -i.bak '/^description:/d' "$FIX/v1-nokey/agent.yaml"
+assert_fail $V "$FIX/v1-nokey"
+make_valid_v1_agent "$FIX/v1-badname" "Demo_Agent"
+assert_fail $V "$FIX/v1-badname"
+make_valid_v1_agent "$FIX/v1-badver" demo-agent "1.0"
+assert_fail $V "$FIX/v1-badver"
+make_valid_v1_agent "$FIX/v1-std2"; sed -i.bak 's/^standard:.*/standard: "2.0"/' "$FIX/v1-std2/agent.yaml"
+assert_fail $V "$FIX/v1-std2"
+
+# Host manifest problems.
+make_valid_v1_agent "$FIX/v1-nogem"; rm "$FIX/v1-nogem/gemini-extension.json"
+assert_fail $V "$FIX/v1-nogem"
+make_valid_v1_agent "$FIX/v1-vermismatch"
+sed -i.bak 's/"version":"0.1.0"/"version":"0.2.0"/' "$FIX/v1-vermismatch/.codex-plugin/plugin.json"
+assert_fail $V "$FIX/v1-vermismatch"
+make_valid_v1_agent "$FIX/v1-badjson"; echo '{"name": ' > "$FIX/v1-badjson/gemini-extension.json"
+assert_fail $V "$FIX/v1-badjson"
+out=$($V "$FIX/v1-badjson" 2>&1)
+if printf '%s\n' "$out" | grep -q 'Traceback'; then _report no "bad JSON produced a traceback"
+else _report ok "bad JSON reported without traceback"; fi
+make_valid_v1_agent "$FIX/v1-agentsdir"
+sed -i.bak 's#"agents":\[\]#"agents":["./subagents/"]#' "$FIX/v1-agentsdir/.claude-plugin/plugin.json"
+assert_fail $V "$FIX/v1-agentsdir"
+make_valid_v1_agent "$FIX/v1-agentsmissing"
+printf '%s\n' '## Purpose' '## Trigger' '## Inputs' '## Outputs' '## Tools allowed' \
+  '## Stop conditions' '## Handoff' '## Inline fallback' > "$FIX/v1-agentsmissing/subagents/role.md"
+assert_fail $V "$FIX/v1-agentsmissing"
+make_valid_v1_agent "$FIX/v1-agentsextra"
+sed -i.bak 's#"agents":\[\]#"agents":["./subagents/ghost.md"]#' "$FIX/v1-agentsextra/.claude-plugin/plugin.json"
+assert_fail $V "$FIX/v1-agentsextra"
+make_valid_v1_agent "$FIX/v1-market"
+printf '{"name":"demo-agent","owner":{"name":"Test"},"plugins":[{"name":"demo-agent","source":"./other"}]}\n' \
+  > "$FIX/v1-market/.claude-plugin/marketplace.json"
+assert_fail $V "$FIX/v1-market"
+make_valid_v1_agent "$FIX/v1-gemctx"
+sed -i.bak 's/"contextFileName":"AGENT.md"/"contextFileName":"GEMINI.md"/' "$FIX/v1-gemctx/gemini-extension.json"
+assert_fail $V "$FIX/v1-gemctx"
+make_valid_v1_agent "$FIX/v1-codex"
+sed -i.bak 's#"skills":"./skills/"#"skills":"./other/"#' "$FIX/v1-codex/.codex-plugin/plugin.json"
+assert_fail $V "$FIX/v1-codex"
+
+# Paths with spaces, run from another directory.
+make_valid_v1_agent "$FIX/with space"
+assert_pass bash -c "cd /tmp && '$PWD/$V' '$FIX/with space'"
+
+# No Python: a clear message, not a shell error.
+make_valid_v1_agent "$FIX/v1-nopy"
+out=$(AGENT_VALIDATOR_PYTHON=/nonexistent/python3 $V "$FIX/v1-nopy" 2>&1)
+if printf '%s\n' "$out" | grep -q '^FAIL: python3 is required'; then
+  _report ok "missing python reported clearly"; else _report no "missing python not reported clearly"; fi
 
 finish
