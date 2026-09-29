@@ -47,12 +47,21 @@ tname_lc=$(lower "$tname")
 show_tool=$(printf '%s' "$tname" | tr -d '\000-\037')
 
 while IFS= read -r line || [ -n "$line" ]; do
-  key=${line%%:*}
-  case "$key" in bind_*) ;; *) continue ;; esac
+  case "$line" in bind_*) ;; *) continue ;; esac
+  # Each line supplies its own key and value (same stripping as yaml_get), so a
+  # repeated bind_ key still applies every adapter.
+  key=$(printf '%s' "${line%%:*}" | sed 's/[[:space:]]*$//')
+  case "$line" in *:*) raw=${line#*:} ;; *) raw="" ;; esac
+  provider=$(lower "$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' \
+    -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
+    -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/")")
   cap=${key#bind_}
-  case "$cap" in ''|*[!a-z0-9_]*) continue ;; esac
-  provider=$(yaml_get "$instance/instance.yaml" "$key")
-  case "$provider" in ''|*[!a-z0-9-]*) continue ;; esac
+  case "$cap" in ''|*[!a-z0-9_]*) bad=1 ;; *) bad="" ;; esac
+  case "$provider" in ''|*[!a-z0-9-]*) bad=1 ;; esac
+  if [ -n "$bad" ]; then # binding state unknown: fail closed
+    shown=$(printf '%s' "$line" | tr -d '\000-\037' | cut -c1-80)
+    block "instance.yaml has a binding line it cannot read ($shown); fix it or re-run setup's tools step"
+  fi
   if [ "$provider" = custom ]; then
     adir="$instance/custom-adapters/$cap"
   else

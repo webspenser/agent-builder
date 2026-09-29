@@ -64,7 +64,7 @@ mv "$AD/guard.bak" "$AD/guard.py"
 
 # python3 absent from PATH.
 BIN="$W/bin"; mkdir -p "$BIN"
-for t in bash cat sed head tr grep sort dirname; do ln -s "$(command -v "$t")" "$BIN/$t"; done
+for t in bash cat sed head tr grep sort dirname cut; do ln -s "$(command -v "$t")" "$BIN/$t"; done
 OUT=$(printf '%s' "$(call mcp__democrm__update-record)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
 expect 2 "no python3 blocks" "python3 is required"
 OUT=$(printf '%s' "$(call mcp__other__update-record)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
@@ -79,11 +79,27 @@ run_guard "$C" "$(call mcp__democrm__update-record)"
 [ "$RC" -eq 0 ] && [ ! -e "$W/EVIL-RAN" ] && _report ok "custom guard never runs" || _report no "custom guard ran or blocked (rc=$RC): $OUT"
 run_guard "$C" "$(call mcp__democrm__delete-record)"; expect 2 "custom block applies"
 
-# Hostile binding values are ignored.
+# Hostile binding lines are unreadable: the call is blocked and nothing executes.
 H="$W/hostile"; mkdir -p "$H"
 printf '%s\n' 'agent: demo-agent' 'bind_crm: ../../x' 'bind_$(touch PWNED): demo' > "$H/instance.yaml"
 run_guard "$H" "$(call mcp__democrm__delete-record)"
-[ "$RC" -eq 0 ] && [ ! -e PWNED ] && [ ! -e "$H/PWNED" ] && _report ok "hostile bindings ignored" || _report no "hostile bindings (rc=$RC): $OUT"
+[ "$RC" -eq 2 ] && [ ! -e PWNED ] && [ ! -e "$H/PWNED" ] && printf '%s\n' "$OUT" | grep -qF "binding line it cannot read" \
+  && _report ok "hostile bindings block, nothing runs" || _report no "hostile bindings (rc=$RC): $OUT"
+
+# A repeated bind_ key: every line applies its own adapter.
+HA="$PKG/capabilities/crm/adapters/harmless"; mkdir -p "$HA"
+printf '%s\n' 'capability: crm' 'provider: harmless' 'server_match: harmlesscrm' > "$HA/adapter.yaml"
+R="$W/repeat"; mkdir -p "$R"
+printf '%s\n' 'agent: demo-agent' 'bind_crm: harmless' 'bind_crm: demo' > "$R/instance.yaml"
+run_guard "$R" "$(call mcp__democrm__update-record '{"v":"FORBIDDEN"}')"
+expect 2 "repeated bind_ key: second adapter's guard runs" "demo guard: FORBIDDEN value"
+
+# Spaced colon, uppercase provider, quotes and comment are normalized.
+SP="$W/spaced"; mkdir -p "$SP"
+printf '%s\n' 'agent: demo-agent' 'bind_crm : Demo' > "$SP/instance.yaml"
+run_guard "$SP" "$(call mcp__democrm__delete-record)"; expect 2 "spaced colon and uppercase provider block" "delete-record is blocked"
+printf '%s\n' 'agent: demo-agent' "bind_crm: 'DEMO'  # note" > "$SP/instance.yaml"
+run_guard "$SP" "$(call mcp__democrm__delete-record)"; expect 2 "quoted provider with comment block" "delete-record is blocked"
 
 # Another agent's instance: allowed.
 O="$W/other"; mkdir -p "$O"; printf '%s\n' 'agent: someone-else' 'bind_crm: demo' > "$O/instance.yaml"

@@ -76,7 +76,9 @@ skill, if this agent has one.
       `server_match`, ignoring case. If there are none, explain how to
       connect that system in the host (a connector or an MCP server),
       and that the user enters any key or login there themselves;
-      leave the capability unbound and go on.
+      leave the capability unbound and go on. The guard itself matches
+      `server_match` anywhere in the tool name after `mcp__`, which is
+      broader than this server test and so safe.
    3. Run the adapter's `## Probe` calls. They only read. On failure,
       say what failed and leave the capability unbound. Write what the
       probe found to `bindings/<capability>.md` in the instance.
@@ -102,7 +104,9 @@ skill, if this agent has one.
    host (connectors, MCP settings, environment variables), never in
    these files.
 11. **Open.** If step 3 created a subfolder, tell the user: "Open your
-   host in <folder> — the agent loads there."
+   host in <folder> — the agent loads there." The CRM and email guards
+   apply only in sessions opened in the instance folder, so the user
+   should open the host there before running the agent.
 
 Never invent the user's facts; what they don't supply stays as the
 package's bracketed prompt.

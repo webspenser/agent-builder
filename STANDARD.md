@@ -272,7 +272,7 @@ enforces this against a git ref when asked:
 
 An agent that did not exist at the ref needs no bump.
 
-## Instances (1.1)
+## Instances (1.1, bindings 1.2)
 
 A folder is an instance of an agent when it holds `instance.yaml`:
 
@@ -388,6 +388,13 @@ then runs the adapter's `guard` with `python3`, the hook input on
 stdin. Exit 2 blocks. It fails closed: a missing guard, a missing
 `python3`, a guard crash, or hook input naming two different tools
 blocks the call. Outside an instance it allows everything.
+
+Every `bind_<capability>` line in `instance.yaml` applies its own
+adapter, so a repeated key cannot hide one. The key may have spaces
+before the colon, and the provider is lowercased and stripped of quotes
+and a trailing comment. A `bind_` line that still cannot be read (a bad
+capability or provider name) blocks the call, since the binding state is
+unknown.
 
 Matching over-covers on purpose, so a name containing `__` cannot hide
 a match: `server_match` is tested (case-insensitive substring) against
