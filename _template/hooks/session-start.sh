@@ -15,15 +15,20 @@ version=$(yaml_get "$root/agent.yaml" version)
 [ -n "$name" ] || exit 0
 
 dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+case "$dir" in /*) ;; *) dir=$(cd "$dir" 2>/dev/null && pwd) || exit 0 ;; esac
 instance=""
 while [ -n "$dir" ]; do
   if [ -f "$dir/instance.yaml" ]; then instance="$dir"; break; fi
-  [ "$dir" = "/" ] && break
-  dir=$(dirname "$dir")
+  parent=$(dirname "$dir")
+  [ "$parent" = "$dir" ] && break
+  dir=$parent
 done
 [ -n "$instance" ] || exit 0
 [ "$(yaml_get "$instance/instance.yaml" agent)" = "$name" ] || exit 0
 instance_version=$(yaml_get "$instance/instance.yaml" agent_version)
+if [ -n "$instance_version" ] && [ -n "$(printf '%s' "$instance_version" | tr -d '0-9A-Za-z.+_-')" ]; then
+  instance_version=""  # not a plain version string: ignore it
+fi
 
 printf '%s\n' \
   "# Agent: $name $version" \
