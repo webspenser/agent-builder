@@ -43,6 +43,17 @@ make_valid_v1_agent() { # make_valid_v1_agent <dir> [name] [version]
     "$name" "$ver" > "$d/.codex-plugin/plugin.json"
 }
 
+make_valid_v11_agent() { # make_valid_v11_agent <dir>
+  local d="$1"
+  make_valid_v1_agent "$d"
+  sed -i.bak 's/^standard:.*/standard: "1.1"/' "$d/agent.yaml" && rm -f "$d/agent.yaml.bak"
+  mkdir -p "$d/hooks" "$d/skills/start" "$d/skills/setup" "$d/migrations"
+  cp _template/hooks/session-start.sh _template/hooks/hooks.json "$d/hooks/"
+  chmod 755 "$d/hooks/session-start.sh"
+  printf '%s\n' '---' 'name: start' 'description: Use when starting' '---' 'x' > "$d/skills/start/SKILL.md"
+  printf '%s\n' '---' 'name: setup' 'description: Use when setting up' '---' 'x' > "$d/skills/setup/SKILL.md"
+}
+
 # A fully conforming directory passes.
 make_valid_agent "$FIX/good"
 assert_pass bin/validate-agent.sh "$FIX/good"
@@ -342,5 +353,24 @@ make_valid_v1_agent "$NOTGIT"
 out=$($V "$NOTGIT" --require-bump HEAD 2>&1)
 if printf '%s\n' "$out" | grep -q "^FAIL: --require-bump: $NOTGIT is not inside a git repository"; then
   _report ok "non-repo dir reported clearly"; else _report no "non-repo dir not reported clearly"; fi
+
+echo "-- Agent Standard 1.1"
+make_valid_v11_agent "$FIX/v11";                 assert_pass $V "$FIX/v11"
+make_valid_v1_agent "$FIX/v10-still";            assert_pass $V "$FIX/v10-still"   # 1.0 unchanged
+make_valid_v11_agent "$FIX/v11-nohook"; rm "$FIX/v11-nohook/hooks/session-start.sh"; assert_fail $V "$FIX/v11-nohook"
+make_valid_v11_agent "$FIX/v11-edited"; echo "# local tweak" >> "$FIX/v11-edited/hooks/session-start.sh"; assert_fail $V "$FIX/v11-edited"
+make_valid_v11_agent "$FIX/v11-noexec"; chmod 644 "$FIX/v11-noexec/hooks/session-start.sh"; assert_fail $V "$FIX/v11-noexec"
+make_valid_v11_agent "$FIX/v11-badcmd"; printf '%s\n' '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"hooks/session-start.sh"}]}]}}' > "$FIX/v11-badcmd/hooks/hooks.json"; assert_fail $V "$FIX/v11-badcmd"
+make_valid_v11_agent "$FIX/v11-badjson"; echo '{' > "$FIX/v11-badjson/hooks/hooks.json"; assert_fail $V "$FIX/v11-badjson"
+out=$($V "$FIX/v11-badjson" 2>&1); printf '%s\n' "$out" | grep -q Traceback && _report no "hooks.json traceback" || _report ok "hooks.json bad JSON reported cleanly"
+make_valid_v11_agent "$FIX/v11-nostart"; rm -r "$FIX/v11-nostart/skills/start"; assert_fail $V "$FIX/v11-nostart"
+make_valid_v11_agent "$FIX/v11-nosetup"; rm -r "$FIX/v11-nosetup/skills/setup"; assert_fail $V "$FIX/v11-nosetup"
+make_valid_v11_agent "$FIX/v11-nomig"; rmdir "$FIX/v11-nomig/migrations"; assert_fail $V "$FIX/v11-nomig"
+make_valid_v11_agent "$FIX/v11-catalog"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' >> "$FIX/v11-catalog/agent.yaml"; assert_pass $V "$FIX/v11-catalog"
+make_valid_v11_agent "$FIX/v11-halfcat"; printf '%s\n' 'catalog: webspenser' >> "$FIX/v11-halfcat/agent.yaml"; assert_fail $V "$FIX/v11-halfcat"
+make_valid_v11_agent "$FIX/v11-badrepo"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: not a repo' >> "$FIX/v11-badrepo/agent.yaml"; assert_fail $V "$FIX/v11-badrepo"
+make_valid_v11_agent "$FIX/v11-srcinst"; printf '%s\n' 'agent: demo-agent' 'agent_version: 0.1.0' 'standard: "1.1"' 'mode: source' > "$FIX/v11-srcinst/instance.yaml"; assert_pass $V "$FIX/v11-srcinst"
+make_valid_v11_agent "$FIX/v11-pluginst"; printf '%s\n' 'agent: demo-agent' 'mode: plugin' > "$FIX/v11-pluginst/instance.yaml"; assert_fail $V "$FIX/v11-pluginst"
+make_valid_v11_agent "$FIX/v11-wronginst"; printf '%s\n' 'agent: other' 'mode: source' > "$FIX/v11-wronginst/instance.yaml"; assert_fail $V "$FIX/v11-wronginst"
 
 finish

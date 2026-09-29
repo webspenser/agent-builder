@@ -1,4 +1,4 @@
-# Agent Standard 1.0
+# Agent Standard 1.1
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
@@ -20,6 +20,9 @@ understands `1.x` and fails any other. A folder with no `agent.yaml` is
 a pre-1.0 agent: it is checked by the pre-1.0 rules below only and passes with
 a warning.
 
+1.1 (this version) adds instances, the entry hook, setup, and migrations;
+a 1.0 agent still validates as 1.0.
+
 ## Directory layout
 
 ```
@@ -29,6 +32,8 @@ agent-builder/
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
     agent.yaml              # identity + standard version (1.0)
+    hooks/                  # hooks.json + session-start.sh (1.1)
+    migrations/             # <from>-<to>.md upgrade notes (1.1)
     .claude-plugin/         # plugin.json, marketplace.json
     .codex-plugin/          # plugin.json
     gemini-extension.json
@@ -252,6 +257,48 @@ enforces this against a git ref when asked:
     bin/validate-agent.sh <agent-dir> --require-bump origin/main
 
 An agent that did not exist at the ref needs no bump.
+
+## Instances (1.1)
+
+A folder is an instance of an agent when it holds `instance.yaml`:
+
+```yaml
+agent: sales-partner       # the agent's name
+agent_version: 1.0.0       # version setup (or the last migration) ran with
+standard: "1.1"
+mode: plugin               # plugin | source
+```
+
+`context/<file>` in `AGENT.md`, skills, and contracts means the
+instance's file; if it is missing, run the step that produces it —
+never act on the package's blank default. `templates/`, `samples/`,
+`skills/`, `subagents/`, and `migrations/` mean the package's files.
+Write only into the instance. In source mode the package folder is the
+instance (`instance.yaml` with `mode: source` at its root).
+
+## Entry hook (1.1)
+
+Every 1.1 agent ships `hooks/hooks.json` with one `SessionStart`
+command hook, `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"`, and
+`hooks/session-start.sh` byte-identical to `_template/hooks/session-start.sh`.
+It finds the nearest `instance.yaml` above the session folder; if it
+names this agent, it prints where the instance and package live, a
+migration notice when versions differ, and `AGENT.md`. Elsewhere it
+prints nothing.
+
+## Setup and start (1.1)
+
+`skills/setup/SKILL.md` creates an instance; `skills/start/SKILL.md`
+loads `AGENT.md` by hand when the hook did not run. Optional
+`agent.yaml` keys `catalog` (marketplace name) and `catalog_repo`
+(`owner/repo`) let setup enable the plugin in the instance's
+`.claude/settings.json`; set both or neither.
+
+## Migrations (1.1)
+
+`migrations/` holds one `<from>-<to>.md` note per release that changes
+the shape of a context file: what changed and how to convert. It may be
+empty.
 
 ## Validation
 
