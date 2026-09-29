@@ -133,7 +133,7 @@ bind_email_drafts: gmail
 ```
 
 `bind_<capability>: custom` means the adapter lives in the instance at
-`adapters/<capability>/adapter.md` and `adapter.yaml`. Facts the probe
+`custom-adapters/<capability>/adapter.md` and `adapter.yaml`. Facts the probe
 discovers (object IDs, which optional attributes exist) are written to
 `bindings/<capability>.md` in the instance, which the adapter reads.
 
@@ -162,7 +162,7 @@ Registered in `hooks/hooks.json` alongside the 1.1 `SessionStart` hook:
    skipped.
 4. For each `bind_<capability>: <provider>` line, load the adapter's
    `adapter.yaml` (package `capabilities/<capability>/adapters/<provider>/`,
-   or instance `adapters/<capability>/` for `custom`). If the lowercased
+   or instance `custom-adapters/<capability>/` for `custom`). If the lowercased
    `<server>` contains the lowercased `server_match`:
    - if the lowercased `<tool>` contains any `block` substring: print
      `Blocked by <agent> guard: <tool> is blocked for <capability>
@@ -193,7 +193,7 @@ own when setup re-runs on an existing instance. For each capability in
 
 1. List the shipped adapters. Ask which system the user uses. If none
    fits, offer a custom adapter: interview the user about their tool,
-   write `adapters/<capability>/adapter.md` and `adapter.yaml` in the
+   write `custom-adapters/<capability>/adapter.md` and `adapter.yaml` in the
    instance (no `guard`), and check its coverage the same way the
    validator does.
 2. Find tools in the current session whose server matches
@@ -352,6 +352,26 @@ A 1.0 or 1.1 agent is checked exactly as today.
    `.claude/settings.json`.
 5. **Untrusted instance** — a folder whose `instance.yaml` points
    `bind_crm: custom` at an adapter with `guard:` must not execute it.
+
+## Rulings during planning
+
+- **Custom adapters live in `custom-adapters/<capability>/`** in the
+  instance, not `adapters/<capability>/`: `adapters/` already holds the
+  1.0 host pointer files, and in source mode the package folder is the
+  instance.
+- **The digest's direct send falls back to a draft.** With Gmail bound,
+  the guard blocks every send tool, so `digest_delivery: send` can't be
+  honored; `send-digest` composes the draft and says why on its first
+  line. This replaces "unchanged" above; an `email_send` capability
+  remains future work.
+- **The Attio guard refuses attribute IDs as keys** in write calls (a
+  UUID key could hide `status` or `do_not_contact`), accepts only the
+  literal allowed values (`draft` on create, `voided` on update, `true`
+  for `do_not_contact` on update), and refuses `create-list` and
+  `update-list`.
+- **Ambiguous hook input blocks.** If the hook input carries more than
+  one distinct `tool_name`, `guard.sh` blocks inside an instance rather
+  than guess which one is real.
 
 ## Out of scope
 
