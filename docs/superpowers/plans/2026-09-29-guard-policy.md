@@ -1,170 +1,58 @@
-# Guard Policy (Agent Standard 1.3) Implementation Plan
+# Agent Standard 2.0 (Guard Policies, Clean Standard) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add declarative guard policies (`guard.yaml`) enforced by a reference Python engine, with validator-checked coverage, as Agent Standard 1.3 in agent-builder 1.3.0; move sales-partner (1.2.0) to guard policies for Attio, Gmail, and Airtable.
+**Goal:** Replace the standard's enforcement mechanisms with declarative guard policies (`guard.yaml`) enforced by one reference engine, and collapse the standard to a single current version (2.0) with no compatibility layer — agent-builder 2.0.0 and sales-partner 2.0.0.
 
-**Architecture:** `hooks/guard_policy.py` (stdlib only, byte-identical in every 1.3 agent) parses a strict YAML subset and decides one PreToolUse call: deny/allow globs on the tool name, then field rules on attribute maps found at configured paths. `hooks/guard.sh` runs it for every bound adapter that has a `guard.yaml`, including custom adapters. The validator imports the same parser, checks that `covers` matches the adapter's `enforce_*: adapter` invariants, and accepts each agent's hooks against the references for its own standard version or later.
+**Architecture:** `hooks/guard_policy.py` (stdlib only, byte-identical in every agent) parses a strict YAML subset and decides one PreToolUse call: deny/allow globs on the tool name, then field rules on attribute maps. `hooks/guard.sh` runs it for every bound adapter that has a `guard.yaml` (package or custom). The validator checks one standard (2.0), imports the engine's parser, and requires `no_send` coverage. Everything the policy replaces — `block`, `guard.py`, `enforce_*` levels, host-deny rules, per-version checks, pre-1.0 support, versioned references — is deleted.
 
 **Tech Stack:** bash (macOS 3.2 compatible), Python 3 standard library, markdown/YAML, GitHub Actions.
 
-**Spec:** `docs/superpowers/specs/2026-09-29-guard-policy-design.md` (builder repo).
+**Spec:** `docs/superpowers/specs/2026-09-29-guard-policy-design.md` (builder repo) — "Agent Standard 2.0 — Guard Policies and a Clean Standard".
 
 ## Global Constraints
 
-- Builder checkout `/Users/hochoy/Work/Webspenser/agent-library`; work on branch `feat/standard-1.3` (create it from `spec/guard-policy`).
-- sales-partner checkout `/Users/hochoy/Work/Webspenser/sales-partner`; work on branch `release/1.2.0` from `main`.
-- Versions: builder `1.3.0`; sales-partner `1.2.0`; standard string `"1.3"`.
-- Engine path in agents: `hooks/guard_policy.py`, mode 755, byte-identical to builder `_template/hooks/guard_policy.py`. Python 3 standard library only.
-- Engine invocation: `python3 hooks/guard_policy.py <guard.yaml> <bindings-file|-> [label]` with the hook JSON on stdin; `python3 hooks/guard_policy.py --check <guard.yaml>` parses only.
-- Engine exit codes: 0 allow, 2 block (stderr one line per problem). It never tracebacks.
-- Block message prefix: `Blocked by <label>: ` where `guard.sh` passes label `<agent> guard policy (<capability>/<provider>)`.
-- Versioned references live in builder `bin/lib/references/<version>/`; `_template/hooks/` always equals the newest version's directory.
-- `hooks/hooks.json` does not change.
-- Never modify `/Users/hochoy/Work/Webspenser/live-agents`. Never call Attio, Gmail, or Airtable tools except in Task 9's read-only acceptance.
+- No backward compatibility: the validator accepts only `standard: "2.0"`; delete superseded mechanisms instead of keeping them alongside.
+- Builder checkout `/Users/hochoy/Work/Webspenser/agent-library`; branch `feat/standard-2.0` from `spec/guard-policy`.
+- sales-partner checkout `/Users/hochoy/Work/Webspenser/sales-partner`; branch `release/2.0.0` from `main`.
+- Versions: builder `2.0.0`; sales-partner `2.0.0`; standard `"2.0"`.
+- `adapter.yaml` keys: exactly `capability`, `provider`, `server_match`.
+- Engine: `hooks/guard_policy.py`, mode 755, byte-identical to builder `_template/hooks/guard_policy.py`; invocation `python3 guard_policy.py <guard.yaml> <bindings-file|-> [label]` (hook JSON on stdin) or `--check <guard.yaml>`; exit 0 allow, 2 block; never tracebacks.
+- Block message prefix from guard.sh: `Blocked by <agent> guard policy (<capability>/<provider>): `.
+- `hooks/hooks.json` unchanged.
+- `docs/superpowers/` files are history: never edit old specs/plans.
+- Never modify `/Users/hochoy/Work/Webspenser/live-agents`. Never call Attio, Gmail, or Airtable tools except in Task 8's read-only acceptance.
 - Commits end with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 - After editing scripts, confirm `git ls-files -s` shows `100755`.
 - The bash-guard hook blocks compound commands resembling exfiltration and anything containing the word "credentials"; use simple separate commands.
 
 ## Review Focus
 
-1. **Grammar edge cases** — tabs, nested maps, unclosed `[`, unknown keys, duplicate keys, unquoted glob starting with `*`: each must fail to parse (validator FAIL, runtime block). Pinned in Task 2.
-2. **Airtable field keyed by ID** — `fld…` for Status is recognized via bindings; missing ID with `binding_id: required` blocks. Pinned in Task 2 and Task 8.
-3. **Default-deny surprises** — every tool an adapter's `adapter.md` names must match its `allow` list. Pinned in Task 7/8 content tests.
-4. **Versioned references** — a 1.2 agent with the 1.2 `guard.sh` still validates after 1.3 lands. Pinned in Task 1 and Task 3.
-5. **Layer interplay** — `block`, `guard.yaml`, `guard.py` on one adapter all narrow; a policy `allow` never re-allows a `block`ed tool. Pinned in Task 3.
+1. **Grammar edge cases** — the parser rejects, never guesses. Pinned in Task 1.
+2. **Airtable field keyed by ID** — `fld…` recognized via bindings; missing required ID blocks. Pinned in Tasks 1 and 7.
+3. **Default-deny surprises** — every tool an `adapter.md` names is in its `allow`. Pinned in Tasks 6 and 7 content tests.
+4. **Nothing left behind** — no `block:`, `guard.py`, `enforce_`, `host-deny`, `permissions.deny`, "pre-1.0", or "1.x" in either repo outside `docs/superpowers/`. Pinned by greps in Tasks 5 and 7.
+5. **No path back to allow** — engine or `python3` missing blocks the bound adapter's calls. Pinned in Task 2.
 
 ---
 
-## Builder (tasks 1–6)
+## Builder (tasks 1–5)
 
-### Task 1: Versioned reference hooks
-
-**Files:**
-- Create: `bin/lib/references/1.1/session-start.sh`, `bin/lib/references/1.2/session-start.sh`, `bin/lib/references/1.2/guard.sh` (copies of today's `_template/hooks/` files, mode 755)
-- Modify: `bin/lib/check_manifests.py`, `tests/test-validate-agent.sh`, `tests/run-all.sh`
-
-**Interfaces:**
-- Produces: `references_for(rel, minor) -> list[pathlib.Path]` in `check_manifests.py`; `check_reference_script(root, rel, references)` now takes a list. Later tasks add `bin/lib/references/1.3/`.
-
-- [ ] **Step 1: Branch and archive**
-
-```bash
-git -C /Users/hochoy/Work/Webspenser/agent-library switch -c feat/standard-1.3 spec/guard-policy
-cd /Users/hochoy/Work/Webspenser/agent-library
-mkdir -p bin/lib/references/1.1 bin/lib/references/1.2
-cp _template/hooks/session-start.sh bin/lib/references/1.1/
-cp _template/hooks/session-start.sh bin/lib/references/1.2/
-cp _template/hooks/guard.sh bin/lib/references/1.2/
-chmod 755 bin/lib/references/1.1/*.sh bin/lib/references/1.2/*.sh
-```
-
-- [ ] **Step 2: Failing tests.** Append to the 1.2 block of `tests/test-validate-agent.sh` (before `finish`):
-
-```bash
-echo "-- versioned references"
-# An agent whose guard.sh is an older version's reference still passes while that version is current or later.
-make_valid_v12_agent "$FIX/v12-oldref"; cp bin/lib/references/1.2/guard.sh "$FIX/v12-oldref/hooks/guard.sh"
-assert_pass $V "$FIX/v12-oldref"
-```
-
-and in `tests/run-all.sh`, after the template section:
-
-```bash
-echo "== template hooks equal the newest reference"
-LATEST=$(ls bin/lib/references | sort -t. -k1,1n -k2,2n | tail -n 1)
-for f in bin/lib/references/"$LATEST"/*; do
-  cmp -s "$f" "_template/hooks/$(basename "$f")" || { echo "FAIL: _template/hooks/$(basename "$f") differs from bin/lib/references/$LATEST"; STATUS=1; }
-done
-```
-
-This task is a refactor guarded by the existing tests: the new case passes before and after (today the 1.2 reference equals the template). Task 3 adds the cases that fail without `references_for`. Run `tests/run-all.sh` to record the baseline.
-
-- [ ] **Step 3: Implement.** In `bin/lib/check_manifests.py`:
-
-Add below `TEMPLATE_HOOKS`:
-
-```python
-REFERENCES = pathlib.Path(__file__).resolve().parent / "references"
-
-
-def _version_key(name):
-    try:
-        major, minor = name.split(".")
-        return int(major), int(minor)
-    except ValueError:
-        return None
-
-
-def references_for(rel, minor):
-    """Reference copies of hooks/<file> an agent at standard 1.<minor> may carry:
-    its own version's and every later one's, plus the template's (the newest)."""
-    name = pathlib.PurePosixPath(rel).name
-    found = []
-    if REFERENCES.is_dir():
-        for d in sorted(REFERENCES.iterdir(), key=lambda p: _version_key(p.name) or (0, 0)):
-            key = _version_key(d.name)
-            if key and key[0] == 1 and key[1] >= minor and (d / name).is_file():
-                found.append(d / name)
-    template = TEMPLATE_HOOKS / name
-    if template.is_file():
-        found.append(template)
-    return found
-```
-
-Replace `check_reference_script` with:
-
-```python
-def check_reference_script(root, rel, references):
-    """`rel` exists, is executable, and is byte-identical to one of `references`."""
-    script = root / rel
-    if not script.is_file():
-        return [f"missing {rel}"]
-    fails = []
-    if not os.access(script, os.X_OK):
-        fails.append(f"{rel} is not executable")
-    if not references:
-        fails.append(f"validator is missing its reference hook for {rel}")
-        return fails
-    try:
-        data = script.read_bytes()
-        same = any(data == ref.read_bytes() for ref in references)
-    except OSError:
-        fails.append(f"{rel} cannot be read")
-    else:
-        if not same:
-            fails.append(f"{rel} differs from the Agent Standard reference copy (_template/{rel} in agent-builder)")
-    return fails
-```
-
-Remove the constants `REFERENCE_HOOK` and `REFERENCE_GUARD`. Change the two call sites: in `check_v11` use `check_reference_script(root, "hooks/session-start.sh", references_for("hooks/session-start.sh", minor))` and in `check_v12` use `check_reference_script(root, "hooks/guard.sh", references_for("hooks/guard.sh", minor))`. Give `check_v11(root, meta, name, minor)` and `check_v12(root, meta, minor)` a `minor` parameter and pass it from `check`.
-
-- [ ] **Step 4: Verify** — `tests/run-all.sh` ends `ALL GREEN` (all messages unchanged).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add bin/lib/references bin/lib/check_manifests.py tests/test-validate-agent.sh tests/run-all.sh
-git commit -m "feat: versioned reference hooks in the validator"
-```
-
----
-
-### Task 2: The guard-policy engine
+### Task 1: The guard-policy engine
 
 **Files:**
-- Create: `_template/hooks/guard_policy.py` (mode 755)
-- Create: `tests/test-guard-policy.sh` (mode 755)
-- Modify: `tests/run-all.sh` (add `echo "== guard policy"; tests/test-guard-policy.sh || STATUS=1` after the guard line)
+- Create: `_template/hooks/guard_policy.py` (755), `tests/test-guard-policy.sh` (755)
+- Modify: `tests/run-all.sh` — add `echo "== guard policy"; tests/test-guard-policy.sh || STATUS=1` after the `== guard` line
 
 **Interfaces:**
-- Produces: `guard_policy.parse(text) -> dict` raising `guard_policy.PolicyError`; CLI as in Global Constraints. Task 4 imports `parse` and `PolicyError`.
+- Produces: `guard_policy.parse(text) -> dict` raising `guard_policy.PolicyError`; the CLI in Global Constraints. Task 3 imports `parse`/`PolicyError`.
 
-- [ ] **Step 1: Failing tests** — `tests/test-guard-policy.sh`:
+- [ ] **Step 1: Branch** — `git -C /Users/hochoy/Work/Webspenser/agent-library switch -c feat/standard-2.0 spec/guard-policy`
+- [ ] **Step 2: Failing tests** — `tests/test-guard-policy.sh`:
 
 ```bash
 #!/usr/bin/env bash
-# The Agent Standard 1.3 guard-policy engine (_template/hooks/guard_policy.py).
+# The Agent Standard guard-policy engine (_template/hooks/guard_policy.py).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source tests/lib.sh
@@ -259,13 +147,13 @@ out=$(printf '{}' | python3 "$E" "$W/missing.yaml" - x 2>&1); rc=$?
 finish
 ```
 
-`chmod 755 tests/test-guard-policy.sh`; add the run-all line. Run it: every case fails (no engine).
+`chmod 755`; add the run-all line; run it — every case fails (no engine).
 
-- [ ] **Step 2: Implement `_template/hooks/guard_policy.py`**
+- [ ] **Step 3: `_template/hooks/guard_policy.py`**
 
 ```python
 #!/usr/bin/env python3
-"""Agent Standard 1.3 guard-policy engine — identical in every agent.
+"""Agent Standard guard-policy engine — identical in every agent.
 
 Usage:
   guard_policy.py <guard.yaml> <bindings-file|-> [label]   hook input JSON on stdin
@@ -646,169 +534,262 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 ```
 
-Note on "rule applies when": `allowed = rule.get(kind) or rule.get("any")` — a rule with only `create` does not check updates, matching the spec ("A field with no applicable list for this kind of write is not checked").
-
 `chmod 755 _template/hooks/guard_policy.py`.
 
-- [ ] **Step 3: Run** `tests/test-guard-policy.sh` → `0 failed`; fix the engine (not the tests) for any failure, unless a test contradicts the spec — then explain in the report.
-
-- [ ] **Step 4:** `tests/run-all.sh` → `ALL GREEN`. (The "template hooks equal the newest reference" check iterates the newest reference directory, still `1.2`, so the new `_template/hooks/guard_policy.py` does not trip it; Task 3 adds `references/1.3`.)
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add _template/hooks/guard_policy.py tests/test-guard-policy.sh tests/run-all.sh
-git commit -m "feat: guard-policy engine (Agent Standard 1.3)"
-```
+- [ ] **Step 4:** `tests/test-guard-policy.sh` → `0 failed` (this code was dry-run against these tests while planning: 51/51); `tests/run-all.sh` → ALL GREEN.
+- [ ] **Step 5: Commit** — `git add _template/hooks/guard_policy.py tests/test-guard-policy.sh tests/run-all.sh` then `git commit -m "feat: guard-policy engine"`.
 
 ---
 
-### Task 3: `guard.sh` runs guard policies; 1.3 references
+### Task 2: `guard.sh` enforces guard policies only
 
 **Files:**
-- Modify: `_template/hooks/guard.sh`, `tests/test-guard.sh`
-- Create: `bin/lib/references/1.3/{session-start.sh,guard.sh,guard_policy.py}` (copies of `_template/hooks/` after this change, mode 755)
-- Modify: `tests/test-validate-agent.sh`
+- Replace: `_template/hooks/guard.sh` (755), `tests/test-guard.sh` (755)
 
 **Interfaces:**
-- Consumes: engine CLI (Task 2).
-- Produces: 1.3 `guard.sh` (Tasks 5, 7 copy it).
+- Consumes: engine CLI (Task 1).
+- Produces: the reference `guard.sh` (Task 6 copies it).
 
-- [ ] **Step 1: Failing tests.** In `tests/test-guard.sh`, after the existing cases and before the hooks.json assertions, add:
-
-```bash
-echo "-- guard policies (1.3)"
-mkdir -p "$PKG/hooks"; cp _template/hooks/guard_policy.py "$PKG/hooks/"
-GP="$PKG/capabilities/crm/adapters/pol"; mkdir -p "$GP"
-printf '%s\n' 'capability: crm' 'provider: pol' 'server_match: polcrm' 'block: merge' 'enforce_draft_only: adapter' > "$GP/adapter.yaml"
-printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, update-entry, "*merge*"]' 'update_tools: [update-entry]' 'create_tools: [add-entry]' \
-  'values_at: [values]' 'rules:' '  - field: status' '    update: [voided]' > "$GP/guard.yaml"
-PI="$W/polinst"; mkdir -p "$PI"
-printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: pol' > "$PI/instance.yaml"
-run_guard "$PI" "$(call mcp__polcrm__list-records)";                           expect 0 "policy: allowed tool"
-run_guard "$PI" "$(call mcp__polcrm__drop-table)";                             expect 2 "policy: not in allow list" "Blocked by demo-agent guard policy (crm/pol): drop-table is not in the allow list"
-run_guard "$PI" "$(call mcp__polcrm__update-entry '{"values":{"status":"sent"}}')"; expect 2 "policy: field rule" "status may only be written as voided on update"
-run_guard "$PI" "$(call mcp__polcrm__merge-records)";                          expect 2 "block beats policy allow" "is blocked for crm (pol adapter)"
-run_guard "$PI" "$(call mcp__other__drop-table)";                              expect 0 "policy: other servers untouched"
-# Custom adapter policies run (data, not code).
-CP="$W/custpol"; mkdir -p "$CP/custom-adapters/crm"
-printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$CP/instance.yaml"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: polcrm' > "$CP/custom-adapters/crm/adapter.yaml"
-printf '%s\n' 'covers: [draft_only]' 'allow: [list-*]' > "$CP/custom-adapters/crm/guard.yaml"
-run_guard "$CP" "$(call mcp__polcrm__drop-table)";                             expect 2 "custom policy enforced" "is not in the allow list"
-# Bindings file is passed to the engine.
-printf '%s\n' 'covers: [draft_only]' 'update_tools: [update-entry]' 'create_tools: [add-entry]' 'values_at: [values]' \
-  'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$GP/guard.yaml"
-run_guard "$PI" "$(call mcp__polcrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
-mkdir -p "$PI/bindings"; printf '%s\n' 'field_status: fldS' > "$PI/bindings/crm.md"
-run_guard "$PI" "$(call mcp__polcrm__update-entry '{"values":{"fldS":"voided"}}')"; expect 0 "binding ID recognized"
-run_guard "$PI" "$(call mcp__polcrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "binding ID enforced"
-# Engine missing / python3 missing / invalid policy: fail closed.
-mv "$PKG/hooks/guard_policy.py" "$W/gp.bak"
-run_guard "$PI" "$(call mcp__polcrm__list-records)";                           expect 2 "engine missing blocks" "engine is missing"
-mv "$W/gp.bak" "$PKG/hooks/guard_policy.py"
-OUT=$(printf '%s' "$(call mcp__polcrm__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$PI" "$BIN/bash" "$GUARD" 2>&1); RC=$?
-expect 2 "policy without python3 blocks" "python3 is required"
-printf '%s\n' 'covers: [draft_only]' 'allow: [list-*' > "$GP/guard.yaml"
-run_guard "$PI" "$(call mcp__polcrm__list-records)";                           expect 2 "invalid policy blocks" "cannot check this call"
-```
-
-In `tests/test-validate-agent.sh` 1.2 block, add after the `v12-oldref` case:
+- [ ] **Step 1: Failing tests** — replace `tests/test-guard.sh` entirely with:
 
 ```bash
-# A 1.2 agent may also carry the newer (1.3) guard.sh.
-make_valid_v12_agent "$FIX/v12-newref"; cp bin/lib/references/1.3/guard.sh "$FIX/v12-newref/hooks/guard.sh"
-assert_pass $V "$FIX/v12-newref"
-# ...and a 1.2 agent with the 1.2 guard.sh passes although the template is now 1.3.
-make_valid_v12_agent "$FIX/v12-keep"; cp bin/lib/references/1.2/guard.sh "$FIX/v12-keep/hooks/guard.sh"
-assert_pass $V "$FIX/v12-keep"
-```
+#!/usr/bin/env bash
+# Behavior of the Agent Standard guard hook (_template/hooks/guard.sh).
+set -uo pipefail
+cd "$(dirname "$0")/.."
+source tests/lib.sh
+GUARD="$PWD/_template/hooks/guard.sh"
 
-Run `tests/test-guard.sh`: the new cases fail.
-
-- [ ] **Step 2: Implement.** In `_template/hooks/guard.sh`, replace the line `  [ "$provider" = custom ] && continue  # never execute code from an instance folder` with:
-
-```bash
-  if [ -f "$adir/guard.yaml" ]; then  # declarative policy (1.3): data, so custom adapters get it too
-    engine="$root/hooks/guard_policy.py"
-    [ -f "$engine" ] || block "the guard policy engine is missing from $name"
-    command -v python3 >/dev/null 2>&1 || block "python3 is required to run the $provider guard policy for $cap"
-    bfile="$instance/bindings/$cap.md"
-    [ -f "$bfile" ] || bfile=-
-    printf '%s' "$input" | python3 "$engine" "$adir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)"; rc=$?
-    if [ "$rc" -ne 0 ]; then
-      [ "$rc" -eq 2 ] && exit 2
-      block "the $provider guard policy for $cap failed (exit $rc)"
-    fi
-  fi
-  [ "$provider" = custom ] && continue  # never execute code from an instance folder
-```
-
-Update the header comment's second sentence to: "…a tool whose name contains one of the adapter's `block` entries is refused, then the adapter's guard policy (`guard.yaml`, run by `guard_policy.py`) and its code guard (package adapters only) inspect the call."
-
-- [ ] **Step 3: 1.3 references**
-
-```bash
-mkdir -p bin/lib/references/1.3
-cp _template/hooks/session-start.sh _template/hooks/guard.sh _template/hooks/guard_policy.py bin/lib/references/1.3/
-chmod 755 bin/lib/references/1.3/*
-```
-
-- [ ] **Step 4: Verify** — `tests/test-guard.sh`, `tests/test-validate-agent.sh`, `tests/run-all.sh` → all pass, ALL GREEN.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add _template/hooks/guard.sh tests/test-guard.sh tests/test-validate-agent.sh bin/lib/references/1.3
-git commit -m "feat: guard.sh runs guard policies; 1.3 reference hooks"
-```
-
----
-
-### Task 4: Validator checks for 1.3
-
-**Files:**
-- Modify: `bin/lib/check_manifests.py`, `tests/test-validate-agent.sh`
-
-**Interfaces:**
-- Consumes: `parse`, `PolicyError` from `_template/hooks/guard_policy.py`; `references_for`.
-
-- [ ] **Step 1: Failing tests.** Append a 1.3 block to `tests/test-validate-agent.sh` before `finish`:
-
-```bash
-echo "-- Agent Standard 1.3"
-make_valid_v13_agent() { # make_valid_v13_agent <dir>
-  local d="$1" a="$1/capabilities/crm/adapters/demo"
-  make_valid_v12_agent "$d"
-  sed -i.bak 's/^standard:.*/standard: "1.3"/' "$d/agent.yaml" && rm -f "$d/agent.yaml.bak"
-  cp _template/hooks/guard.sh _template/hooks/guard_policy.py "$d/hooks/"; chmod 755 "$d/hooks/guard.sh" "$d/hooks/guard_policy.py"
-  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' > "$a/guard.yaml"
+W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+PKG="$W/pkg"; AD="$PKG/capabilities/crm/adapters/demo"; mkdir -p "$AD" "$PKG/hooks"
+cp _template/hooks/guard_policy.py "$PKG/hooks/"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "2.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: DemoCRM' > "$AD/adapter.yaml"
+write_policy() {
+  printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
+    'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+    'rules:' '  - field: status' '    update: [voided]' > "$AD/guard.yaml"
 }
-A13=capabilities/crm/adapters/demo
-make_valid_v13_agent "$FIX/v13"; assert_pass $V "$FIX/v13"
-make_valid_v13_agent "$FIX/v13-noengine"; rm "$FIX/v13-noengine/hooks/guard_policy.py"
-fails_with "$FIX/v13-noengine" "missing hooks/guard_policy.py"
-make_valid_v13_agent "$FIX/v13-oldguard"; cp bin/lib/references/1.2/guard.sh "$FIX/v13-oldguard/hooks/guard.sh"
-fails_with "$FIX/v13-oldguard" "hooks/guard.sh differs from the Agent Standard reference copy (_template/hooks/guard.sh in agent-builder)"
-make_valid_v13_agent "$FIX/v13-badpol"; printf '%s\n' 'covers: [draft_only' > "$FIX/v13-badpol/$A13/guard.yaml"
-fails_with "$FIX/v13-badpol" "$A13/guard.yaml: line 1: unclosed '['"
-make_valid_v13_agent "$FIX/v13-uncovered"; printf '%s\n' 'covers: [draft_only]' > "$FIX/v13-uncovered/$A13/guard.yaml"
-fails_with "$FIX/v13-uncovered" "$A13/guard.yaml: covers must list no_send (enforce_no_send: adapter)"
-make_valid_v13_agent "$FIX/v13-strange"; printf '%s\n' 'covers: [draft_only, no_send, other]' > "$FIX/v13-strange/$A13/guard.yaml"
-fails_with "$FIX/v13-strange" "$A13/guard.yaml: covers names other, which is not an invariant of the contract"
-make_valid_v13_agent "$FIX/v13-level"; sed -i.bak 's/^enforce_draft_only: .*/enforce_draft_only: instruction/' "$FIX/v13-level/$A13/adapter.yaml"
-fails_with "$FIX/v13-level" "$A13/guard.yaml: covers draft_only, but adapter.yaml enforces it by instruction"
-make_valid_v13_agent "$FIX/v13-nopol"; rm "$FIX/v13-nopol/$A13/guard.yaml"
-fails_with "$FIX/v13-nopol" "$A13: enforce_draft_only is adapter, so guard.yaml must cover it"
-make_valid_v12_agent "$FIX/v12-with-pol"; printf '%s\n' 'covers: [draft_only' > "$FIX/v12-with-pol/$A13/guard.yaml"
-fails_with "$FIX/v12-with-pol" "$A13/guard.yaml: line 1: unclosed '['"
+write_policy
+
+I="$W/inst"; mkdir -p "$I/sub"
+printf '%s\n' 'agent: demo-agent' 'agent_version: 1.0.0' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
+
+call() { # call <tool_name> [tool_input JSON] — hook input on one line
+  local args=${2:-}; [ -n "$args" ] || args='{}'
+  printf '{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"%s","tool_input":%s}' "$1" "$args"
+}
+run_guard() { # run_guard <project dir> <input> — output in $OUT, exit code in $RC
+  OUT=$(printf '%s' "$2" | CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$1" bash "$GUARD" 2>&1); RC=$?
+}
+expect() { # expect <rc> <label> [text the output must contain]
+  if [ "$RC" -eq "$1" ] && { [ -z "${3:-}" ] || printf '%s\n' "$OUT" | grep -qF -- "$3"; }; then
+    _report ok "$2"; else _report no "$2 (rc=$RC): $OUT"; fi
+}
+
+echo "-- scope"
+run_guard "$I" "$(call Bash '{"command":"ls"}')";                expect 0 "non-MCP tool allowed"
+run_guard "$W" "$(call mcp__claude_ai_DemoCRM__delete-record)";  expect 0 "no instance: allowed"
+run_guard "$I" "$(call mcp__other__delete-record)";              expect 0 "unbound server allowed"
+O="$W/other"; mkdir -p "$O"; printf '%s\n' 'agent: someone-else' 'bind_crm: demo' > "$O/instance.yaml"
+run_guard "$O" "$(call mcp__democrm__delete-record)";            expect 0 "another agent's instance allowed"
+
+echo "-- policy enforcement"
+run_guard "$I" "$(call mcp__claude_ai_DemoCRM__delete-record)"
+expect 2 "denied tool blocked" "Blocked by demo-agent guard policy (crm/demo): delete-record is denied"
+run_guard "$I" "$(call mcp__democrm__merge-records)";            expect 2 "server match is case-insensitive"
+run_guard "$I/sub" "$(call mcp__democrm__merge-records)";        expect 2 "found from a subfolder"
+run_guard "$I" "$(call mcp__x__DemoCRM__delete-record)";         expect 2 "server containing __ still matches"
+run_guard "$I" "$(call mcp__democrm__delete__record)";           expect 2 "tool containing __ still denied"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 0 "allowed tool passes"
+run_guard "$I" "$(call mcp__democrm__drop-table)";               expect 2 "tool outside allow blocked" "is not in the allow list"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"status":"sent"}}')"; expect 2 "field rule enforced" "status may only be written as voided on update"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"status":"voided"}}')"; expect 0 "field rule allows voided"
+
+echo "-- tool name input"
+run_guard "$I" "$(call mcp__other__x '{"tool_name":"mcp__democrm__delete-record"}')"; expect 2 "two tool names block" "more than one tool"
+run_guard "$I" "$(call mcp__other__x '{"note":"say \"tool_name\": \"y\""}')";         expect 0 "escaped tool_name ignored"
+
+echo "-- bindings"
+PL="$PKG/capabilities/email/adapters/plain"; mkdir -p "$PL"
+printf '%s\n' 'capability: email' 'provider: plain' 'server_match: plainmail' > "$PL/adapter.yaml"
+P2="$W/plain"; mkdir -p "$P2"; printf '%s\n' 'agent: demo-agent' 'bind_email: plain' > "$P2/instance.yaml"
+run_guard "$P2" "$(call mcp__plainmail__send_message)";          expect 0 "adapter without guard.yaml: instruction-only, allowed"
+G2="$W/ghost"; mkdir -p "$G2"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' > "$G2/instance.yaml"
+run_guard "$G2" "$(call mcp__democrm__delete-record)";           expect 0 "missing adapter.yaml: allowed with a note" "no adapter.yaml"
+R="$W/repeat"; mkdir -p "$R"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' 'bind_crm: demo' > "$R/instance.yaml"
+run_guard "$R" "$(call mcp__democrm__delete-record)";            expect 2 "repeated bind_ key applies every adapter"
+SP="$W/spaced"; mkdir -p "$SP"; printf '%s\n' 'agent: demo-agent' 'bind_crm : "Demo"  # note' > "$SP/instance.yaml"
+run_guard "$SP" "$(call mcp__democrm__delete-record)";           expect 2 "spaced colon, quoted uppercase provider"
+H="$W/hostile"; mkdir -p "$H"
+printf '%s\n' 'agent: demo-agent' 'bind_crm: ../../x' 'bind_$(touch PWNED): demo' > "$H/instance.yaml"
+run_guard "$H" "$(call mcp__democrm__list-records)"
+[ "$RC" -eq 2 ] && [ ! -e PWNED ] && [ ! -e "$H/PWNED" ] && printf '%s' "$OUT" | grep -qF "cannot read" \
+  && _report ok "unreadable binding blocks, nothing executed" || _report no "hostile bindings (rc=$RC): $OUT"
+
+echo "-- field IDs from bindings"
+printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+  'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
+mkdir -p "$I/bindings"; printf '%s\n' 'field_status: fldS' > "$I/bindings/crm.md"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"voided"}}')"; expect 0 "binding ID recognized"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "binding ID enforced"
+rm -r "$I/bindings"; write_policy
+
+echo "-- custom adapters"
+C="$W/custom"; mkdir -p "$C/custom-adapters/crm"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$C/instance.yaml"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$C/custom-adapters/crm/adapter.yaml"
+printf '%s\n' 'covers: [draft_only]' 'allow: [list-*]' > "$C/custom-adapters/crm/guard.yaml"
+printf '%s\n' 'import pathlib' "pathlib.Path('$W/EVIL-RAN').touch()" > "$C/custom-adapters/crm/guard.py"
+run_guard "$C" "$(call mcp__democrm__drop-table)";               expect 2 "custom policy enforced" "is not in the allow list"
+run_guard "$C" "$(call mcp__democrm__list-records)"
+[ "$RC" -eq 0 ] && [ ! -e "$W/EVIL-RAN" ] && _report ok "no code from the instance runs" || _report no "instance code ran (rc=$RC): $OUT"
+
+echo "-- fail closed"
+mv "$PKG/hooks/guard_policy.py" "$W/gp.bak"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "engine missing blocks" "engine is missing"
+run_guard "$I" "$(call mcp__other__list-records)";               expect 0 "engine missing: other servers allowed"
+mv "$W/gp.bak" "$PKG/hooks/guard_policy.py"
+BIN="$W/bin"; mkdir -p "$BIN"
+for t in bash cat sed head tr grep sort dirname cut; do ln -s "$(command -v "$t")" "$BIN/$t"; done
+OUT=$(printf '%s' "$(call mcp__democrm__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
+expect 2 "no python3 blocks" "python3 is required"
+OUT=$(printf '%s' "$(call mcp__other__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
+expect 0 "no python3: other servers allowed"
+printf '%s\n' 'covers: [draft_only]' 'allow: [list-*' > "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "invalid policy blocks" "cannot check this call"
+write_policy
+
+echo "-- paths"
+S="$W/with space/inst"; mkdir -p "$S"; cp "$I/instance.yaml" "$S/"
+run_guard "$S" "$(call mcp__democrm__delete-record)";            expect 2 "path with spaces"
+cp "$GUARD" "$PKG/hooks/guard.sh"
+printf '%s\n' 'agent: demo-agent' 'mode: source' 'bind_crm: demo' > "$PKG/instance.yaml"
+OUT=$(printf '%s' "$(call mcp__democrm__delete-record)" | env -u CLAUDE_PLUGIN_ROOT CLAUDE_PROJECT_DIR="$PKG" bash "$PKG/hooks/guard.sh" 2>&1); RC=$?
+expect 2 "source mode guards"
+rm "$PKG/instance.yaml"
+
+assert_contains _template/hooks/hooks.json '"\"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\""'
+assert_contains _template/hooks/hooks.json '"matcher": "mcp__.*"'
+[ -x "$GUARD" ] && _report ok "guard is executable" || _report no "guard not executable"
+
+finish
 ```
 
-Run it; the 1.3 cases fail.
+Run it: the policy cases fail against today's guard.sh.
 
-- [ ] **Step 2: Implement** in `bin/lib/check_manifests.py`:
+- [ ] **Step 2: Replace `_template/hooks/guard.sh`** entirely with:
 
-Add near the top (after imports):
+```bash
+#!/usr/bin/env bash
+# Agent Standard guard hook — identical in every agent.
+# PreToolUse hook for MCP tools. Inside an instance of this agent, every bound
+# adapter whose server_match appears in the tool name gets its guard policy
+# (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the call and
+# shows stderr to the model; exit 0 hands it to the normal permission flow.
+root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+yaml_get() { # yaml_get <file> <key>: top-level scalar; quotes and trailing comments removed
+  sed -n "s/^$2:[[:space:]]*//p" "$1" 2>/dev/null | head -n 1 \
+    | sed -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
+          -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+block() { printf 'Blocked by %s guard: %s\n' "$name" "$1" >&2; exit 2; }
+
+name=$(yaml_get "$root/agent.yaml" name)
+[ -n "$name" ] || exit 0
+
+dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+case "$dir" in /*) ;; *) dir=$(CDPATH= cd "$dir" 2>/dev/null && pwd) || exit 0 ;; esac
+instance=""
+while [ -n "$dir" ]; do
+  if [ -f "$dir/instance.yaml" ]; then instance="$dir"; break; fi
+  parent=$(dirname "$dir")
+  [ "$parent" = "$dir" ] && break
+  dir=$parent
+done
+[ -n "$instance" ] || exit 0
+[ "$(yaml_get "$instance/instance.yaml" agent)" = "$name" ] || exit 0
+
+# JSON strings hold no raw newlines, so joining lines is safe. An escaped
+# \"tool_name\" inside a string value never matches the pattern.
+input=$(cat)
+names=$(printf '%s' "$input" | tr '\n' ' ' \
+  | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"\\]*"' \
+  | sed 's/^.*"\([^"]*\)"$/\1/' | sort -u)
+[ -n "$names" ] || exit 0
+[ "$(printf '%s\n' "$names" | grep -c .)" -eq 1 ] || block "the hook input names more than one tool"
+tool=$names
+case "$tool" in mcp__?*__?*) ;; *) exit 0 ;; esac
+rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match on the whole
+
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in bind_*) ;; *) continue ;; esac
+  # Each line supplies its own key and value, so a repeated bind_ key still
+  # applies every adapter.
+  key=$(printf '%s' "${line%%:*}" | sed 's/[[:space:]]*$//')
+  case "$line" in *:*) raw=${line#*:} ;; *) raw="" ;; esac
+  provider=$(lower "$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' \
+    -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
+    -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/")")
+  cap=${key#bind_}
+  case "$cap" in ''|*[!a-z0-9_]*) bad=1 ;; *) bad="" ;; esac
+  case "$provider" in ''|*[!a-z0-9-]*) bad=1 ;; esac
+  if [ -n "$bad" ]; then # binding state unknown: fail closed
+    shown=$(printf '%s' "$line" | tr -d '\000-\037' | cut -c1-80)
+    block "instance.yaml has a binding line it cannot read ($shown); fix it or re-run setup's tools step"
+  fi
+  if [ "$provider" = custom ]; then
+    adir="$instance/custom-adapters/$cap"
+  else
+    adir="$root/capabilities/$cap/adapters/$provider"
+  fi
+  if [ ! -f "$adir/adapter.yaml" ]; then
+    printf '%s guard: no adapter.yaml for %s (%s)\n' "$name" "$cap" "$provider" >&2
+    continue
+  fi
+  match=$(lower "$(yaml_get "$adir/adapter.yaml" server_match)")
+  [ -n "$match" ] || continue
+  case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
+  [ -f "$adir/guard.yaml" ] || continue  # no policy: this adapter's invariants are instruction-only
+  engine="$root/hooks/guard_policy.py"
+  [ -f "$engine" ] || block "the guard policy engine is missing from $name"
+  command -v python3 >/dev/null 2>&1 || block "python3 is required to run the $provider guard policy for $cap"
+  bfile="$instance/bindings/$cap.md"
+  [ -f "$bfile" ] || bfile=-
+  printf '%s' "$input" | python3 "$engine" "$adir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)"; rc=$?
+  [ "$rc" -eq 0 ] && continue
+  [ "$rc" -eq 2 ] && exit 2
+  block "the $provider guard policy for $cap failed (exit $rc)"
+done < "$instance/instance.yaml"
+exit 0
+```
+
+- [ ] **Step 3:** `tests/test-guard.sh` → `0 failed` (dry-run while planning: 35/35); `tests/run-all.sh` → ALL GREEN except validator fixtures that copy the new `guard.sh` into 1.2 agents — Task 3 rewrites those; if `tests/run-all.sh` fails only there, note it in the report and proceed.
+- [ ] **Step 4: Commit** — `git add _template/hooks/guard.sh tests/test-guard.sh` then `git commit -m "feat: guard.sh enforces guard policies; block and guard.py removed"`.
+
+---
+
+### Task 3: One validator for Standard 2.0
+
+**Files:**
+- Modify: `bin/validate-agent.sh`, `bin/lib/check_manifests.py`, `tests/test-validate-agent.sh`
+
+**Interfaces:**
+- Consumes: `_template/hooks/guard_policy.py` (`parse`, `PolicyError`), the three template hooks.
+
+- [ ] **Step 1: `bin/validate-agent.sh`**
+  - `PY_MISSING="python3 is required for Agent Standard checks (set AGENT_VALIDATOR_PYTHON to its path)"`.
+  - The comment `# Agent Standard 1.0: agent.yaml and host manifests` becomes `# agent.yaml, host manifests, hooks, capabilities`.
+  - Replace the `else … echo "WARN: $DIR has no agent.yaml — checked as pre-1.0"` branch with `else fail "missing agent.yaml"`.
+
+- [ ] **Step 2: `bin/lib/check_manifests.py`**
+  - Docstring first line: `"""Agent Standard manifest checks.`
+  - Replace `SUPPORTED_STANDARD = …` with `CURRENT_STANDARD = "2.0"`.
+  - After `REFERENCE_GUARD`, add `REFERENCE_POLICY = TEMPLATE_HOOKS / "guard_policy.py"` and `ADAPTER_KEYS = ("capability", "provider", "server_match")`. Delete `LEVELS` and `GUARD_FILE`.
+  - Add, after the constants:
 
 ```python
 import importlib.util
@@ -816,9 +797,8 @@ import importlib.util
 
 def load_policy_engine():
     """The reference guard_policy module, or None when it cannot be loaded."""
-    path = TEMPLATE_HOOKS / "guard_policy.py"
     try:
-        spec = importlib.util.spec_from_file_location("guard_policy_reference", path)
+        spec = importlib.util.spec_from_file_location("guard_policy_reference", REFERENCE_POLICY)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -826,88 +806,201 @@ def load_policy_engine():
         return None
 ```
 
-(Place `load_policy_engine` after `TEMPLATE_HOOKS` is defined.) Give `check_capability(root, cap, minor)` and `check_adapter(adir, cap, ops, invariants, minor)` a `minor` parameter (pass it from `check_v12`). At the end of `check_adapter`, before `return fails`, add:
+  - Rename `check_v11` → `check_runtime` (docstring "Entry hook, start/setup skills, migrations, catalog, instance marker.") and `check_v12` → `check_tools` (docstring "Guard hook and engine, capability contracts, adapters, guard policies."). In `check_tools`, after the `guard.sh` reference check, add `fails.extend(check_reference_script(root, "hooks/guard_policy.py", REFERENCE_POLICY))`.
+  - Replace `check_adapter` entirely:
 
 ```python
-    policy_path = adir / "guard.yaml"
+def check_adapter(adir, cap, ops, invariants):
+    """One adapter folder against its capability's contract."""
+    fails = []
+    prefix = f"capabilities/{cap}/adapters/{adir.name}"
+    if not KEBAB.match(adir.name):
+        fails.append(f"{prefix}: adapter folder name is not kebab-case")
+    texts = {}
+    for fname in ("adapter.md", "adapter.yaml"):
+        path = adir / fname
+        if not path.is_file():
+            fails.append(f"missing {prefix}/{fname}")
+            continue
+        try:
+            texts[fname] = read_text(path)
+        except ReadError as err:
+            fails.append(f"{prefix}/{fname}: {err}")
+    if "adapter.yaml" in texts:
+        rel = f"{prefix}/adapter.yaml"
+        ay = parse_agent_yaml(texts["adapter.yaml"])
+        for key in ay:
+            if key not in ADAPTER_KEYS:
+                fails.append(f"{rel}: unknown key '{key}' (adapter.yaml holds capability, provider, server_match)")
+        if ay.get("capability") != cap:
+            fails.append(f"{rel}: capability {ay.get('capability')!r} must be {cap!r}")
+        if ay.get("provider") != adir.name:
+            fails.append(f"{rel}: provider {ay.get('provider')!r} must be {adir.name!r}")
+        match = ay.get("server_match", "")
+        bare = re.search(r"(?m)^server_match:\s*(#.*)?$", texts["adapter.yaml"])
+        if "[" in match or "]" in match or bare:
+            fails.append(f"{rel}: server_match must be a plain value, not a YAML list")
+        elif not match:
+            fails.append(f"{rel}: missing server_match")
+    if "adapter.md" in texts:
+        rel = f"{prefix}/adapter.md"
+        for op in ops:
+            if f"`{op}`" not in texts["adapter.md"]:
+                fails.append(f"{rel}: does not map operation `{op}`")
+        if section(texts["adapter.md"], "Probe") is None:
+            fails.append(f"{rel}: needs a ## Probe section")
+    policy = adir / "guard.yaml"
     covers = None
-    if policy_path.is_file():
+    if policy.is_file():
         engine = load_policy_engine()
         if engine is None:
             fails.append("validator cannot load its guard-policy engine (_template/hooks/guard_policy.py)")
         else:
             try:
-                covers = engine.parse(read_text(policy_path))["covers"]
+                covers = engine.parse(read_text(policy))["covers"]
             except ReadError as err:
                 fails.append(f"{prefix}/guard.yaml: {err}")
             except engine.PolicyError as err:
                 fails.append(f"{prefix}/guard.yaml: {err}")
-    if minor >= 3 and "adapter.yaml" in texts:
-        levels = {k[len("enforce_"):]: v for k, v in parse_agent_yaml(texts["adapter.yaml"]).items()
-                  if k.startswith("enforce_")}
-        if covers is not None:
-            for inv in covers:
-                if inv not in invariants:
-                    fails.append(f"{prefix}/guard.yaml: covers names {inv}, which is not an invariant of the contract")
-                elif levels.get(inv) != "adapter":
-                    fails.append(f"{prefix}/guard.yaml: covers {inv}, but adapter.yaml enforces it by {levels.get(inv, 'nothing')}")
-            for inv, level in sorted(levels.items()):
-                if level == "adapter" and inv not in covers:
-                    fails.append(f"{prefix}/guard.yaml: covers must list {inv} (enforce_{inv}: adapter)")
-        elif not policy_path.is_file():
-            for inv, level in sorted(levels.items()):
-                if level == "adapter":
-                    fails.append(f"{prefix}: enforce_{inv} is adapter, so guard.yaml must cover it")
+    for inv in covers or []:
+        if inv not in invariants:
+            fails.append(f"{prefix}/guard.yaml: covers names {inv}, which is not an invariant of the contract")
+    if "no_send" in invariants:
+        if not policy.is_file():
+            fails.append(f"{prefix}: the contract has no_send, so guard.yaml must cover it")
+        elif covers is not None and "no_send" not in covers:
+            fails.append(f"{prefix}/guard.yaml: covers must include no_send")
+    return fails
 ```
 
-Add `check_v13`:
+  - In `check`, replace the standard/minor block with:
 
 ```python
-def check_v13(root, minor):
-    """Agent Standard 1.3: the guard-policy engine."""
-    return check_reference_script(root, "hooks/guard_policy.py", references_for("hooks/guard_policy.py", minor))
+    if std and std != CURRENT_STANDARD:
+        fails.append(f"agent.yaml: standard '{std}' is not {CURRENT_STANDARD}; update the agent to the current Agent Standard")
+    fails.extend(check_runtime(root, meta, name))
+    fails.extend(check_tools(root, meta))
 ```
 
-and in `check`: `if minor >= 3: fails.extend(check_v13(root, minor))`.
+  - Grep the file afterwards: no `v11`, `v12`, `minor`, `1.x`, `LEVELS`, `enforce_`, `host-deny`, `block`, `guard.py` remain.
 
-- [ ] **Step 3: Verify** — `tests/test-validate-agent.sh` 0 failed; `tests/run-all.sh` ALL GREEN.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Consolidate `tests/test-validate-agent.sh`**
+  - Replace the helpers `make_valid_agent`, `make_valid_v1_agent`, `make_valid_v11_agent`, `make_valid_v12_agent` with this one helper plus `sync_agents` (put them where `make_valid_agent` is today):
 
 ```bash
-git add bin/lib/check_manifests.py tests/test-validate-agent.sh
-git commit -m "feat: validator checks guard policies and coverage (Agent Standard 1.3)"
+make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 2.0 agent
+  local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}"
+  mkdir -p "$d"/{adapters,skills/start,skills/setup,subagents,templates,samples,context,evals,hooks,migrations,.claude-plugin,.codex-plugin}
+  printf '%s\n' \
+    '## Identity' '## Mission' '## Inputs' '## Outputs' \
+    '## Operating rules' '## Workflow' '## Sub-agents' '## Skills' \
+    '## Guardrails / never do' '## Escalate to human when' > "$d/AGENT.md"
+  for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/adapters/$a.md"; done
+  echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
+  echo '# Cases' > "$d/evals/cases.md"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "2.0"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
+  printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
+  printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
+  cp _template/hooks/session-start.sh _template/hooks/guard.sh _template/hooks/guard_policy.py _template/hooks/hooks.json "$d/hooks/"
+  chmod 755 "$d/hooks/session-start.sh" "$d/hooks/guard.sh" "$d/hooks/guard_policy.py"
+  printf '%s\n' '---' 'name: start' 'description: Use when starting' '---' 'x' > "$d/skills/start/SKILL.md"
+  printf '%s\n' '---' 'name: setup' 'description: Use when setting up' '---' 'x' > "$d/skills/setup/SKILL.md"
+  local c="$d/capabilities/crm" a="$d/capabilities/crm/adapters/demo"
+  mkdir -p "$a"
+  printf '%s\n' '# CRM contract' '' '## Operations' '' '| Operation | Arguments |' '|---|---|' \
+    '| `create_lead` | `company` |' '| `get_lead` | `lead_id` |' '' '## Invariants' '' \
+    '- `draft_only` — only drafts' '- `no_send` — never sends' > "$c/contract.md"
+  printf '%s\n' '# Demo adapter' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/adapter.md"
+  printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' > "$a/adapter.yaml"
+  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' > "$a/guard.yaml"
+  sync_agents "$d" "$name" "$ver"
+}
+sync_agents() { # sync_agents <dir> [name] [version] — rewrite plugin.json's agents list from subagents/
+  local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}" agents="" f
+  for f in "$d"/subagents/*.md; do
+    [ -e "$f" ] || continue
+    agents="$agents${agents:+,}\"./subagents/$(basename "$f")\""
+  done
+  printf '{"name":"%s","version":"%s","description":"A demo agent","agents":[%s]}\n' "$name" "$ver" "$agents" > "$d/.claude-plugin/plugin.json"
+}
 ```
+
+  - Every call to a removed helper becomes `make_valid_agent` with the same `<dir> [name] [version]` arguments.
+  - Cases that add or change sub-agent files and expect a specific failure: call `sync_agents "$FIX/<case>"` after the change, so the failure is the intended one and not a manifest mismatch. Where a case uses bare `assert_fail`, convert it to `fails_with` with the exact message the validator prints for that problem (run it once to read the message) — a bare `assert_fail` against a fixture with several problems proves nothing.
+  - Delete these cases (they test removed behavior): the pre-1.0 WARN case (`pre10`), `v10-still`, `v11-again` and any other "older version still validates" case, and every case about `enforce_`, levels, `host-deny`, `deny`, `guard.py`, or `block` (`v12-missenf`, `v12-extraenf`, `v12-badlevel`, `v12-nodeny`, `v12-deny`, `v12-nosend`, `v12-guardgone`, `v12-guardnx`, `v12-guardpath`, `v12-blocklist`, `v12-blockseq`). Keep every other check's cases. Rename section headers that name versions (`-- Agent Standard 1.0`, `-- Agent Standard 1.1`, `-- Agent Standard 1.2`) to what they test (`-- manifests`, `-- runtime`, `-- capabilities`).
+  - Change the `v1-std2` case (standard "2.0" rejected) to reject `standard: "1.2"` with `fails_with … "agent.yaml: standard '1.2' is not 2.0; update the agent to the current Agent Standard"`.
+  - Add before `finish`:
+
+```bash
+echo "-- Agent Standard 2.0"
+A=capabilities/crm/adapters/demo
+make_valid_agent "$FIX/cur"; assert_pass $V "$FIX/cur"
+make_valid_agent "$FIX/noyaml"; rm "$FIX/noyaml/agent.yaml"
+fails_with "$FIX/noyaml" "missing agent.yaml"
+make_valid_agent "$FIX/noengine"; rm "$FIX/noengine/hooks/guard_policy.py"
+fails_with "$FIX/noengine" "missing hooks/guard_policy.py"
+make_valid_agent "$FIX/editengine"; echo "# x" >> "$FIX/editengine/hooks/guard_policy.py"
+fails_with "$FIX/editengine" "hooks/guard_policy.py differs from the Agent Standard reference copy (_template/hooks/guard_policy.py in agent-builder)"
+make_valid_agent "$FIX/extrakey"; echo 'block: send' >> "$FIX/extrakey/$A/adapter.yaml"
+fails_with "$FIX/extrakey" "$A/adapter.yaml: unknown key 'block' (adapter.yaml holds capability, provider, server_match)"
+make_valid_agent "$FIX/enforce"; echo 'enforce_draft_only: adapter' >> "$FIX/enforce/$A/adapter.yaml"
+fails_with "$FIX/enforce" "$A/adapter.yaml: unknown key 'enforce_draft_only' (adapter.yaml holds capability, provider, server_match)"
+make_valid_agent "$FIX/matchlist"; sed -i.bak 's/^server_match: .*/server_match: [demo]/' "$FIX/matchlist/$A/adapter.yaml"
+fails_with "$FIX/matchlist" "$A/adapter.yaml: server_match must be a plain value, not a YAML list"
+make_valid_agent "$FIX/badpol"; printf '%s\n' 'covers: [draft_only' > "$FIX/badpol/$A/guard.yaml"
+fails_with "$FIX/badpol" "$A/guard.yaml: line 1: unclosed '['"
+make_valid_agent "$FIX/strange"; printf '%s\n' 'covers: [draft_only, no_send, other]' 'deny: ["*send*"]' > "$FIX/strange/$A/guard.yaml"
+fails_with "$FIX/strange" "$A/guard.yaml: covers names other, which is not an invariant of the contract"
+make_valid_agent "$FIX/nopolicy"; rm "$FIX/nopolicy/$A/guard.yaml"
+fails_with "$FIX/nopolicy" "$A: the contract has no_send, so guard.yaml must cover it"
+make_valid_agent "$FIX/nosendcov"; printf '%s\n' 'covers: [draft_only]' > "$FIX/nosendcov/$A/guard.yaml"
+fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_send"
+make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
+assert_pass $V "$FIX/instronly"   # an adapter without a policy is allowed: instruction-only
+```
+
+- [ ] **Step 4: Verify** — `tests/test-validate-agent.sh` → `0 failed`; `tests/run-all.sh` → ALL GREEN except `== validating _template` (the template is still 1.x until Task 4) — if that is the only failure, note it and proceed.
+- [ ] **Step 5: Commit** — `git add bin tests/test-validate-agent.sh` then `git commit -m "feat: one validator for Agent Standard 2.0; guard policies checked"`.
 
 ---
 
-### Task 5: Template 1.3 and the capability skeleton
+### Task 4: Template 2.0, setup, and the capability skeleton
 
 **Files:**
-- Modify: `_template/agent.yaml` (`standard: "1.3"`), `_template/skills/setup/SKILL.md`, `tests/run-all.sh`
+- Modify: `_template/agent.yaml`, `_template/skills/setup/SKILL.md`, `tests/run-all.sh`, `_capability-template/adapters/example-provider/adapter.yaml`
 - Create: `_capability-template/adapters/example-provider/guard.yaml`
-- Modify: `_capability-template/adapters/example-provider/adapter.yaml` (keep `enforce_example_invariant: instruction`)
 
-- [ ] **Step 1: Failing test** — in `tests/run-all.sh` change the template check to 1.3:
+- [ ] **Step 1: Failing checks** — in `tests/run-all.sh`, the template section becomes:
 
 ```bash
-echo "== template is Agent Standard 1.3"
-if ! grep -q '^standard: "1.3"' _template/agent.yaml; then echo "FAIL: _template is not 1.3"; STATUS=1; fi
-if ! grep -qF 'guard.yaml' _template/skills/setup/SKILL.md; then echo "FAIL: setup does not mention guard.yaml"; STATUS=1; fi
+echo "== template is Agent Standard 2.0"
+if ! grep -q '^standard: "2.0"' _template/agent.yaml; then echo "FAIL: _template is not 2.0"; STATUS=1; fi
+if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
+if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/adapters/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
 ```
 
-(keep the `**Tools.**` check). Run: fails.
+Remove the old `TEMPLATE_OUTPUT` pre-1.0 check. Run: FAILs.
 
-- [ ] **Step 2: `_capability-template/adapters/example-provider/guard.yaml`**
+- [ ] **Step 2: `_template/agent.yaml`** — `standard: "2.0"`.
+- [ ] **Step 3: Skeleton** — `adapter.yaml` becomes exactly:
 
 ```yaml
-# Guard policy for this adapter (Agent Standard 1.3). Declarative: the
-# agent's guard_policy.py enforces it before every call to this provider.
-# covers lists the contract invariants it enforces; set each of them to
-# `enforce_<id>: adapter` in adapter.yaml. Example below: read tools are
-# allowed, deletes are denied, and a status field may only be created as
-# "draft". Replace it with your provider's tool names and fields.
+capability: example_capability
+provider: example-provider
+server_match: example
+```
+
+`_capability-template/adapters/example-provider/guard.yaml`:
+
+```yaml
+# Guard policy for this adapter. The agent's guard_policy.py enforces it
+# before every call to this provider. covers lists the contract
+# invariants it enforces; invariants it does not list are enforced only
+# by the agent's instructions. Example: read tools allowed, deletes
+# denied, and a status field may only be created as "draft". Replace it
+# with your provider's tool names and fields.
 covers: [example_invariant]
 allow: [whoami, list-*, get-*, search-*, create-thing, update-thing]
 deny: ["*delete*"]
@@ -919,69 +1012,99 @@ rules:
     create: [draft]
 ```
 
-In `adapter.yaml`, change `enforce_example_invariant: instruction` to `enforce_example_invariant: adapter` and remove its `block: delete` line (the policy's `deny` covers it). Check the Task-3 (1.2) skeleton test in `tests/test-validate-agent.sh` still passes (it copies the skeleton into a 1.2 fixture; a `guard.yaml` is parsed there too — it must parse).
+In `_capability-template/contract.md`, the Invariants intro becomes: "An adapter's `guard.yaml` lists in `covers` the invariants it enforces by mechanism; the rest rely on the agent's instructions."
 
-- [ ] **Step 3: `_template/agent.yaml`** → `standard: "1.3"`.
+- [ ] **Step 4: Setup (`_template/skills/setup/SKILL.md`)**
+  - Step 4 (Marker): `instance.yaml` holds `agent: <name>`, `agent_version: <version>`, `mode: plugin` — no `standard` line.
+  - Replace step 9 entirely with:
 
-- [ ] **Step 4: Setup text** (`_template/skills/setup/SKILL.md`, step 9):
-  - In sub-step 1, after "…write `custom-adapters/<capability>/adapter.md` and `adapter.yaml` in the instance…", add: "and, for each invariant the user wants enforced by mechanism, a `guard.yaml` guard policy (an `allow` list of the tools the adapter uses, a `deny` list, and any field rules), then check it with `python3 <package>/hooks/guard_policy.py --check custom-adapters/<capability>/guard.yaml`. A custom adapter never has a `guard.py`."
-  - In sub-step 3, add: "If the adapter's `## Probe` says to record field IDs, write them as `field_<name>: <id>` lines."
-  - Replace sub-step 7 with: "7. Tell the user, for each capability, whether it is **unattended-safe**: every invariant enforced by `adapter` (listed in the adapter's `guard.yaml` `covers`) or by `host-deny` with its rules written. List each invariant and what enforces it. Scheduled runs may use only unattended-safe capabilities."
-
-- [ ] **Step 5: Verify** — `tests/run-all.sh` ALL GREEN (template validates as 1.3; `_template` has no capabilities).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add _template _capability-template tests/run-all.sh
-git commit -m "feat: template follows Agent Standard 1.3; skeleton guard policy"
+```markdown
+9. **Tools.** Skip if `agent.yaml` lists no `capabilities`. For each
+   capability listed there:
+   1. List the shipped adapters (`capabilities/<capability>/adapters/`
+      in the package) and ask which system the user uses. If none
+      fits, offer a custom adapter: interview the user about their
+      tool and write, in the instance's
+      `custom-adapters/<capability>/`, an `adapter.md` mapping every
+      operation in the contract, an `adapter.yaml` (`capability`,
+      `provider: custom`, `server_match`), and — for every invariant
+      the user wants enforced by mechanism — a `guard.yaml` guard
+      policy: an `allow` list of the tools the adapter uses, a `deny`
+      list, and any field rules. Check it with
+      `python3 <package>/hooks/guard_policy.py --check custom-adapters/<capability>/guard.yaml`.
+   2. Find the tools in this session whose name contains the adapter's
+      `server_match` after `mcp__`, ignoring case. If there are none,
+      explain how to connect that system in the host (a connector or
+      an MCP server), and that the user enters any key or login there
+      themselves; leave the capability unbound and go on.
+   3. Run the adapter's `## Probe` calls. They only read. On failure,
+      say what failed and leave the capability unbound. Write what the
+      probe found to `bindings/<capability>.md` in the instance,
+      including any `field_<name>: <id>` lines the probe records.
+   4. If the contract has a `no_send` invariant and the adapter's
+      `guard.yaml` does not list it in `covers`, refuse to bind it and
+      say why.
+   5. Add `bind_<capability>: <provider>` (or `custom`) to
+      `instance.yaml`, replacing an earlier line for that capability.
+   6. Source mode only: merge into `.claude/settings.json` a
+      `PreToolUse` hook with matcher `mcp__.*` and command
+      `"$CLAUDE_PROJECT_DIR/hooks/guard.sh"`, unless one is there
+      already. Keep every existing key.
+   7. Tell the user, for each capability, each contract invariant and
+      whether the adapter's guard policy covers it. A capability is
+      **unattended-safe** when every invariant is covered. Scheduled
+      runs may use only unattended-safe capabilities.
 ```
+
+  - In step 1, "the tools step (step 9)" stays; check other step references still hold.
+- [ ] **Step 5: Verify** — `tests/run-all.sh` ALL GREEN (template validates as 2.0 with no capabilities).
+- [ ] **Step 6: Commit** — `git add _template _capability-template tests/run-all.sh` then `git commit -m "feat: template follows Agent Standard 2.0; guard policies in setup and the skeleton"`.
 
 ---
 
-### Task 6: Standard text, wizard, docs, builder 1.3.0
+### Task 5: `STANDARD.md` 2.0, wizard, docs, builder 2.0.0
 
 **Files:**
-- Modify: `STANDARD.md`, `skills/new-agent/SKILL.md`, `docs/writing-an-agent.md`, `README.md`, the three builder manifests (`1.3.0`), `tests/test-builder-manifests.sh` (expects `1.3.0`)
+- Modify: `STANDARD.md`, `skills/new-agent/SKILL.md`, `docs/writing-an-agent.md`, `README.md`, `validate/action.yml` (only if it names a standard version), the three builder manifests (`2.0.0`), `tests/test-builder-manifests.sh` (expects `2.0.0`)
 
-- [ ] **Step 1:** test-builder-manifests expects `1.3.0` (RED), bump manifests (GREEN).
-- [ ] **Step 2: `STANDARD.md`:**
-  - Title `# Agent Standard 1.3`; Versioning notes 1.3 adds guard policies (additive).
-  - New section `## Guard policy (1.3)` before `## Guard hook`: purpose (declarative enforcement of contract invariants; data, so custom adapters may ship one); the example from the spec's "The guard policy format"; the grammar bullets; the keys table; the seven semantics points; "Field identity and bindings" with the `binding_id: required` example. Copy these from the spec verbatim where possible.
-  - `## Guard hook`: add that for an adapter with `guard.yaml` the hook runs `hooks/guard_policy.py` with the policy and the instance's `bindings/<capability>.md`, for package and custom adapters alike; python3 or the engine missing blocks.
-  - `## Capabilities and adapters`: `adapter.yaml` example unchanged; add one sentence that in 1.3 every `enforce_<id>: adapter` must be listed in the adapter's `guard.yaml` `covers`.
-  - `## Setup — tools step`: custom adapters may write `guard.yaml`; probe may record `field_<name>` IDs; unattended-safe report lists each invariant and its enforcer.
-  - `## Validation`: add the 1.3 checks (engine file, `guard.yaml` parses, coverage both directions) and the versioned-references rule (an agent's hooks must equal the reference for its own version or a later one; references live in `bin/lib/references/<version>/`).
-  - Directory layout: add `hooks/guard_policy.py` (1.3) and `guard.yaml` beside `adapter.yaml`.
-  - `## Instances` example: `standard: "1.3"`.
-- [ ] **Step 3: Wizard** — the Tools bullet: write `guard.yaml` from the skeleton; every invariant set to `adapter` must be in `covers`; list every tool the adapter uses in `allow`; verify with `python3 _template/hooks/guard_policy.py --check <path>`; step 4 says `standard: "1.3"` and keep `hooks/` exactly as copied (three scripts).
-- [ ] **Step 4: `docs/writing-an-agent.md`** Tools section: guard policies replace most `guard.py` use; one short YAML example; "unattended-safe means every invariant is covered".
-- [ ] **Step 5: README** — "Agent Standard 1.3"; the feature sentence mentions guard policies.
-- [ ] **Step 6: Verify and commit** — `tests/run-all.sh` ALL GREEN; `grep -n 'Standard 1\.2' README.md skills/new-agent/SKILL.md` shows only historical mentions.
+- [ ] **Step 1:** test-builder-manifests expects `2.0.0` (RED); bump the three manifests (GREEN).
+- [ ] **Step 2: `STANDARD.md`** — rewrite as "Agent Standard 2.0", one document for the current standard:
+  - `## Versioning` becomes "Development phase": the standard is 2.0; the validator checks only the current version; breaking changes are allowed and every Webspenser agent is updated in the same release; compatibility rules will return when agents have outside users. Keep the release rule (every change bumps the agent's version).
+  - Remove every section version tag ("(1.1)", "(1.2)", "(1.1, bindings 1.2)") and every "Later versions add keys; a 1.0 validator ignores…"-style compatibility sentence. The Directory layout comments drop version numbers and add `hooks/guard_policy.py` and `guard.yaml`.
+  - `## Capabilities and adapters`: `adapter.yaml` has exactly `capability`, `provider`, `server_match`; delete enforcement levels, `block`, `guard`, `deny`. Invariants: an adapter's `guard.yaml` `covers` lists those enforced by mechanism; the rest are instruction-only; `no_send` must be covered.
+  - New `## Guard policy`: purpose; the Attio example; grammar; keys table; semantics 1–8; field identity with `binding_id: required` — copied from the spec's "The guard policy format" section.
+  - `## Guard hook`: rewritten to the spec's "Engine and hook" (no `block`, no `guard.py`).
+  - `## Bindings`, `## Setup — tools step`: per the spec; no `permissions.deny`; `instance.yaml` has no `standard`.
+  - `## Instances` example: `agent`, `agent_version`, `mode`, `bind_crm` — no `standard`.
+  - `## Validation`: the spec's "Validator" list; remove "A 1.0 or 1.1 agent is checked exactly as today" and all per-version wording.
+  - Afterwards `grep -nE '1\.[0-3]\b|pre-1\.0|host-deny|enforce_|guard\.py|block:' STANDARD.md` prints nothing except semver examples like `version: 1.3.0` for an agent's own version.
+- [ ] **Step 3: Wizard** — step 4: `standard: "2.0"`; keep `hooks/` exactly as copied (three scripts). Tools bullet: an adapter pack is `adapter.md` + `adapter.yaml` (three keys) + `guard.yaml` from the skeleton; list every tool the adapter uses in `allow`; put each invariant it enforces in `covers`; a `no_send` invariant must be covered (usually `deny: ["*send*", "*reply*", "*forward*"]` plus an `allow` list); verify with `python3 _template/hooks/guard_policy.py --check <path>`. Remove every mention of `enforce_`, levels, `block`, `deny` suffixes, `host-deny`.
+- [ ] **Step 4: `docs/writing-an-agent.md`** Tools section rewritten to guard policies (one short YAML example; "unattended-safe means every invariant is covered"). **README** — "Agent Standard 2.0"; feature sentence mentions guard policies.
+- [ ] **Step 5: Leftover grep** — `grep -rnE 'host-deny|enforce_|guard\.py|pre-1\.0|Standard 1\.[0-3]|block:' --include='*.md' --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml' . | grep -v -e '^./docs/superpowers/' -e '^./tests/'` prints nothing (fix any hit; `tests/` is excluded because negative test cases deliberately contain the removed keys).
+- [ ] **Step 6: Verify, commit, push** — `tests/run-all.sh` ALL GREEN.
 
 ```bash
-git add STANDARD.md skills/new-agent/SKILL.md docs/writing-an-agent.md README.md .claude-plugin/plugin.json gemini-extension.json .codex-plugin/plugin.json tests/test-builder-manifests.sh
-git commit -m "docs: Agent Standard 1.3 guard policies; builder 1.3.0"
-git push -u origin feat/standard-1.3
+git add -A
+git commit -m "docs: Agent Standard 2.0; builder 2.0.0"
+git push -u origin feat/standard-2.0
 ```
 
 ---
 
-## sales-partner (tasks 7–8) — `/Users/hochoy/Work/Webspenser/sales-partner`, branch `release/1.2.0`
+## sales-partner (tasks 6–7) — `/Users/hochoy/Work/Webspenser/sales-partner`, branch `release/2.0.0`
 
-Validate with `bash /Users/hochoy/Work/Webspenser/agent-library/bin/validate-agent.sh .` (builder on `feat/standard-1.3`).
+Validate with `bash /Users/hochoy/Work/Webspenser/agent-library/bin/validate-agent.sh .` (builder on `feat/standard-2.0`).
 
-### Task 7: Attio guard policy replaces `guard.py`; hooks 1.3
+### Task 6: Adopt 2.0 — hooks, adapter files, Attio and Gmail policies
 
 **Files:**
 - Copy: builder `_template/hooks/guard.sh`, `_template/hooks/guard_policy.py` → `hooks/` (755)
-- Create: `capabilities/crm/adapters/attio/guard.yaml`
+- Create: `capabilities/crm/adapters/attio/guard.yaml`, `capabilities/email_drafts/adapters/gmail/guard.yaml`, `tests/test-policies.sh` (755)
 - Delete: `capabilities/crm/adapters/attio/guard.py`, `tests/test-attio-guard.sh`
-- Create: `tests/test-policies.sh` (755)
-- Modify: `capabilities/crm/adapters/attio/adapter.yaml`, `capabilities/crm/adapters/attio/adapter.md`, `agent.yaml` (`standard: "1.3"`), `tests/run-all.sh`, `tests/test-content.sh`
+- Modify: all three `adapter.yaml` (three keys only), Attio and Gmail `adapter.md`, `agent.yaml` (`standard: "2.0"`), `tests/run-all.sh`, `tests/test-content.sh`
 
-- [ ] **Step 1: Branch** — `git -C /Users/hochoy/Work/Webspenser/sales-partner switch -c release/1.2.0`.
-- [ ] **Step 2: Failing tests** — `tests/test-policies.sh`:
+- [ ] **Step 1: Branch** — `git -C /Users/hochoy/Work/Webspenser/sales-partner switch -c release/2.0.0`
+- [ ] **Step 2: Failing tests** — `tests/test-policies.sh` (Attio and Gmail now; Task 7 appends Airtable before `finish`):
 
 ```bash
 #!/usr/bin/env bash
@@ -1034,42 +1157,6 @@ check 0 "note without values"       $AT ${P}create-note '{"title":"x","content":
 out=$(printf '{not json' | python3 "$E" "$AT" - x 2>&1); rc=$?
 [ "$rc" -eq 2 ] && _report ok "malformed JSON blocks" || _report no "malformed JSON (rc=$rc)"
 
-finish
-```
-
-Also add to `tests/test-content.sh` (Attio block): every `attio:<tool>` named in `capabilities/crm/adapters/attio/adapter.md` must be allowed:
-
-```bash
-for t in $(grep -oE 'attio:[a-z-]+' "$SP/capabilities/crm/adapters/attio/adapter.md" | sort -u | cut -d: -f2); do
-  out=$(printf '{"tool_name":"mcp__attio__%s","tool_input":{}}' "$t" | python3 "$SP/hooks/guard_policy.py" "$SP/capabilities/crm/adapters/attio/guard.yaml" - x 2>&1)
-  printf '%s' "$out" | grep -q 'not in the allow list' && _report no "Attio tool $t not allowed by guard.yaml" || _report ok "Attio tool $t allowed"
-done
-```
-
-Replace the run-all line for `test-attio-guard.sh` with `echo "== policies"; tests/test-policies.sh || STATUS=1`. Run: fails (no engine, no policy).
-
-- [ ] **Step 3: Implement**
-  - Copy the builder's `guard.sh` and `guard_policy.py` into `hooks/`; `chmod 755`.
-  - `capabilities/crm/adapters/attio/guard.yaml` — exactly the spec's example (Attio `covers`, `allow`, `deny`, `create_tools`, `update_tools`, `values_at`, `unwrap`, `unknown_writes: update`, `refuse_keys: [uuid]`, the two rules), with a two-line comment header.
-  - `adapter.yaml`: remove `block:` and `guard:` lines; invariants stay `adapter`.
-  - `git rm capabilities/crm/adapters/attio/guard.py tests/test-attio-guard.sh`.
-  - `adapter.md` "Approval invariant under Attio": item 1 becomes "`guard.yaml` in this folder — the agent's guard policy engine enforces it before every Attio call inside an instance: …" (same rules, now including "tools not in its allow list, and any delete or merge tool"); item 2 (block) is folded into item 1.
-  - `agent.yaml`: `standard: "1.3"`.
-  - `tests/test-content.sh`: replace assertions that mention `guard.py`/`block: delete, merge` with `assert_contains` on `guard.yaml` (`covers: [draft_only, dnc_one_way, no_delete]`) and `[ ! -e .../guard.py ]`.
-- [ ] **Step 4: Verify** — `tests/run-all.sh` ALL GREEN; validator OK. Grep: `grep -rn 'guard.py' --include='*.md' . | grep -v -e '^./docs/' -e '^./migrations/'` → no output.
-- [ ] **Step 5: Commit** — `git add -A` then `git commit -m "feat: Attio guard policy replaces guard.py (Standard 1.3)"`.
-
----
-
-### Task 8: Gmail and Airtable guard policies; release 1.2.0
-
-**Files:**
-- Create: `capabilities/email_drafts/adapters/gmail/guard.yaml`, `capabilities/crm/adapters/airtable/guard.yaml`, `migrations/1.1.0-1.2.0.md`
-- Modify: both adapters' `adapter.yaml` and `adapter.md`, `agent.yaml` (`version: 1.2.0`), three host manifests, `README.md`, `tests/test-policies.sh`, `tests/test-content.sh`, `skills/setup/SKILL.md` (sync with builder template)
-
-- [ ] **Step 1: Failing tests** — append to `tests/test-policies.sh` before `finish`:
-
-```bash
 echo "-- Gmail"
 GM=capabilities/email_drafts/adapters/gmail/guard.yaml; G=mcp__claude_ai_Gmail__
 check 0 "create draft"              $GM ${G}create_draft '{"to":"a@b.c","subject":"s","body":"b"}'
@@ -1080,6 +1167,60 @@ check 2 "forward refused"           $GM ${G}forward_message '{}' "is denied"
 check 2 "trash not allowed"         $GM ${G}trash_thread '{}' "is not in the allow list"
 check 2 "new unlisted tool"         $GM ${G}schedule_email '{}' "is not in the allow list"
 
+
+finish
+```
+
+In `tests/run-all.sh`, replace the attio-guard line with `echo "== policies"; tests/test-policies.sh || STATUS=1`. In `tests/test-content.sh`, add for Attio and Gmail — every tool named in `adapter.md` is allowed by the policy:
+
+```bash
+allowed_by() { # allowed_by <policy> <prefix> <tool>
+  printf '{"tool_name":"%s%s","tool_input":{}}' "$2" "$3" | python3 "$SP/hooks/guard_policy.py" "$1" - x 2>&1 | grep -q 'not in the allow list' && return 1 || return 0
+}
+for t in $(grep -oE 'attio:[a-z-]+' "$SP/capabilities/crm/adapters/attio/adapter.md" | sort -u | cut -d: -f2); do
+  allowed_by "$SP/capabilities/crm/adapters/attio/guard.yaml" mcp__attio__ "$t" && _report ok "Attio $t allowed" || _report no "Attio $t not in guard.yaml allow"
+done
+for t in $(grep -oE 'gmail:[a-z_]+' "$SP/capabilities/email_drafts/adapters/gmail/adapter.md" | sort -u | cut -d: -f2); do
+  allowed_by "$SP/capabilities/email_drafts/adapters/gmail/guard.yaml" mcp__gmail__ "$t" && _report ok "Gmail $t allowed" || _report no "Gmail $t not in guard.yaml allow"
+done
+```
+
+Also in `tests/test-content.sh`: replace assertions about `block:`, `guard: guard.py`, `enforce_…` lines with: each `adapter.yaml` has exactly three lines of keys (`capability`, `provider`, `server_match`); `[ ! -e "$SP/capabilities/crm/adapters/attio/guard.py" ]`; `assert_contains` the two new `guard.yaml` `covers` lines. Run: failures.
+
+- [ ] **Step 3: Implement**
+  - Copy the builder's `guard.sh` and `guard_policy.py` into `hooks/`; `chmod 755`.
+  - `capabilities/crm/adapters/attio/guard.yaml` — exactly the spec's Attio example, with a one-line comment header.
+  - `capabilities/email_drafts/adapters/gmail/guard.yaml`:
+
+```yaml
+# Gmail guard policy: drafts and reading only. The guard policy engine
+# blocks every tool not listed here, and anything that sends.
+covers: [no_send]
+allow: [create_draft, list_drafts, get_draft, search_threads, get_thread,
+        get_message, list_labels]
+deny: ["*send*", "*reply*", "*forward*"]
+```
+
+  - All three `adapter.yaml` reduced to `capability`, `provider`, `server_match`.
+  - `git rm capabilities/crm/adapters/attio/guard.py tests/test-attio-guard.sh`.
+  - Attio `adapter.md` "Approval invariant under Attio": one mechanism — "`guard.yaml` in this folder, enforced by the agent's guard policy engine before every Attio call inside an instance: …" (allow list, denies, status rules, do-not-contact rule, attribute IDs refused); drop the separate `block` item.
+  - Gmail `adapter.md`: the paragraph about `block` becomes the `guard.yaml` explanation (allow list of the draft and read tools; send/reply/forward denied; unlisted tools blocked; "if your Gmail server names these tools differently, add its names to `allow`").
+  - `agent.yaml`: `standard: "2.0"`.
+- [ ] **Step 4: Verify** — `tests/run-all.sh` ALL GREEN; validator OK (Airtable has no policy yet: allowed, instruction-only).
+- [ ] **Step 5: Commit** — `git add -A` then `git commit -m "feat: Agent Standard 2.0 — guard policies for Attio and Gmail"`.
+
+---
+
+### Task 7: Airtable policy, cleanup, release 2.0.0
+
+**Files:**
+- Create: `capabilities/crm/adapters/airtable/guard.yaml`
+- Delete: every file in `migrations/` except a new `migrations/.gitkeep`
+- Modify: Airtable `adapter.md`, `AGENT.md`, `README.md`, `skills/setup/SKILL.md`, any skill/sub-agent/context file mentioning removed mechanisms, `agent.yaml` (`version: 2.0.0`), three host manifests, `tests/test-policies.sh`, `tests/test-content.sh`
+
+- [ ] **Step 1: Failing tests** — append to `tests/test-policies.sh` before `finish`:
+
+```bash
 echo "-- Airtable"
 AR=capabilities/crm/adapters/airtable/guard.yaml; A=mcp__claude_ai_Airtable__
 printf '%s\n' '# CRM binding — Airtable' 'base_id: appAAAAAAAAAAAAAA' 'field_status: fldSSSSSSSSSSSSSS' 'field_do_not_contact: fldDDDDDDDDDDDDDD' > "$W/b.md"
@@ -1095,22 +1236,9 @@ check 2 "schema change refused"     $AR ${A}create_field "{$B}" "is not in the a
 check 0 "read allowed"              $AR ${A}list_records_for_table "{$B}"
 ```
 
-In `tests/test-content.sh` add: `assert_contains "$SP/capabilities/crm/adapters/airtable/adapter.yaml" 'enforce_draft_only: adapter'`, same for `enforce_dnc_one_way`; `assert_contains "$SP/capabilities/crm/adapters/airtable/adapter.md" 'field_status'`; `assert_contains "$SP/migrations/1.1.0-1.2.0.md" 'field IDs'`; `assert_contains "$SP/agent.yaml" 'version: 1.2.0'`; and the "every named tool is allowed" loop for Gmail and Airtable, written out in full like Attio's in Task 7 but with `grep -oE 'gmail:[a-z_]+'` over the Gmail `adapter.md` / prefix `mcp__gmail__` / policy `capabilities/email_drafts/adapters/gmail/guard.yaml`, and `grep -oE 'airtable:[a-z_]+'` over the Airtable `adapter.md` / prefix `mcp__airtable__` / policy `capabilities/crm/adapters/airtable/guard.yaml` (these tool names use underscores, not hyphens). Remove the obsolete `version: 1.1.0` assertion. Run: failures.
+In `tests/test-content.sh`: the Airtable "every named tool allowed" loop (`grep -oE 'airtable:[a-z_]+'`, prefix `mcp__airtable__`, policy `capabilities/crm/adapters/airtable/guard.yaml`); `assert_contains "$SP/capabilities/crm/adapters/airtable/adapter.md" 'field_status'`; `assert_contains "$SP/agent.yaml" 'version: 2.0.0'`; remove assertions about old migration notes and the old version; add `[ -f "$SP/migrations/.gitkeep" ] && [ "$(ls "$SP/migrations" | wc -l | tr -d ' ')" = 0 ]` style check that `migrations/` holds only `.gitkeep` (use `ls -A` and expect exactly `.gitkeep`). Run: failures.
 
-- [ ] **Step 2: Gmail** — `capabilities/email_drafts/adapters/gmail/guard.yaml`:
-
-```yaml
-# Gmail guard policy: drafts and reading only. The guard policy engine
-# blocks every tool not listed here, and anything that sends.
-covers: [no_send]
-allow: [create_draft, list_drafts, get_draft, search_threads, get_thread,
-        get_message, list_labels]
-deny: ["*send*", "*reply*", "*forward*"]
-```
-
-`adapter.yaml`: remove `block:`. `adapter.md`: the paragraph about `block` becomes "`guard.yaml` allows only the draft and read tools this adapter uses and denies anything that sends, replies, or forwards, so `no_send` holds by mechanism — including against tools a Gmail server adds later. If your Gmail server names these tools differently, add its names to `allow`."
-
-- [ ] **Step 3: Airtable** — `capabilities/crm/adapters/airtable/guard.yaml`:
+- [ ] **Step 2: Airtable** — `capabilities/crm/adapters/airtable/guard.yaml`:
 
 ```yaml
 # Airtable guard policy. Airtable writes name fields by ID, so the Status
@@ -1135,48 +1263,28 @@ rules:
     update: [true]
 ```
 
-The rule field `Do Not Contact` is a plain scalar with spaces, which the grammar allows; confirm with `python3 hooks/guard_policy.py --check capabilities/crm/adapters/airtable/guard.yaml` (exit 0).
+Confirm `python3 hooks/guard_policy.py --check capabilities/crm/adapters/airtable/guard.yaml` exits 0. In Airtable `adapter.md` `## Probe`, step 2 also records `field_status: <field ID of Activities.Status>` and `field_do_not_contact: <field ID of Leads."Do Not Contact">` from `list_tables_for_base`; add a "Guard policy" paragraph: rules and "writes are blocked until the probe has recorded both IDs". Every `airtable:` tool the adapter names must be in `allow` (content test); add only read tools or the two record-write tools — never delete, schema, or automation tools.
 
-`adapter.yaml`: remove `block:`; set `enforce_draft_only: adapter`, `enforce_dnc_one_way: adapter` (keep `enforce_no_delete: adapter`). `adapter.md` `## Probe`: step 2 also records `field_status: <id of Activities.Status>` and `field_do_not_contact: <id of Leads."Do Not Contact">` from `list_tables_for_base`; add a paragraph "Guard policy" explaining the rules and that writes are blocked until the probe has recorded both IDs. Cross-check: every `airtable:` tool named in `adapter.md` is in `allow` (the content test enforces it) — if `adapter.md` names a tool not listed above (for example `get_table_schema` vs. another read tool), add it to `allow` only if it is a read or one of the two record-write tools; never add a delete, schema, or automation tool.
-
-- [ ] **Step 4: Setup sync** — copy the builder template's setup step 9 changes (Task 5) into `skills/setup/SKILL.md`; check `diff <(sed 's/<interview-skill>/interview-business/g' /Users/hochoy/Work/Webspenser/agent-library/_template/skills/setup/SKILL.md) skills/setup/SKILL.md` shows only the context-files line.
-
-- [ ] **Step 5: Release 1.2.0** — `agent.yaml` `version: 1.2.0`; the three host manifests `1.2.0`; README version line and tools text ("guard policies make Attio, Airtable, and Gmail unattended-safe"). `migrations/1.1.0-1.2.0.md`:
-
-```markdown
-# 1.1.0 → 1.2.0
-
-sales-partner now follows Agent Standard 1.3: each tool's safety rules
-are a declarative guard policy (`guard.yaml`) that the agent's guard
-enforces, and Airtable joins Attio and Gmail as unattended-safe.
-
-**Your context files do not change shape.**
-
-- **Airtable users:** re-run setup's tools step (`/sales-partner:setup`,
-  then choose the tools step). Its probe records the field IDs of
-  Activities `Status` and Leads `Do Not Contact` in `bindings/crm.md`;
-  until then the guard blocks Airtable writes.
-- **Attio and Gmail users:** nothing to do.
-- Set `standard: "1.3"` and `agent_version: 1.2.0` in `instance.yaml`.
-- Source mode: `capabilities/crm/adapters/attio/guard.py` is replaced by
-  `guard.yaml`, and `hooks/guard_policy.py` is new.
-```
-
-- [ ] **Step 6: Verify** — `tests/run-all.sh` ALL GREEN; validator OK; `--require-bump origin/main` passes (`git fetch origin` first).
-- [ ] **Step 7: Commit and push**
+- [ ] **Step 3: Cleanup of removed mechanisms**
+  - `git rm` every file in `migrations/`; create `migrations/.gitkeep`.
+  - `grep -rnE 'host-deny|enforce_|guard\.py|block:|permissions\.deny|Standard 1\.[0-3]|migrations/[0-9]' --include='*.md' . | grep -v -e '^./docs/' -e '^./tests/'` — rewrite each hit: enforcement is "the adapter's guard policy (`guard.yaml`) covers it" or "instruction-only"; unattended-safe means every invariant covered; no deny rules; no references to deleted migration notes. In `AGENT.md` keep the "Where these files live" paragraph accurate (mention `guard.yaml` only if it already lists adapter files).
+  - `skills/setup/SKILL.md`: copy the builder template's step 4 and step 9 text; `diff <(sed 's/<interview-skill>/interview-business/g' /Users/hochoy/Work/Webspenser/agent-library/_template/skills/setup/SKILL.md) skills/setup/SKILL.md` shows only the context-files line.
+- [ ] **Step 4: Release 2.0.0** — `agent.yaml` `version: 2.0.0`; three host manifests `2.0.0`; README version and tools text ("each tool's guard policy makes Attio, Airtable, and Gmail unattended-safe").
+- [ ] **Step 5: Verify** — `tests/run-all.sh` ALL GREEN; validator OK; `git fetch origin` then validator `--require-bump origin/main` passes; the Step 3 grep prints nothing.
+- [ ] **Step 6: Commit and push**
 
 ```bash
 git add -A
-git commit -m "feat: Gmail and Airtable guard policies; Airtable unattended-safe; release 1.2.0 (Standard 1.3)"
-git push -u origin release/1.2.0
+git commit -m "feat: Airtable guard policy; remove superseded mechanisms; release 2.0.0 (Agent Standard 2.0)"
+git push -u origin release/2.0.0
 ```
 
 ---
 
-## Task 9: Release and acceptance (controller; the user merges)
+## Task 8: Release and acceptance (controller; the user merges)
 
-- [ ] Open PR `feat/standard-1.3` → `main` (agent-builder; supersedes the spec PR if open). The user merges with a merge commit, then moves `v1`: `! git -C ~/Work/Webspenser/agent-library fetch origin --tags && git -C ~/Work/Webspenser/agent-library tag -f v1 origin/main && git -C ~/Work/Webspenser/agent-library push -f origin v1`.
-- [ ] Open PR `release/1.2.0` → `main` (sales-partner); re-run its CI after the tag move; the user merges.
-- [ ] Catalog README status: "1.2 — install, run setup, bind Attio or Airtable and Gmail; all three unattended-safe". PR; user merges.
-- [ ] Acceptance from the catalog (read-only): install `sales-partner@webspenser` (shows 1.2.0, hooks SessionStart + PreToolUse); in a scratch instance with `bind_crm: attio`, an instructed `update-list-entry-by-id` with `status: approved` on entry `00000000-0000-0000-0000-000000000000` is blocked with `Blocked by sales-partner guard policy (crm/attio): status may only be written as voided on update`; Attio `list-lists` from a plain folder succeeds; uninstall.
+- [ ] Open PR `feat/standard-2.0` → `main` (agent-builder; it carries the spec and plan commits). The user merges with a merge commit, then moves `v1`: `! git -C ~/Work/Webspenser/agent-library fetch origin --tags && git -C ~/Work/Webspenser/agent-library tag -f v1 origin/main && git -C ~/Work/Webspenser/agent-library push -f origin v1`.
+- [ ] Open PR `release/2.0.0` → `main` (sales-partner); re-run CI after the tag move; the user merges.
+- [ ] Catalog README: sales-partner status "2.0 — install, run setup, bind Attio or Airtable and Gmail; all three unattended-safe"; "Adding a plugin" mentions Agent Standard 2.0 if it names a version. PR; the user merges.
+- [ ] Acceptance from the catalog (read-only): install `sales-partner@webspenser` (2.0.0; hooks SessionStart + PreToolUse); in a scratch instance with `bind_crm: attio` (no `standard` line), an instructed `update-list-entry-by-id` with `status: approved` on entry `00000000-0000-0000-0000-000000000000` is blocked with `Blocked by sales-partner guard policy (crm/attio): status may only be written as voided on update`; an Attio tool outside `allow` (e.g. `create-comment`) is blocked; Attio `list-lists` from a plain folder succeeds; uninstall.
 - [ ] Clean up merged branches in all three repos.
