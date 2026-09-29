@@ -57,14 +57,24 @@ skeleton is `_capability-template/` in the same root. The validator is
      a mailbox). For each, pick a `snake_case` capability name, copy
      `_capability-template/` (beside `_template/`) to
      `capabilities/<name>/`, write the contract's operations and
-     invariants, rename
-     `adapters/example-provider/` to the first system's kebab-case
-     name and fill its `adapter.md`, `## Probe`, and `adapter.yaml`
-     (set `capability` and `provider` to the folder names). List the
-     names in `agent.yaml` as `capabilities: a, b`. Skills and
-     sub-agents name operations, never a system's tools. If the agent
-     must never send messages, give the capability a `no_send`
-     invariant and enforce it with `block: send`.
+     invariants, and rename `adapters/example-provider/` to the first
+     system's kebab-case name. Fill its `adapter.md` (every operation
+     in backticks, plus `## Probe`) and `adapter.yaml`: set
+     `capability` and `provider` to the folder names; `server_match`
+     to a substring of the real MCP server's name; `block` to the
+     tool-name substrings to refuse, or remove it. Replace the
+     skeleton's `enforce_example_invariant` with exactly one
+     `enforce_<id>: adapter|host-deny|instruction` line per contract
+     invariant, none left over; `host-deny` also needs a `deny` list.
+     `server_match`, `block`, and `deny` are plain comma-separated
+     values, never YAML lists. List the names in `agent.yaml` as
+     `capabilities: a, b`. Skills and sub-agents name operations,
+     never a system's tools. If the agent must never send messages,
+     give the capability a `no_send` invariant with
+     `enforce_no_send: adapter` (never `instruction`) and `block: send`.
+     `block: send` removes only tools whose names contain "send", so
+     confirm in `adapter.md` that the provider has no other way to
+     send.
    - Operating rules — numbered, about how it works.
    - Workflow — ordered steps, each tagged T1, T2, or T3; no critical
      step may need T1.

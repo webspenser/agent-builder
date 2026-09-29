@@ -36,7 +36,16 @@ agent-builder/
   <agent-name>/
     agent.yaml              # identity + standard version (1.1)
     hooks/                  # hooks.json + session-start.sh (1.1)
+      guard.sh              # PreToolUse guard, from _template (1.2)
     migrations/             # <from>-<to>.md upgrade notes (1.1)
+    capabilities/           # optional, one folder per capability (1.2)
+      <capability>/
+        contract.md         # operations + invariants
+        adapters/
+          <provider>/
+            adapter.md      # operation -> tool map, ## Probe
+            adapter.yaml    # server_match, block, guard, deny, enforce_*
+            guard.py        # optional argument check
     .claude-plugin/         # plugin.json, marketplace.json
     .codex-plugin/          # plugin.json
     gemini-extension.json
@@ -270,8 +279,9 @@ A folder is an instance of an agent when it holds `instance.yaml`:
 ```yaml
 agent: sales-partner       # the agent's name
 agent_version: 1.0.0       # version setup (or the last migration) ran with
-standard: "1.1"
+standard: "1.2"
 mode: plugin               # plugin | source
+bind_crm: attio            # 1.2: one line per bound capability
 ```
 
 `context/<file>` in `AGENT.md`, skills, and contracts means the
@@ -424,9 +434,9 @@ also checks, in addition to the 1.1 rules:
 - Each name in `capabilities` is `snake_case`, and
   `capabilities/<name>/contract.md` exists with a `## Operations` table
   holding at least one backticked operation and a `## Invariants` list
-  holding at least one backticked `snake_case` id.
+  holding at least one backticked id; invariant ids are `snake_case`.
 - Each capability has at least one adapter folder.
-- Each adapter folder has `adapter.md` and `adapter.yaml`; `capability`
+- Each adapter folder name is kebab-case and has `adapter.md` and `adapter.yaml`; `capability`
   and `provider` equal the folder names; `server_match` is non-empty;
   `server_match`, `block`, and `deny` are plain comma-separated values,
   not YAML lists.
