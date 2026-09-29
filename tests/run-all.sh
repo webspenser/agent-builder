@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 STATUS=0
 echo "== validator tests"; tests/test-validate-agent.sh || STATUS=1
 echo "== install tests";   tests/test-install.sh        || STATUS=1
+echo "== hook";  tests/test-hook.sh || STATUS=1
 echo "== builder manifests"; tests/test-builder-manifests.sh || STATUS=1
 echo "== action";  tests/test-action.sh || STATUS=1
 
