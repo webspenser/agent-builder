@@ -67,8 +67,15 @@ The template lives at `_template/` in this plugin's root
    - Interview — which skill gathers the user's context; replace
      `<interview-skill>` in `skills/setup/SKILL.md` with its name. If
      the agent has no interview skill, delete the `<interview-skill>`
-     wording from setup (its step 7 and source mode) instead of
-     leaving it.
+     wording from setup (its step 8 and source mode) instead of
+     leaving it. Replace `<context-files>` in setup's step 8 with the
+     list of context files the interview fills (for example
+     `context/athlete-profile.md`); package-owned context files the
+     user never edits stay off that list and are read from the
+     package. The user's own examples go in the instance's
+     `context/samples/`; `samples/` in the package holds only the
+     examples the agent ships with. The validator fails while either
+     placeholder is left.
    Fill the Sub-agents and Skills tables in `AGENT.md` to match.
 6. **Evals.** Write at least three cases in `evals/cases.md`, each a
    thing the agent must refuse or never do, in the form Given / Expect
@@ -88,7 +95,7 @@ The template lives at `_template/` in this plugin's root
      a catalog — Webspenser's is `webspenser/agent-library`; its README
      says how to add a plugin.
    - Catalog: if you publish to one, set both `catalog` and
-     `catalog_repo` in `agent.yaml`, or neither.
+     `catalog_repo` in `agent.yaml` as two flat keys, or neither.
    - Every later change bumps `version` in `agent.yaml` and all four
      host manifests.
 

@@ -31,4 +31,5 @@ rules are in `STANDARD.md`; this is the craft.
     four host manifests together.
 11. **Your data lives in an instance.** Write `context/` paths as if
     they are the user's folder — the entry hook and `setup` make that
-    true.
+    true. Package paths are read-only in plugin mode; operator examples
+    go in `context/samples/`.

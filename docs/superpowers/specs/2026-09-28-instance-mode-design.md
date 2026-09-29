@@ -173,6 +173,25 @@ A 1.0 agent is checked exactly as today.
   `agent_version: 0.9.1` confirm the migration line appears; then
   uninstall.
 
+## Deviations during implementation
+
+- `agent.yaml` catalog fields are two flat keys, `catalog` and
+  `catalog_repo`, not a `catalog: { name, repo }` map: the Python
+  checker and the bash hook read top-level `key: value` lines only.
+- The hook inlines `AGENT.md` only up to 9000 bytes; above that it
+  prints a line telling the model to read the file (Claude Code cuts
+  hook output at 10,000 characters). It always tells the model to read
+  `AGENT.md` in full, and the validator WARNs above 9000 bytes.
+- The hook is silent for a `mode: source` instance (source copies load
+  `AGENT.md` through their own host files), and prints the migration
+  notice only when the instance is older than the package.
+- Operator-supplied examples live in the instance at
+  `context/samples/`; the package's `samples/` holds only shipped
+  examples.
+- Setup copies only the context files the interview fills (listed per
+  agent in `skills/setup/SKILL.md` via `<context-files>`); package-owned
+  context files are read from the package.
+
 ## Out of scope
 
 - Bindings, adapters, deny rules (sub-project 4); schedules on routines
