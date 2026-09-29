@@ -3,9 +3,10 @@
 
 Usage: check_manifests.py <agent-dir>
        check_manifests.py --get <key> <agent.yaml | ->
-The first form prints one 'FAIL: <message>' line per problem and exits 0;
-bin/validate-agent.sh counts the lines and treats any other exit status as
-a crash. The second prints one parsed top-level value from agent.yaml (or
+The first form prints one 'FAIL: <message>' line per problem and one
+'WARN: <message>' line per advisory, and exits 0; bin/validate-agent.sh
+counts the FAIL lines, passes WARN lines through uncounted, and treats any
+other exit status as a crash. The second prints one parsed top-level value from agent.yaml (or
 stdin, with '-'), or nothing when the key is absent.
 """
 import json
@@ -19,6 +20,9 @@ KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 SUPPORTED_STANDARD = re.compile(r"^1\.\d+$")
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
+SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
+TEMPLATE_NAME = "agent-template"
 HOOK_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"'
 REFERENCE_HOOK = pathlib.Path(__file__).resolve().parents[2] / "_template" / "hooks" / "session-start.sh"
 IDENTITY_MANIFESTS = (".claude-plugin/plugin.json", "gemini-extension.json", ".codex-plugin/plugin.json")
@@ -60,9 +64,18 @@ def parse_agent_yaml(text):
     return data
 
 
+class Warn(str):
+    """An advisory: printed as WARN, never counted as a failure."""
+
+
 def check_v11(root, meta, name):
     """Agent Standard 1.1: entry hook, start/setup skills, migrations, catalog, instance marker."""
     fails = []
+    agent_md = root / "AGENT.md"
+    if agent_md.is_file():
+        size = agent_md.stat().st_size
+        if size > AGENT_MD_INLINE_MAX:
+            fails.append(Warn(f"AGENT.md is {size} bytes; the entry hook will point the model at the file instead of inlining it"))
     hooks, parsed = None, False
     try:
         hooks = json.loads(read_text(root / "hooks" / "hooks.json"))
@@ -105,12 +118,22 @@ def check_v11(root, meta, name):
     for skill in ("start", "setup"):
         if not (root / "skills" / skill / "SKILL.md").is_file():
             fails.append(f"missing skills/{skill}/SKILL.md")
+    setup = root / "skills" / "setup" / "SKILL.md"
+    if name != TEMPLATE_NAME and setup.is_file():
+        try:
+            setup_text = read_text(setup)
+        except ReadError as err:
+            fails.append(f"skills/setup/SKILL.md: {err}")
+        else:
+            for placeholder in SETUP_PLACEHOLDERS:
+                if placeholder in setup_text:
+                    fails.append(f"skills/setup/SKILL.md still has the {placeholder} placeholder")
     if not (root / "migrations").is_dir():
         fails.append("missing directory: migrations/")
 
     catalog, catalog_repo = meta.get("catalog", ""), meta.get("catalog_repo", "")
-    if bool(catalog) != bool(catalog_repo):
-        fails.append("agent.yaml: catalog and catalog_repo must be set together")
+    if ("catalog" in meta or "catalog_repo" in meta) and not (catalog and catalog_repo):
+        fails.append("agent.yaml: catalog and catalog_repo must be set together as flat keys")
     if catalog and not KEBAB.match(catalog):
         fails.append(f"agent.yaml: catalog '{catalog}' is not kebab-case")
     if catalog_repo and not REPO.match(catalog_repo):
@@ -256,7 +279,7 @@ def main(argv):
         print("FAIL: usage: check_manifests.py <agent-dir> | --get <key> <agent.yaml|->")
         return 2
     for message in check(pathlib.Path(argv[0])):
-        print(f"FAIL: {message}")
+        print(f"{'WARN' if isinstance(message, Warn) else 'FAIL'}: {message}")
     return 0
 
 

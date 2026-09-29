@@ -43,9 +43,9 @@ make_valid_v1_agent() { # make_valid_v1_agent <dir> [name] [version]
     "$name" "$ver" > "$d/.codex-plugin/plugin.json"
 }
 
-make_valid_v11_agent() { # make_valid_v11_agent <dir>
+make_valid_v11_agent() { # make_valid_v11_agent <dir> [name]
   local d="$1"
-  make_valid_v1_agent "$d"
+  make_valid_v1_agent "$d" "${2:-demo-agent}"
   sed -i.bak 's/^standard:.*/standard: "1.1"/' "$d/agent.yaml" && rm -f "$d/agent.yaml.bak"
   mkdir -p "$d/hooks" "$d/skills/start" "$d/skills/setup" "$d/migrations"
   cp _template/hooks/session-start.sh _template/hooks/hooks.json "$d/hooks/"
@@ -384,5 +384,33 @@ for c in hooks5 hooksnull nounread instdir; do
     _report ok "v11-$c fails cleanly"; else _report no "v11-$c (rc=$rc): $out"; fi
 done
 chmod 644 "$FIX/v11-nounread/hooks/session-start.sh"
+
+echo "-- 1.1 final-review checks"
+# AGENT.md over 9000 bytes: WARN, still OK.
+make_valid_v11_agent "$FIX/v11-bigagent"; head -c 9500 /dev/zero | tr '\0' 'x' >> "$FIX/v11-bigagent/AGENT.md"
+out=$($V "$FIX/v11-bigagent" 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q '^WARN: AGENT.md is [0-9]* bytes; the entry hook will point the model at the file instead of inlining it' \
+  && printf '%s\n' "$out" | grep -q '^OK:'; then _report ok "large AGENT.md WARNs, still OK"; else _report no "large AGENT.md (rc=$rc): $out"; fi
+out=$($V "$FIX/v11" 2>&1)
+printf '%s\n' "$out" | grep -q '^WARN:' && _report no "small AGENT.md WARNed: $out" || _report ok "small AGENT.md: no WARN"
+
+# catalog: present but empty (a nested map) fails.
+make_valid_v11_agent "$FIX/v11-nestcat"
+printf '%s\n' 'catalog:' '  name: webspenser' '  repo: webspenser/agent-library' >> "$FIX/v11-nestcat/agent.yaml"
+out=$($V "$FIX/v11-nestcat" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF 'FAIL: agent.yaml: catalog and catalog_repo must be set together as flat keys'; then
+  _report ok "nested catalog map fails"; else _report no "nested catalog (rc=$rc): $out"; fi
+
+# Setup placeholders left unfilled fail, except in the template itself.
+for ph in '<interview-skill>' '<context-files>'; do
+  make_valid_v11_agent "$FIX/v11-ph"; printf 'Run the %s skill.\n' "$ph" >> "$FIX/v11-ph/skills/setup/SKILL.md"
+  out=$($V "$FIX/v11-ph" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF "FAIL: skills/setup/SKILL.md still has the $ph placeholder"; then
+    _report ok "unfilled $ph fails"; else _report no "unfilled $ph (rc=$rc): $out"; fi
+  make_valid_v11_agent "$FIX/v11-tpl" agent-template; printf 'Run the %s skill.\n' "$ph" >> "$FIX/v11-tpl/skills/setup/SKILL.md"
+  out=$($V "$FIX/v11-tpl" 2>&1); rc=$?
+  [ "$rc" -eq 0 ] && _report ok "agent-template keeps $ph" || _report no "agent-template with $ph (rc=$rc): $out"
+  rm -rf "$FIX/v11-ph" "$FIX/v11-tpl"
+done
 
 finish

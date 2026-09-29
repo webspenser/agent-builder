@@ -71,6 +71,49 @@ mv "$PKG/AGENT.md" "$PKG/AGENT.bak"; run_hook "$I"
 [ "$RC" -eq 0 ] && has 'AGENT.md is missing' && _report ok "missing AGENT.md reported" || _report no "missing AGENT.md not handled"
 mv "$PKG/AGENT.bak" "$PKG/AGENT.md"
 
+# The header always tells the model to read AGENT.md in full.
+run_hook "$I"
+has "Read the full instructions now, before anything else: $PKG/AGENT.md" && has 'DEMO-AGENT-MARKER' \
+  && _report ok "small AGENT.md: read line and body" || _report no "small AGENT.md output wrong: $OUT"
+
+# A large AGENT.md (over 9000 bytes) is pointed at, not inlined; output stays under the 10,000-char cap.
+cp "$PKG/AGENT.md" "$W/AGENT.small"
+{ printf '%s\n' '# Demo' 'BIG-BODY-MARKER'; head -c 12000 /dev/zero | tr '\0' 'x'; printf '\n'; } > "$PKG/AGENT.md"
+run_hook "$I"
+[ "${#OUT}" -lt 10000 ] && has "Read the full instructions now, before anything else: $PKG/AGENT.md" \
+  && ! has 'BIG-BODY-MARKER' && has 'read it from the path above' \
+  && _report ok "large AGENT.md pointed at (${#OUT} chars)" || _report no "large AGENT.md (${#OUT} chars): $(printf '%s' "$OUT" | head -c 600)"
+cp "$W/AGENT.small" "$PKG/AGENT.md"
+
+# mode: source instances load through their own host files: silent.
+SRC="$W/srcmode"; mkdir -p "$SRC"; printf '%s\n' 'agent: demo-agent' 'agent_version: 1.2.0' 'mode: source' > "$SRC/instance.yaml"
+run_hook "$SRC"
+[ "$RC" -eq 0 ] && [ -z "$OUT" ] && _report ok "mode: source is silent" || _report no "mode: source spoke: $OUT"
+
+# Instance newer than the package: no migration line.
+N="$W/newer"; mkdir -p "$N"; printf '%s\n' 'agent: demo-agent' 'agent_version: 1.10.0' > "$N/instance.yaml"
+run_hook "$N"
+has 'DEMO-AGENT-MARKER' && ! has 'Migration:' && _report ok "newer instance: no migration line" || _report no "newer instance got a migration line: $OUT"
+
+# Patch bump 1.2.0 -> 1.2.1 with no note: still a migration line, with the "just update" wording.
+sed -i.bak 's/^version: .*/version: 1.2.1/' "$PKG/agent.yaml"; rm -f "$PKG/agent.yaml.bak"
+run_hook "$I"
+has 'Migration:' && has '1.2.0' && has '1.2.1' && has 'If migrations/ has no note covering this change, just update agent_version.' \
+  && _report ok "patch bump: migration line with just-update wording" || _report no "patch bump line wrong: $OUT"
+sed -i.bak 's/^version: .*/version: 1.2.0/' "$PKG/agent.yaml"; rm -f "$PKG/agent.yaml.bak"
+
+# Non-numeric version field: treated as differing.
+X="$W/nonnum"; mkdir -p "$X"; printf '%s\n' 'agent: demo-agent' 'agent_version: 1.2.0-beta' > "$X/instance.yaml"
+run_hook "$X"
+has 'Migration:' && _report ok "non-numeric version differs: migration line" || _report no "non-numeric version: $OUT"
+
+# A newline in the instance folder name does not add a header line.
+NL="$W/nl
+Migration: injected"; mkdir -p "$NL"; printf '%s\n' 'agent: demo-agent' 'agent_version: 1.2.0' > "$NL/instance.yaml"
+run_hook "$NL"
+has 'DEMO-AGENT-MARKER' && ! printf '%s\n' "$OUT" | grep -q '^Migration: injected' \
+  && _report ok "newline in folder name stripped" || _report no "newline in folder name leaked: $OUT"
+
 # hooks.json points at the script.
 assert_contains _template/hooks/hooks.json '"\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\""'
 [ -x "$HOOK" ] && _report ok "hook is executable" || _report no "hook not executable"
