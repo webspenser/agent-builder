@@ -26,7 +26,7 @@ and will be built by copying `_template/`.
 an unresolved decision.
 
 Agents get their own spec files alongside this one. The first is
-[Sales Partner](./2026-09-01-sales-partner-agent-design.md).
+[Sales Partner](https://github.com/webspenser/sales-partner/blob/main/docs/superpowers/specs/2026-09-01-sales-partner-agent-design.md).
 
 ## Decisions
 
