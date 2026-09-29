@@ -111,6 +111,21 @@ run 2 "status by field ID"           mcp__airtable__update_records '{"records":[
 run 0 "draft by field ID on create"  mcp__airtable__create_records '{"records":[{"fields":{"fldAAAAAAAAAAAAAA":"draft","fldBBBBBBBBBBBBBB":"x"}}]}' "" "$W/bindings.md"
 run 2 "required ID missing"          mcp__airtable__create_records '{"records":[{"fields":{"fldBBBBBBBBBBBBBB":"x"}}]}' "has not recorded field_status"
 run 0 "read tool needs no binding"   mcp__airtable__list_records '{}'
+bind() { printf '%s\n' "$@" > "$W/bindings.md"; }
+UPD='{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}'
+VOID='{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"voided"}}]}'
+bind 'field_status: `fldAAAAAAAAAAAAAA`'
+run 2 "backticked ID enforced"       mcp__airtable__update_records "$UPD" "Status may only be written as voided" "$W/bindings.md"
+run 0 "backticked ID: voided allowed" mcp__airtable__update_records "$VOID" "" "$W/bindings.md"
+bind 'field_status: "fldAAAAAAAAAAAAAA"'
+run 2 "quoted ID enforced"           mcp__airtable__update_records "$UPD" "Status may only be written as voided" "$W/bindings.md"
+run 0 "quoted ID: voided allowed"    mcp__airtable__update_records "$VOID" "" "$W/bindings.md"
+bind 'field_status: fldAAAAAAAAAAAAAA  # note'
+run 2 "ID with trailing comment blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
+bind 'field_status: fldAAAAAAAAAAAAAA (Activities.Status)'
+run 2 "ID with parenthetical blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
+bind 'base_id: `appXXXXXXXXXXXXXX` (my base)' '- field_status: fldAAAAAAAAAAAAAA'
+run 2 "bullet form ignored: not recorded" mcp__airtable__update_records "$VOID" "has not recorded field_status" "$W/bindings.md"
 
 echo "-- fail closed"
 policy 'covers: [x]' 'allow: [a'

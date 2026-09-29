@@ -31,6 +31,7 @@ KEY_LINE = re.compile(r"^([a-z_]+):(?: (.*))?$")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\])?)*$")
 BINDING_LINE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(\S.*?)\s*$")
+BARE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class PolicyError(Exception):
@@ -309,8 +310,16 @@ def read_bindings(path):
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             m = BINDING_LINE.match(line.rstrip("\r\n"))
-            if m:
-                data[m.group(1)] = m.group(2)
+            if not m:
+                continue
+            key, value = m.group(1), m.group(2)
+            if key.startswith("field_"):
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "`'\"":
+                    value = value[1:-1]
+                if not BARE_ID.match(value):
+                    shown = "".join(c for c in m.group(2) if c.isprintable())[:60]
+                    raise PolicyError(f"bindings: {key} must be a bare ID, got {shown}")
+            data[key] = value
     return data
 
 

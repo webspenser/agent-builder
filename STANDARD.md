@@ -484,6 +484,14 @@ ID in `bindings/<capability>.md` as `field_<name>: <id>`, and the rule
 matches that key too. `binding_id: required` makes the ID mandatory: a
 write while it is missing is blocked.
 
+The exact form is a plain line, `field_<name>: <ID>`, with nothing else
+on it: no bullet, and no trailing comment or note. The engine strips one
+surrounding pair of backticks or matching quotes; the rest must match
+`^[A-Za-z0-9_.-]+$`, or the call is blocked with `field_<name> must be a
+bare ID`. A bulleted line is not read as a binding, so with
+`binding_id: required` it counts as not recorded. Keys that do not start
+with `field_` are not checked.
+
 ## Bindings
 
 `instance.yaml` binds each capability with one flat line,

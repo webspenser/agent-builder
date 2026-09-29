@@ -6,8 +6,9 @@
 # shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
+BOM=$(printf '\357\273\277')  # a leading UTF-8 byte-order mark must not hide line 1
 yaml_get() { # yaml_get <file> <key>: top-level scalar; quotes and trailing comments removed
-  sed -n "s/^$2:[[:space:]]*//p" "$1" 2>/dev/null | head -n 1 \
+  sed -e "1s/^$BOM//" -n -e "s/^$2:[[:space:]]*//p" "$1" 2>/dev/null | head -n 1 \
     | sed -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
           -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }
@@ -28,7 +29,12 @@ while [ -n "$dir" ]; do
   dir=$parent
 done
 [ -n "$instance" ] || exit 0
-[ "$(yaml_get "$instance/instance.yaml" agent)" = "$name" ] || exit 0
+agent=$(yaml_get "$instance/instance.yaml" agent)
+if [ "$agent" != "$name" ]; then
+  # Another agent's instance stays silent; bindings with no agent: line at all are an error.
+  [ -z "$agent" ] && sed -e "1s/^$BOM//" "$instance/instance.yaml" 2>/dev/null | grep -q '^bind_' || exit 0
+  unnamed=1
+fi
 
 # JSON strings hold no raw newlines, so joining lines is safe. An escaped
 # \"tool_name\" inside a string value never matches the pattern.
@@ -40,9 +46,12 @@ names=$(printf '%s' "$input" | tr '\n' ' ' \
 [ "$(printf '%s\n' "$names" | grep -c .)" -eq 1 ] || block "the hook input names more than one tool"
 tool=$names
 case "$tool" in mcp__?*__?*) ;; *) exit 0 ;; esac
+[ -z "${unnamed:-}" ] || block "instance.yaml has bindings but no agent: line; fix it or re-run setup"
 rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match on the whole
 
+first=1
 while IFS= read -r line || [ -n "$line" ]; do
+  [ -z "$first" ] || { line=${line#"$BOM"}; first=""; }
   case "$line" in bind_*) ;; *) continue ;; esac
   # Each line supplies its own key and value, so a repeated bind_ key still
   # applies every adapter.

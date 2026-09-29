@@ -81,7 +81,10 @@ skill, if this agent has one.
    3. Run the adapter's `## Probe` calls. They only read. On failure,
       say what failed and leave the capability unbound. Write what the
       probe found to `bindings/<capability>.md` in the instance,
-      including any `field_<name>: <id>` lines the probe records.
+      including any `field_<name>: <id>` lines the probe records. Write
+      each as a plain line, `field_<name>: <ID>`, with nothing else on
+      it: no bullet, no backticks or quotes, no trailing note. Anything
+      else blocks the guarded call.
    4. If the contract has a `no_send` invariant and the adapter's
       `guard.yaml` does not list it in `covers`, refuse to bind it and
       say why.
