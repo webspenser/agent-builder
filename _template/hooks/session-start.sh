@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Agent Standard 1.1 entry hook — identical in every agent.
+# Agent Standard entry hook — identical in every agent.
 # When the session's folder is (inside) a plugin-mode instance of this agent,
 # prints where its files live and the agent's instructions (AGENT.md inline up
 # to 9000 bytes, otherwise a pointer to the file). Prints nothing otherwise.

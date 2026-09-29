@@ -19,8 +19,7 @@ this plugin) and explains every problem in plain language.
    against (usually `origin/main`).
 4. Report the result:
    - `OK: … conforms` — say so in one line; mention a `WARN:` line if
-     present (a pre-1.0 agent: suggest adding `agent.yaml` and the four
-     host manifests from `_template/`).
+     present.
    - Each `FAIL:` line — restate it plainly, name the file, and give
      the exact fix (the key to add, the value to change, the heading to
      move). Group fixes by file.
