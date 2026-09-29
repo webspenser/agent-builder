@@ -11,7 +11,12 @@ on Claude Code, Gemini CLI, and Codex.
 
 ## Install
 
-**Claude Code** (supported)
+**Claude Code** (supported) — from the Webspenser catalog:
+
+    /plugin marketplace add webspenser/agent-library
+    /plugin install agent-builder@webspenser
+
+or straight from this repo:
 
     /plugin marketplace add webspenser/agent-builder
     /plugin install agent-builder@agent-builder
