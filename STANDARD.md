@@ -429,7 +429,7 @@ validation error and, at runtime, a block.
 | `deny` | no | Tool-name glob patterns that are always blocked |
 | `create_tools` | if `rules` | Tools whose writes create new data |
 | `update_tools` | if `rules` | Tools whose writes change existing data |
-| `values_at` | if `rules` or `refuse_keys` | Where attribute maps sit in the tool input: a key (`values`) or a list path (`records[].fields`) |
+| `values_at` | if `rules` or `refuse_keys` | Where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`) |
 | `unwrap` | no | Keys whose value stands for a wrapped value (`{"option": "draft"}`); without them any object value on a write is an error |
 | `unknown_writes` | no | `update` (default) or `block`: a tool in neither list whose input holds an attribute map |
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
@@ -455,7 +455,8 @@ validation error and, at runtime, a block.
 3. **Values.** Lists flatten to their items; objects to the values
    under their `unwrap` keys (an object may hold only `unwrap` keys;
    any other key, or none, is an error); booleans to
-   `true`/`false`. Leaves compare as trimmed lowercase strings.
+   `true`/`false`; a JSON `null` compares as `null`. Leaves compare as
+   trimmed lowercase strings.
 4. **Rules.** A rule whose field appears in a map requires the
    flattened value to equal exactly one entry of the applicable list —
    `create` for creates, `update` for updates and unknown writes; `any`
@@ -463,13 +464,15 @@ validation error and, at runtime, a block.
    checked.
 5. **Refused keys.** `refuse_keys: [uuid]` blocks any UUID-shaped key
    in a map (it could hide a ruled field).
-6. **Field identity.** `field_<name>` in `bindings/<capability>.md` (a
+6. **Field identity.** `field_<name>` (the name normalized: lowercase,
+   spaces and hyphens become underscores) in `bindings/<capability>.md` (a
    `key: value` line) adds that ID as a key matching the rule. With
    `binding_id: required`, a write while the ID is missing is blocked.
 7. **Errors.** An invalid policy, unreadable bindings, bad JSON, or any
    engine exception blocks, with the cause on stderr.
 8. **Output.** Exit 2 with one line per problem, prefixed
-   `Blocked by <label>: `; exit 0 otherwise. `guard.sh` passes the label
+   `Blocked by <label>: `; exit 0 otherwise. `--check` prints
+   `FAIL: …` and exits 1 on an invalid policy. `guard.sh` passes the label
    `<agent> guard policy (<capability>/<provider>)`.
 
 ### Field identity
@@ -551,9 +554,6 @@ Setup's tools step binds each capability:
 - Report, per capability, each invariant as covered or instruction-only.
   A capability is unattended-safe when every invariant is covered.
   Scheduled runs may use only unattended-safe capabilities.
-
-Setup writes no host deny rules, and `instance.yaml` has no `standard`
-line.
 
 ## Validation
 

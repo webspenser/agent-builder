@@ -64,10 +64,14 @@ skeleton is `_capability-template/` in the same root. The validator is
      `adapter.yaml`, which has three keys: `capability` and `provider`
      equal to the folder names, and `server_match`, a substring of the
      real MCP server's name. In `guard.yaml`, list every tool the
-     adapter uses in `allow`, and put each invariant it enforces in
-     `covers`; an invariant left out is held only by the agent's
-     instructions. Verify with
-     `python3 _template/hooks/guard_policy.py --check <path>`. List the
+     adapter uses in `allow`, and replace the skeleton's
+     `example_invariant` in `covers` with the real contract invariant
+     ids it enforces; an invariant left out is held only by the agent's
+     instructions. Replace or remove the example `rules`,
+     `create_tools` and `update_tools`. Verify with
+     `python3 _template/hooks/guard_policy.py --check <path>`, which
+     only parses; the validator step checks `covers` against the
+     contract. List the
      names in `agent.yaml` as `capabilities: a, b`. Skills and
      sub-agents name operations, never a system's tools. If the agent
      must never send messages, give the capability a `no_send`

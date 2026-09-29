@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior of the Agent Standard 1.1 entry hook (_template/hooks/session-start.sh).
+# Behavior of the Agent Standard entry hook (_template/hooks/session-start.sh).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source tests/lib.sh
