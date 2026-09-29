@@ -76,10 +76,11 @@ The template lives at `_template/` in this plugin's root
      the user with each file's bracketed prompts, writing their
      answers in place.
    - Distributable: offer `git init` and a first commit; explain
-     publishing — push to a GitHub repo, enable "Template repository"
-     in its settings so others can copy it without forking, and list it
-     in a catalog — Webspenser's is `webspenser/agent-library`; its README says how to add a plugin. Every later change bumps `version` in `agent.yaml`
-     and all four host manifests.
+     publishing — push to a GitHub repo, enable "Template repository" in
+     its settings so others can copy it without forking, and list it in
+     a catalog — Webspenser's is `webspenser/agent-library`; its README
+     says how to add a plugin. Every later change bumps `version` in
+     `agent.yaml` and all four host manifests.
 
 ## Worked example (abridged)
 

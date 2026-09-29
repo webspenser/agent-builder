@@ -85,7 +85,9 @@ passes `webspenser/agent-builder/validate@v1`, then one entry in
   an alternative.
 - `skills/new-agent/SKILL.md` step 9 (distributable): "list it in a
   catalog" names `webspenser/agent-library` as Webspenser's catalog.
-- Builder version bumps to `1.0.1` in its four manifests (release rule).
+- Builder version bumps to `1.0.1` in its three versioned manifests
+  (`.claude-plugin/plugin.json`, `gemini-extension.json`,
+  `.codex-plugin/plugin.json`) (release rule).
 
 ## Verification
 
