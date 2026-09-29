@@ -16,6 +16,8 @@ import pathlib
 import re
 import sys
 
+sys.dont_write_bytecode = True
+
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
@@ -46,7 +48,7 @@ def load_policy_engine():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
-    except (OSError, ImportError, AttributeError, SyntaxError):
+    except Exception:
         return None
 
 

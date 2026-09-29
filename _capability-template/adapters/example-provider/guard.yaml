@@ -1,0 +1,15 @@
+# Guard policy for this adapter. The agent's guard_policy.py enforces it
+# before every call to this provider. covers lists the contract
+# invariants it enforces; invariants it does not list are enforced only
+# by the agent's instructions. Example: read tools allowed, deletes
+# denied, and a status field may only be created as "draft". Replace it
+# with your provider's tool names and fields.
+covers: [example_invariant]
+allow: [whoami, list-*, get-*, search-*, create-thing, update-thing]
+deny: ["*delete*"]
+create_tools: [create-thing]
+update_tools: [update-thing]
+values_at: [values]
+rules:
+  - field: status
+    create: [draft]

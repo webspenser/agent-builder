@@ -478,6 +478,8 @@ make_valid_agent "$FIX/enforce"; echo 'enforce_draft_only: adapter' >> "$FIX/enf
 fails_with "$FIX/enforce" "$A/adapter.yaml: unknown key 'enforce_draft_only' (adapter.yaml holds capability, provider, server_match)"
 make_valid_agent "$FIX/matchlist"; sed -i.bak 's/^server_match: .*/server_match: [demo]/' "$FIX/matchlist/$A/adapter.yaml"
 fails_with "$FIX/matchlist" "$A/adapter.yaml: server_match must be a plain value, not a YAML list"
+make_valid_agent "$FIX/matchbare"; sed -i.bak 's/^server_match: .*/server_match:/' "$FIX/matchbare/$A/adapter.yaml"; printf '  - demo\n' >> "$FIX/matchbare/$A/adapter.yaml"
+fails_with "$FIX/matchbare" "$A/adapter.yaml: server_match must be a plain value, not a YAML list"
 make_valid_agent "$FIX/badpol"; printf '%s\n' 'covers: [draft_only' > "$FIX/badpol/$A/guard.yaml"
 fails_with "$FIX/badpol" "$A/guard.yaml: line 1: unclosed '['"
 make_valid_agent "$FIX/strange"; printf '%s\n' 'covers: [draft_only, no_send, other]' 'deny: ["*send*"]' > "$FIX/strange/$A/guard.yaml"

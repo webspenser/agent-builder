@@ -38,8 +38,7 @@ skill, if this agent has one.
    Every later step writes into this folder (the instance folder),
    not the current folder.
 4. **Marker.** Write `instance.yaml`:
-   `agent: <name>`, `agent_version: <version>`, `standard: "1.2"`,
-   `mode: plugin`.
+   `agent: <name>`, `agent_version: <version>`, `mode: plugin`.
 5. **Host files.** Write `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`, each:
    "This folder is an instance of <name>. Its instructions load from the
    <name> plugin; if they didn't, run the `start` skill." Do not
@@ -66,39 +65,36 @@ skill, if this agent has one.
    1. List the shipped adapters (`capabilities/<capability>/adapters/`
       in the package) and ask which system the user uses. If none
       fits, offer a custom adapter: interview the user about their
-      tool and write `custom-adapters/<capability>/adapter.md` and
-      `adapter.yaml` in the instance, mapping every operation in the
-      contract and declaring each invariant's level (`adapter`,
-      `host-deny`, or `instruction`). A custom adapter never has a
-      `guard`.
-   2. Find the tools in this session whose server name (the part
-      between `mcp__` and the next `__`) contains the adapter's
-      `server_match`, ignoring case. If there are none, explain how to
-      connect that system in the host (a connector or an MCP server),
-      and that the user enters any key or login there themselves;
-      leave the capability unbound and go on. The guard itself matches
-      `server_match` anywhere in the tool name after `mcp__`, which is
-      broader than this server test and so safe.
+      tool and write, in the instance's
+      `custom-adapters/<capability>/`, an `adapter.md` mapping every
+      operation in the contract, an `adapter.yaml` (`capability`,
+      `provider: custom`, `server_match`), and — for every invariant
+      the user wants enforced by mechanism — a `guard.yaml` guard
+      policy: an `allow` list of the tools the adapter uses, a `deny`
+      list, and any field rules. Check it with
+      `python3 <package>/hooks/guard_policy.py --check custom-adapters/<capability>/guard.yaml`.
+   2. Find the tools in this session whose name contains the adapter's
+      `server_match` after `mcp__`, ignoring case. If there are none,
+      explain how to connect that system in the host (a connector or
+      an MCP server), and that the user enters any key or login there
+      themselves; leave the capability unbound and go on.
    3. Run the adapter's `## Probe` calls. They only read. On failure,
       say what failed and leave the capability unbound. Write what the
-      probe found to `bindings/<capability>.md` in the instance.
-   4. If the contract has a `no_send` invariant and the adapter
-      enforces it by `instruction`, refuse to bind it and say why.
+      probe found to `bindings/<capability>.md` in the instance,
+      including any `field_<name>: <id>` lines the probe records.
+   4. If the contract has a `no_send` invariant and the adapter's
+      `guard.yaml` does not list it in `covers`, refuse to bind it and
+      say why.
    5. Add `bind_<capability>: <provider>` (or `custom`) to
-      `instance.yaml`, replacing an earlier line for that capability,
-      and set `standard: "1.2"` there. Create or merge
-      `.claude/settings.json`: add to `permissions.deny` one rule
-      `mcp__<server>__<tool>` for every tool of a matched server whose
-      name contains a `block` entry or ends with a `deny` entry. Keep
-      every existing rule and key; never add a rule twice.
-   6. Source mode only: also merge into `.claude/settings.json` a
+      `instance.yaml`, replacing an earlier line for that capability.
+   6. Source mode only: merge into `.claude/settings.json` a
       `PreToolUse` hook with matcher `mcp__.*` and command
       `"$CLAUDE_PROJECT_DIR/hooks/guard.sh"`, unless one is there
-      already.
-   7. Tell the user, for each capability, whether it is
-      **unattended-safe**: every invariant enforced by `adapter`, or by
-      `host-deny` with its rules written. Scheduled runs may use only
-      unattended-safe capabilities.
+      already. Keep every existing key.
+   7. Tell the user, for each capability, each contract invariant and
+      whether the adapter's guard policy covers it. A capability is
+      **unattended-safe** when every invariant is covered. Scheduled
+      runs may use only unattended-safe capabilities.
 10. **Version control.** Offer `git init` and a first commit, in a
    private repository. Remind the user that credentials belong in the
    host (connectors, MCP settings, environment variables), never in
