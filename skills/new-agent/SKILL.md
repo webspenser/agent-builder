@@ -12,7 +12,8 @@ bracketed prompt.
 
 The template lives at `_template/` in this plugin's root
 (`${CLAUDE_PLUGIN_ROOT}/_template` on Claude Code; on other hosts, the
-`_template/` folder beside this `skills/` folder). The validator is
+`_template/` folder beside this `skills/` folder). The capability
+skeleton is `_capability-template/` in the same root. The validator is
 `bin/validate-agent.sh` in the same root.
 
 ## Procedure
@@ -35,13 +36,13 @@ The template lives at `_template/` in this plugin's root
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "1.1"`. Set the same name, version, and description in
+   `standard: "1.2"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
    publisher the user named in step 3. Set the title in `AGENT.md` and the
    three `adapters/` files to the agent's display name.
-   The template is Agent Standard 1.1: keep `hooks/` exactly as copied
+   The template is Agent Standard 1.2: keep `hooks/` exactly as copied
    (the validator checks it byte for byte).
 5. **Specification, section by section.** For each, ask, draft,
    confirm, write:
@@ -52,6 +53,18 @@ The template lives at `_template/` in this plugin's root
      (for a training coach: goals, schedule, current fitness). Write
      each as `context/<name>.md` with bracketed interview prompts, not
      answers.
+   - Tools — which outside systems the agent reads or writes (a CRM,
+     a mailbox). For each, pick a `snake_case` capability name, copy
+     `_capability-template/` (beside `_template/`) to
+     `capabilities/<name>/`, write the contract's operations and
+     invariants, rename
+     `adapters/example-provider/` to the first system's kebab-case
+     name and fill its `adapter.md`, `## Probe`, and `adapter.yaml`
+     (set `capability` and `provider` to the folder names). List the
+     names in `agent.yaml` as `capabilities: a, b`. Skills and
+     sub-agents name operations, never a system's tools. If the agent
+     must never send messages, give the capability a `no_send`
+     invariant and enforce it with `block: send`.
    - Operating rules — numbered, about how it works.
    - Workflow — ordered steps, each tagged T1, T2, or T3; no critical
      step may need T1.

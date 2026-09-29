@@ -25,10 +25,10 @@ agent or a "Use this template" copy): use the package folder itself
 (no subfolder proposal); write `instance.yaml` with `mode: source`;
 skip step 5's host files if `CLAUDE.md`/`GEMINI.md`/`AGENTS.md`
 already point at `AGENT.md` (they do after `install.sh`), otherwise
-write "Read `AGENT.md` in this folder."; skip step 7 (settings) except
-what step 9 writes and step 8's copy — `context/` is already here;
-still create `context/samples/` and run the `<interview-skill>` skill, if this
-agent has one.
+write "Read `AGENT.md` in this folder."; skip step 7 (settings), except
+what step 9 writes, and skip step 8's copy — `context/` is already
+here; still create `context/samples/` and run the `<interview-skill>`
+skill, if this agent has one.
 
 3. **Folder.** If the current folder is empty (dot files aside), use it.
    Otherwise propose `./<agent name>/` and confirm. If an
@@ -102,7 +102,7 @@ agent has one.
    host (connectors, MCP settings, environment variables), never in
    these files.
 11. **Open.** If step 3 created a subfolder, tell the user: "Open your
-    host in <folder> — the agent loads there."
+   host in <folder> — the agent loads there."
 
 Never invent the user's facts; what they don't supply stays as the
 package's bracketed prompt.

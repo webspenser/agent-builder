@@ -1,4 +1,4 @@
-# Agent Standard 1.1
+# Agent Standard 1.2
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
@@ -14,14 +14,17 @@ bug.
 The standard uses semantic versioning: a minor release adds optional
 rules, a major release changes what an agent must do to conform. It
 grows with the builder's sub-projects — 1.0 packaging,
-1.1 instance rules (this version), 1.2 capability contracts and adapters. An agent
+1.1 instance rules, 1.2 capability contracts and adapters (this version). An agent
 declares the version it follows in `agent.yaml`; the validator
 understands `1.x` and fails any other. A folder with no `agent.yaml` is
 a pre-1.0 agent: it is checked by the pre-1.0 rules below only and passes with
 a warning.
 
-1.1 (this version) adds instances, the entry hook, setup, and migrations;
-a 1.0 agent still validates as 1.0.
+1.1 adds instances, the entry hook, setup, and migrations; a 1.0 agent
+still validates as 1.0.
+
+1.2 (this version) adds capabilities, adapters, bindings, and the guard
+hook. It is additive: a 1.1 agent stays valid as 1.1.
 
 ## Directory layout
 
@@ -228,7 +231,9 @@ standard: "1.0"                # the Agent Standard version followed
 
 All four keys are required, one `key: value` per line; quotes and
 trailing comments are allowed. Later versions add keys; a 1.0 validator
-ignores keys it does not know. The folder name is not checked — a clone
+ignores keys it does not know. 1.2 adds the optional flat key
+`capabilities: crm, email_drafts` — comma-separated `snake_case` names,
+one per folder in `capabilities/`. The folder name is not checked — a clone
 may live under any name.
 
 ## Host manifests
@@ -318,6 +323,83 @@ keys (not a nested map), set both or neither.
 release that changes the shape of a context file: what changed and how
 to convert. It may be empty (keep a `.gitkeep` so git tracks it).
 
+## Capabilities and adapters (1.2)
+
+A capability is an outside system the agent works through — a CRM, a
+mailbox. The package describes it in two layers:
+
+- `capabilities/<capability>/contract.md` — the neutral operations the
+  agent thinks in (a `## Operations` table whose first column is each
+  operation name in backticks) and the rules every adapter must uphold
+  (a `## Invariants` list, each item starting with a `snake_case` id in
+  backticks). Skills and sub-agent contracts call operations, never a
+  provider's tools.
+- `capabilities/<capability>/adapters/<provider>/` — one folder per
+  system: `adapter.md` maps every operation to that provider's tools
+  and has a `## Probe` section (read-only calls setup makes when
+  binding); `adapter.yaml` holds flat keys:
+
+      capability: crm
+      provider: attio
+      server_match: attio          # substring of the MCP server name, any case
+      block: delete, merge         # optional: tool-name substrings refused
+      guard: guard.py              # optional: argument checks (package adapters only)
+      deny: delete-record          # optional: tool-name suffixes for host-deny
+      enforce_draft_only: adapter  # one line per contract invariant
+
+`server_match`, `block`, and `deny` must be plain comma-separated
+values; a YAML list (`[a, b]` or indented `- a` items) fails
+validation, because the guard reads them as flat text.
+
+Enforcement levels: `adapter` (a mechanism in the package holds it —
+no violating tool exists, `block` removes it, or `guard` rejects the
+arguments), `host-deny` (setup writes host deny rules for the `deny`
+tools), `instruction` (only the agent's instructions hold it). An
+invariant named `no_send` can never be `instruction`.
+
+## Bindings (1.2)
+
+`instance.yaml` binds each capability with one flat line,
+`bind_<capability>: <provider>`. `custom` means the instance's own
+adapter in `custom-adapters/<capability>/` (it may use `block`, never
+`guard`). What the probe discovers — workspace IDs, optional
+attributes — goes in the instance's `bindings/<capability>.md`. A
+capability with no binding is not set up: the agent offers setup's
+tools step instead of calling anything. Credentials stay in the host.
+
+## Guard hook (1.2)
+
+`hooks/guard.sh`, byte-identical to `_template/hooks/guard.sh`, is
+registered in `hooks/hooks.json` as a `PreToolUse` command hook with
+matcher `mcp__.*` and command `"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"`.
+Inside an instance of the agent (source mode included) it refuses any
+tool of a bound adapter's servers whose name contains a `block` entry,
+then runs the adapter's `guard` with `python3`, the hook input on
+stdin. Exit 2 blocks. It fails closed: a missing guard, a missing
+`python3`, a guard crash, or hook input naming two different tools
+blocks the call. Outside an instance it allows everything.
+
+Matching over-covers on purpose, so a name containing `__` cannot hide
+a match: `server_match` is tested (case-insensitive substring) against
+everything after `mcp__` in the tool name, and `block` entries against
+everything after the first `__`.
+
+A guard reads the hook input JSON, exits 2 with one stderr line per
+broken rule, or 0; any internal error must become exit 2. A guard must
+be fast and never wait on the network or a prompt: the host's hook
+timeout lets a call through, so a hanging guard fails open.
+
+## Setup — tools step (1.2)
+
+Setup's tools step binds each capability: pick an adapter (or write a
+custom one), find the matching connected server, run the probe, write
+`bind_<capability>` and `bindings/<capability>.md`, merge deny rules
+into `.claude/settings.json`, and report which capabilities are
+unattended-safe (every invariant at `adapter`, or `host-deny` with its
+rules written). It refuses to bind a `no_send` capability enforced by
+`instruction`. Scheduled runs may use only unattended-safe
+capabilities.
+
 ## Validation
 
 ```bash
@@ -330,3 +412,32 @@ and exits non-zero. Run it before committing any change to an agent
 directory — a change that breaks heading order, frontmatter shape, or
 adapter size is a change that breaks portability, and this script is the
 only thing that catches it before a host does.
+
+For an agent declaring `standard: "1.2"` (or a later 1.x), the validator
+also checks, in addition to the 1.1 rules:
+
+- `hooks/hooks.json` has a `PreToolUse` entry with matcher `mcp__.*`
+  whose command is exactly `"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"`
+  (quoted, as in 1.1).
+- `hooks/guard.sh` exists, is executable, and is byte-identical to the
+  builder's `_template/hooks/guard.sh`.
+- Each name in `capabilities` is `snake_case`, and
+  `capabilities/<name>/contract.md` exists with a `## Operations` table
+  holding at least one backticked operation and a `## Invariants` list
+  holding at least one backticked `snake_case` id.
+- Each capability has at least one adapter folder.
+- Each adapter folder has `adapter.md` and `adapter.yaml`; `capability`
+  and `provider` equal the folder names; `server_match` is non-empty;
+  `server_match`, `block`, and `deny` are plain comma-separated values,
+  not YAML lists.
+- Each adapter has exactly one `enforce_<id>` line per contract
+  invariant, valued `adapter`, `host-deny`, or `instruction`; a
+  `host-deny` level requires a non-empty `deny`; `guard`, when set,
+  names an executable file in that folder.
+- `adapter.md` mentions every operation in backticks and has a
+  `## Probe` section.
+- `no_send` at `instruction` fails: a package may not ship an adapter
+  setup would refuse.
+- A `capabilities/` folder not listed in `capabilities` fails.
+
+A 1.0 or 1.1 agent is checked exactly as before.
