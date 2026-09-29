@@ -13,8 +13,8 @@ bug.
 
 The standard uses semantic versioning: a minor release adds optional
 rules, a major release changes what an agent must do to conform. It
-grows with the builder's sub-projects — 1.0 packaging (this version),
-1.1 instance rules, 1.2 capability contracts and adapters. An agent
+grows with the builder's sub-projects — 1.0 packaging,
+1.1 instance rules (this version), 1.2 capability contracts and adapters. An agent
 declares the version it follows in `agent.yaml`; the validator
 understands `1.x` and fails any other. A folder with no `agent.yaml` is
 a pre-1.0 agent: it is checked by the pre-1.0 rules below only and passes with
@@ -31,7 +31,7 @@ agent-builder/
   STANDARD.md               # the Agent Standard
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
-    agent.yaml              # identity + standard version (1.0)
+    agent.yaml              # identity + standard version (1.1)
     hooks/                  # hooks.json + session-start.sh (1.1)
     migrations/             # <from>-<to>.md upgrade notes (1.1)
     .claude-plugin/         # plugin.json, marketplace.json
@@ -278,13 +278,14 @@ instance (`instance.yaml` with `mode: source` at its root).
 
 ## Entry hook (1.1)
 
-Every 1.1 agent ships `hooks/hooks.json` with one `SessionStart`
+Every 1.1 agent ships `hooks/hooks.json` with at least one `SessionStart`
 command hook, `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"`, and
 `hooks/session-start.sh` byte-identical to `_template/hooks/session-start.sh`.
-It finds the nearest `instance.yaml` above the session folder; if it
-names this agent, it prints where the instance and package live, a
-migration notice when versions differ, and `AGENT.md`. Elsewhere it
-prints nothing.
+It finds the nearest `instance.yaml` above the session folder and stops
+there (it never looks further up); if that file names this agent, it
+prints where the instance and package live, a migration notice when
+versions differ, and `AGENT.md`. A missing or malformed `agent_version`
+suppresses the migration notice. Elsewhere it prints nothing.
 
 ## Setup and start (1.1)
 

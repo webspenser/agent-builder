@@ -373,4 +373,16 @@ make_valid_v11_agent "$FIX/v11-srcinst"; printf '%s\n' 'agent: demo-agent' 'agen
 make_valid_v11_agent "$FIX/v11-pluginst"; printf '%s\n' 'agent: demo-agent' 'mode: plugin' > "$FIX/v11-pluginst/instance.yaml"; assert_fail $V "$FIX/v11-pluginst"
 make_valid_v11_agent "$FIX/v11-wronginst"; printf '%s\n' 'agent: other' 'mode: source' > "$FIX/v11-wronginst/instance.yaml"; assert_fail $V "$FIX/v11-wronginst"
 
+for c in hooks5 hooksnull nounread instdir; do make_valid_v11_agent "$FIX/v11-$c"; done
+printf '%s\n' '{"hooks":{"SessionStart":[{"hooks":5}]}}' > "$FIX/v11-hooks5/hooks/hooks.json"
+echo 'null' > "$FIX/v11-hooksnull/hooks/hooks.json"
+chmod 000 "$FIX/v11-nounread/hooks/session-start.sh"
+mkdir "$FIX/v11-instdir/instance.yaml"
+for c in hooks5 hooksnull nounread instdir; do
+  out=$($V "$FIX/v11-$c" 2>&1); rc=$?
+  if [ "$rc" -eq 1 ] && ! printf '%s\n' "$out" | grep -qE 'Traceback|checker error|crashed'; then
+    _report ok "v11-$c fails cleanly"; else _report no "v11-$c (rc=$rc): $out"; fi
+done
+chmod 644 "$FIX/v11-nounread/hooks/session-start.sh"
+
 finish

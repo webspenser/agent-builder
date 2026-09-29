@@ -63,19 +63,23 @@ def parse_agent_yaml(text):
 def check_v11(root, meta, name):
     """Agent Standard 1.1: entry hook, start/setup skills, migrations, catalog, instance marker."""
     fails = []
-    hooks = None
+    hooks, parsed = None, False
     try:
         hooks = json.loads(read_text(root / "hooks" / "hooks.json"))
+        parsed = True
     except ReadError as err:
         fails.append(f"hooks/hooks.json: {err}")
     except json.JSONDecodeError as err:
         fails.append(f"hooks/hooks.json: not valid JSON ({err.msg}, line {err.lineno})")
-    if hooks is not None:
+    if parsed:
         commands = []
+        if not isinstance(hooks, dict):
+            fails.append("hooks/hooks.json must be a JSON object")
         events = hooks.get("hooks") if isinstance(hooks, dict) else None
         groups = events.get("SessionStart") if isinstance(events, dict) else None
         for group in groups if isinstance(groups, list) else []:
-            for hook in (group.get("hooks") if isinstance(group, dict) else None) or []:
+            inner = group.get("hooks") if isinstance(group, dict) else None
+            for hook in inner if isinstance(inner, list) else []:
                 if isinstance(hook, dict) and hook.get("type") == "command":
                     commands.append(hook.get("command"))
         if HOOK_COMMAND not in commands:
@@ -89,8 +93,14 @@ def check_v11(root, meta, name):
             fails.append("hooks/session-start.sh is not executable")
         if not REFERENCE_HOOK.is_file():
             fails.append(f"validator is missing its reference hook at {REFERENCE_HOOK}")
-        elif script.read_bytes() != REFERENCE_HOOK.read_bytes():
-            fails.append("hooks/session-start.sh differs from the Agent Standard reference copy (_template/hooks/session-start.sh in agent-builder)")
+        else:
+            try:
+                same = script.read_bytes() == REFERENCE_HOOK.read_bytes()
+            except OSError:
+                fails.append("hooks/session-start.sh cannot be read")
+            else:
+                if not same:
+                    fails.append("hooks/session-start.sh differs from the Agent Standard reference copy (_template/hooks/session-start.sh in agent-builder)")
 
     for skill in ("start", "setup"):
         if not (root / "skills" / skill / "SKILL.md").is_file():
@@ -107,7 +117,9 @@ def check_v11(root, meta, name):
         fails.append(f"agent.yaml: catalog_repo '{catalog_repo}' is not owner/repo")
 
     marker = root / "instance.yaml"
-    if marker.is_file():
+    if marker.is_dir():
+        fails.append("instance.yaml must be a file")
+    elif marker.is_file():
         try:
             inst = parse_agent_yaml(read_text(marker))
         except ReadError as err:
