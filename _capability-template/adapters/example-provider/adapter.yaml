@@ -1,0 +1,5 @@
+capability: example_capability
+provider: example-provider
+server_match: example
+block: delete
+enforce_example_invariant: instruction

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent Standard 1.0 manifest checks.
+"""Agent Standard 1.x manifest checks.
 
 Usage: check_manifests.py <agent-dir>
        check_manifests.py --get <key> <agent.yaml | ->
@@ -24,7 +24,16 @@ AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to 
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
 TEMPLATE_NAME = "agent-template"
 HOOK_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"'
-REFERENCE_HOOK = pathlib.Path(__file__).resolve().parents[2] / "_template" / "hooks" / "session-start.sh"
+TEMPLATE_HOOKS = pathlib.Path(__file__).resolve().parents[2] / "_template" / "hooks"
+REFERENCE_HOOK = TEMPLATE_HOOKS / "session-start.sh"
+REFERENCE_GUARD = TEMPLATE_HOOKS / "guard.sh"
+GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
+GUARD_MATCHER = "mcp__.*"
+LEVELS = ("adapter", "host-deny", "instruction")
+SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
+OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
+INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
+GUARD_FILE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")
 IDENTITY_MANIFESTS = (".claude-plugin/plugin.json", "gemini-extension.json", ".codex-plugin/plugin.json")
 ALL_MANIFESTS = IDENTITY_MANIFESTS + (".claude-plugin/marketplace.json",)
 
@@ -68,6 +77,55 @@ class Warn(str):
     """An advisory: printed as WARN, never counted as a failure."""
 
 
+def hook_commands(hooks, event, matcher=None):
+    """Commands of `event`'s command hooks; with `matcher`, only groups whose matcher equals it."""
+    events = hooks.get("hooks") if isinstance(hooks, dict) else None
+    groups = events.get(event) if isinstance(events, dict) else None
+    commands = []
+    for group in groups if isinstance(groups, list) else []:
+        if not isinstance(group, dict) or (matcher is not None and group.get("matcher") != matcher):
+            continue
+        inner = group.get("hooks")
+        for hook in inner if isinstance(inner, list) else []:
+            if isinstance(hook, dict) and hook.get("type") == "command":
+                commands.append(hook.get("command"))
+    return commands
+
+
+def check_reference_script(root, rel, reference):
+    """`rel` exists, is executable, and is byte-identical to the builder's reference copy."""
+    script = root / rel
+    if not script.is_file():
+        return [f"missing {rel}"]
+    fails = []
+    if not os.access(script, os.X_OK):
+        fails.append(f"{rel} is not executable")
+    if not reference.is_file():
+        fails.append(f"validator is missing its reference hook at {reference}")
+        return fails
+    try:
+        same = script.read_bytes() == reference.read_bytes()
+    except OSError:
+        fails.append(f"{rel} cannot be read")
+    else:
+        if not same:
+            fails.append(f"{rel} differs from the Agent Standard reference copy (_template/{rel} in agent-builder)")
+    return fails
+
+
+def section(text, heading):
+    """Lines under `## heading` up to the next `## ` heading, or None when there is no such heading."""
+    lines, found, inside = [], False, False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == heading
+            found = found or inside
+            continue
+        if inside:
+            lines.append(line)
+    return lines if found else None
+
+
 def check_v11(root, meta, name):
     """Agent Standard 1.1: entry hook, start/setup skills, migrations, catalog, instance marker."""
     fails = []
@@ -85,35 +143,13 @@ def check_v11(root, meta, name):
     except json.JSONDecodeError as err:
         fails.append(f"hooks/hooks.json: not valid JSON ({err.msg}, line {err.lineno})")
     if parsed:
-        commands = []
         if not isinstance(hooks, dict):
             fails.append("hooks/hooks.json must be a JSON object")
-        events = hooks.get("hooks") if isinstance(hooks, dict) else None
-        groups = events.get("SessionStart") if isinstance(events, dict) else None
-        for group in groups if isinstance(groups, list) else []:
-            inner = group.get("hooks") if isinstance(group, dict) else None
-            for hook in inner if isinstance(inner, list) else []:
-                if isinstance(hook, dict) and hook.get("type") == "command":
-                    commands.append(hook.get("command"))
+        commands = hook_commands(hooks, "SessionStart")
         if HOOK_COMMAND not in commands:
             fails.append(f"hooks/hooks.json: needs a SessionStart command hook {HOOK_COMMAND}")
 
-    script = root / "hooks" / "session-start.sh"
-    if not script.is_file():
-        fails.append("missing hooks/session-start.sh")
-    else:
-        if not os.access(script, os.X_OK):
-            fails.append("hooks/session-start.sh is not executable")
-        if not REFERENCE_HOOK.is_file():
-            fails.append(f"validator is missing its reference hook at {REFERENCE_HOOK}")
-        else:
-            try:
-                same = script.read_bytes() == REFERENCE_HOOK.read_bytes()
-            except OSError:
-                fails.append("hooks/session-start.sh cannot be read")
-            else:
-                if not same:
-                    fails.append("hooks/session-start.sh differs from the Agent Standard reference copy (_template/hooks/session-start.sh in agent-builder)")
+    fails.extend(check_reference_script(root, "hooks/session-start.sh", REFERENCE_HOOK))
 
     for skill in ("start", "setup"):
         if not (root / "skills" / skill / "SKILL.md").is_file():
@@ -156,6 +192,119 @@ def check_v11(root, meta, name):
     return fails
 
 
+def check_adapter(adir, cap, ops, invariants):
+    """One adapter folder against its capability's contract."""
+    fails = []
+    prefix = f"capabilities/{cap}/adapters/{adir.name}"
+    if not KEBAB.match(adir.name):
+        fails.append(f"{prefix}: adapter folder name is not kebab-case")
+    texts = {}
+    for fname in ("adapter.md", "adapter.yaml"):
+        path = adir / fname
+        if not path.is_file():
+            fails.append(f"missing {prefix}/{fname}")
+            continue
+        try:
+            texts[fname] = read_text(path)
+        except ReadError as err:
+            fails.append(f"{prefix}/{fname}: {err}")
+    if "adapter.yaml" in texts:
+        rel = f"{prefix}/adapter.yaml"
+        ay = parse_agent_yaml(texts["adapter.yaml"])
+        if ay.get("capability") != cap:
+            fails.append(f"{rel}: capability {ay.get('capability')!r} must be {cap!r}")
+        if ay.get("provider") != adir.name:
+            fails.append(f"{rel}: provider {ay.get('provider')!r} must be {adir.name!r}")
+        if not ay.get("server_match") and not re.search(r"(?m)^server_match:\s*(#.*)?$", texts["adapter.yaml"]):
+            fails.append(f"{rel}: missing server_match")
+        # The guard reads these as flat scalars; a YAML list would be silently ignored (fail open).
+        for key in ("server_match", "block", "deny"):
+            value = ay.get(key, "")
+            empty = re.search(rf"(?m)^{key}:\s*(#.*)?$", texts["adapter.yaml"])
+            if "[" in value or "]" in value or empty:
+                fails.append(f"{rel}: {key} must be a plain comma-separated value, not a YAML list")
+        levels = {k[len("enforce_"):]: v for k, v in ay.items() if k.startswith("enforce_")}
+        for inv in sorted(invariants - levels.keys()):
+            fails.append(f"{rel}: missing enforce_{inv}")
+        for inv in sorted(levels.keys() - invariants):
+            fails.append(f"{rel}: enforce_{inv} names no invariant in the contract")
+        for inv, level in sorted(levels.items()):
+            if level not in LEVELS:
+                fails.append(f"{rel}: enforce_{inv} must be adapter, host-deny, or instruction")
+        if "host-deny" in levels.values() and not ay.get("deny"):
+            fails.append(f"{rel}: host-deny needs a deny list of tool names")
+        if levels.get("no_send") == "instruction":
+            fails.append(f"{rel}: no_send cannot be enforced by instruction")
+        guard = ay.get("guard")
+        if guard:
+            if not GUARD_FILE.match(guard):
+                fails.append(f"{rel}: guard '{guard}' must be a file name in the adapter folder")
+            elif not (adir / guard).is_file():
+                fails.append(f"{rel}: guard {guard} does not exist")
+            elif not os.access(adir / guard, os.X_OK):
+                fails.append(f"{prefix}/{guard} is not executable")
+    if "adapter.md" in texts:
+        rel = f"{prefix}/adapter.md"
+        for op in ops:
+            if f"`{op}`" not in texts["adapter.md"]:
+                fails.append(f"{rel}: does not map operation `{op}`")
+        if section(texts["adapter.md"], "Probe") is None:
+            fails.append(f"{rel}: needs a ## Probe section")
+    return fails
+
+
+def check_capability(root, cap):
+    """capabilities/<cap>/contract.md and every adapter under it."""
+    base = root / "capabilities" / cap
+    rel = f"capabilities/{cap}/contract.md"
+    if not (base / "contract.md").is_file():
+        return [f"missing {rel}"]
+    try:
+        text = read_text(base / "contract.md")
+    except ReadError as err:
+        return [f"{rel}: {err}"]
+    fails = []
+    ops = [m.group(1) for line in section(text, "Operations") or [] for m in [OPERATION.match(line)] if m]
+    invariants = [m.group(1) for line in section(text, "Invariants") or [] for m in [INVARIANT.match(line)] if m]
+    if not ops:
+        fails.append(f"{rel}: needs a ## Operations table with at least one `operation` in its first column")
+    if not invariants:
+        fails.append(f"{rel}: needs a ## Invariants list with at least one `invariant_id`")
+    for inv in invariants:
+        if not SNAKE.match(inv):
+            fails.append(f"{rel}: invariant '{inv}' is not snake_case")
+    folder = base / "adapters"
+    adapters = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+    if not adapters:
+        fails.append(f"capabilities/{cap}: needs at least one adapter in adapters/")
+    for adir in adapters:
+        fails.extend(check_adapter(adir, cap, ops, set(invariants)))
+    return fails
+
+
+def check_v12(root, meta):
+    """Agent Standard 1.2: guard hook, capability contracts, adapters."""
+    fails = []
+    try:
+        hooks = json.loads(read_text(root / "hooks" / "hooks.json"))
+    except (ReadError, json.JSONDecodeError):
+        hooks = None  # already reported by check_v11
+    if hooks is not None and GUARD_COMMAND not in hook_commands(hooks, "PreToolUse", GUARD_MATCHER):
+        fails.append(f"hooks/hooks.json: needs a PreToolUse command hook {GUARD_COMMAND} with matcher {GUARD_MATCHER}")
+    fails.extend(check_reference_script(root, "hooks/guard.sh", REFERENCE_GUARD))
+    caps = [c.strip() for c in meta.get("capabilities", "").split(",") if c.strip()]
+    for cap in caps:
+        if not SNAKE.match(cap):
+            fails.append(f"agent.yaml: capability '{cap}' is not snake_case")
+            continue
+        fails.extend(check_capability(root, cap))
+    folder = root / "capabilities"
+    if folder.is_dir():
+        for d in sorted(folder.iterdir()):
+            if d.is_dir() and d.name not in caps:
+                fails.append(f"capabilities/{d.name} is not listed in agent.yaml capabilities")
+    return fails
+
 def check(root):
     fails = []
     try:
@@ -173,8 +322,11 @@ def check(root):
         fails.append(f"agent.yaml: version '{version}' is not MAJOR.MINOR.PATCH")
     if std and not SUPPORTED_STANDARD.match(std):
         fails.append(f"agent.yaml: standard '{std}' is not supported (this validator understands 1.x)")
-    if std and SUPPORTED_STANDARD.match(std) and int(std.split(".")[1]) >= 1:
+    minor = int(std.split(".")[1]) if std and SUPPORTED_STANDARD.match(std) else 0
+    if minor >= 1:
         fails.extend(check_v11(root, meta, name))
+    if minor >= 2:
+        fails.extend(check_v12(root, meta))
 
     manifests = {}
     for rel in ALL_MANIFESTS:
