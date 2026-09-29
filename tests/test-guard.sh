@@ -96,6 +96,7 @@ run_guard "$S" "$(call mcp__democrm__delete-record)"; expect 2 "path with spaces
 # A server name containing __ still matches; the block applies to the real tool name.
 run_guard "$I" "$(call mcp__x__DemoCRM__delete-record)"; expect 2 "server name containing __ matches" "delete-record is blocked"
 run_guard "$I" "$(call mcp__x__DemoCRM__update-record)"; expect 0 "server containing __, allowed tool passes"
+run_guard "$I" "$(call mcp__democrm__delete__record)";   expect 2 "tool name containing __ still blocked" "delete__record is blocked"
 
 # Invalid guard name in a bound adapter blocks.
 BAD="$PKG/capabilities/crm/adapters/bad"; mkdir -p "$BAD"
