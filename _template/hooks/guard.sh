@@ -41,8 +41,8 @@ names=$(printf '%s' "$input" | tr '\n' ' ' \
 tool=$names
 case "$tool" in mcp__?*__?*) ;; *) exit 0 ;; esac
 rest=${tool#mcp__}
-server_lc=$(lower "${rest%%__*}")
-tname=${rest#*__}
+server_lc=$(lower "${rest%__*}")  # everything before the last __, so a server name may contain __
+tname=${rest##*__}
 tname_lc=$(lower "$tname")
 show_tool=$(printf '%s' "$tname" | tr -d '\000-\037')
 

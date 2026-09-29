@@ -93,6 +93,22 @@ run_guard "$O" "$(call mcp__democrm__delete-record)"; expect 0 "another agent's 
 S="$W/with space/inst"; mkdir -p "$S"; cp "$I/instance.yaml" "$S/"
 run_guard "$S" "$(call mcp__democrm__delete-record)"; expect 2 "path with spaces"
 
+# A server name containing __ still matches; the block applies to the real tool name.
+run_guard "$I" "$(call mcp__x__DemoCRM__delete-record)"; expect 2 "server name containing __ matches" "delete-record is blocked"
+run_guard "$I" "$(call mcp__x__DemoCRM__update-record)"; expect 0 "server containing __, allowed tool passes"
+
+# Invalid guard name in a bound adapter blocks.
+BAD="$PKG/capabilities/crm/adapters/bad"; mkdir -p "$BAD"
+printf '%s\n' 'capability: crm' 'provider: bad' 'server_match: badcrm' 'guard: ../x.py' > "$BAD/adapter.yaml"
+B="$W/badinst"; mkdir -p "$B"
+printf '%s\n' 'agent: demo-agent' 'bind_crm: bad' > "$B/instance.yaml"
+run_guard "$B" "$(call mcp__badcrm__update-record)"; expect 2 "invalid guard name blocks" "invalid guard"
+
+# Bound provider with no adapter.yaml: allowed, with a note on stderr.
+G="$W/ghostinst"; mkdir -p "$G"
+printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' > "$G/instance.yaml"
+run_guard "$G" "$(call mcp__democrm__update-record)"; expect 0 "missing adapter.yaml allowed" "no adapter.yaml"
+
 # Source mode: no CLAUDE_PLUGIN_ROOT; the package root is the script's parent folder.
 mkdir -p "$PKG/hooks"; cp "$GUARD" "$PKG/hooks/guard.sh"
 printf '%s\n' 'agent: demo-agent' 'mode: source' 'bind_crm: demo' > "$PKG/instance.yaml"
