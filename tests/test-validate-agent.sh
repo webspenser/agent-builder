@@ -507,4 +507,11 @@ fails_with "$FIX/v12-blocklist" "$AD/adapter.yaml: block must be a plain comma-s
 make_valid_v12_agent "$FIX/v12-blockseq"; sed -i.bak 's/^block: .*/block:/' "$FIX/v12-blockseq/$AD/adapter.yaml"; printf '%s\n' '  - send' >> "$FIX/v12-blockseq/$AD/adapter.yaml"
 fails_with "$FIX/v12-blockseq" "$AD/adapter.yaml: block must be a plain comma-separated value, not a YAML list"
 
+# The capability skeleton validates once copied into an agent under its own names.
+make_valid_v12_agent "$FIX/v12-skel"
+mkdir -p "$FIX/v12-skel/capabilities/example_capability"
+cp -R _capability-template/. "$FIX/v12-skel/capabilities/example_capability/"
+sed -i.bak 's/^capabilities: .*/capabilities: crm, example_capability/' "$FIX/v12-skel/agent.yaml"
+assert_pass $V "$FIX/v12-skel"
+
 finish
