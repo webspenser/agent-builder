@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Agent Standard 1.2 guard hook — identical in every agent.
-# PreToolUse hook for MCP tools. Inside an instance of this agent, applies each
-# bound adapter's rules to calls on the servers it matches: a tool whose name
-# contains one of the adapter's `block` entries is refused, then the adapter's
-# guard (package adapters only) inspects the call. Exit 2 blocks the call and
+# Agent Standard guard hook — identical in every agent.
+# PreToolUse hook for MCP tools. Inside an instance of this agent, every bound
+# adapter whose server_match appears in the tool name gets its guard policy
+# (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the call and
 # shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
@@ -40,16 +39,12 @@ names=$(printf '%s' "$input" | tr '\n' ' ' \
 [ "$(printf '%s\n' "$names" | grep -c .)" -eq 1 ] || block "the hook input names more than one tool"
 tool=$names
 case "$tool" in mcp__?*__?*) ;; *) exit 0 ;; esac
-rest=${tool#mcp__}
-server_lc=$(lower "$rest")  # server and tool names may both contain __, so the split is
-tname=${rest#*__}           # ambiguous: match the server on the whole, block on all after the first __
-tname_lc=$(lower "$tname")
-show_tool=$(printf '%s' "$tname" | tr -d '\000-\037')
+rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match on the whole
 
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in bind_*) ;; *) continue ;; esac
-  # Each line supplies its own key and value (same stripping as yaml_get), so a
-  # repeated bind_ key still applies every adapter.
+  # Each line supplies its own key and value, so a repeated bind_ key still
+  # applies every adapter.
   key=$(printf '%s' "${line%%:*}" | sed 's/[[:space:]]*$//')
   case "$line" in *:*) raw=${line#*:} ;; *) raw="" ;; esac
   provider=$(lower "$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' \
@@ -73,22 +68,16 @@ while IFS= read -r line || [ -n "$line" ]; do
   fi
   match=$(lower "$(yaml_get "$adir/adapter.yaml" server_match)")
   [ -n "$match" ] || continue
-  case "$server_lc" in *"$match"*) ;; *) continue ;; esac
-  IFS=, read -r -a subs <<< "$(yaml_get "$adir/adapter.yaml" block)"
-  for sub in "${subs[@]}"; do
-    sub=$(lower "$(printf '%s' "$sub" | tr -d '[:space:]')")
-    [ -n "$sub" ] || continue
-    case "$tname_lc" in *"$sub"*) block "$show_tool is blocked for $cap ($provider adapter)" ;; esac
-  done
-  [ "$provider" = custom ] && continue  # never execute code from an instance folder
-  guard=$(yaml_get "$adir/adapter.yaml" guard)
-  [ -n "$guard" ] || continue
-  case "$guard" in .*|*/*|*[!A-Za-z0-9._-]*) block "the $provider adapter for $cap names an invalid guard" ;; esac
-  [ -f "$adir/$guard" ] || block "the $provider guard for $cap is missing"
-  command -v python3 >/dev/null 2>&1 || block "python3 is required to run the $provider guard for $cap"
-  printf '%s' "$input" | python3 "$adir/$guard"; rc=$?
+  case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
+  [ -f "$adir/guard.yaml" ] || continue  # no policy: this adapter's invariants are instruction-only
+  engine="$root/hooks/guard_policy.py"
+  [ -f "$engine" ] || block "the guard policy engine is missing from $name"
+  command -v python3 >/dev/null 2>&1 || block "python3 is required to run the $provider guard policy for $cap"
+  bfile="$instance/bindings/$cap.md"
+  [ -f "$bfile" ] || bfile=-
+  printf '%s' "$input" | python3 "$engine" "$adir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)"; rc=$?
   [ "$rc" -eq 0 ] && continue
   [ "$rc" -eq 2 ] && exit 2
-  block "the $provider guard for $cap failed (exit $rc)"
+  block "the $provider guard policy for $cap failed (exit $rc)"
 done < "$instance/instance.yaml"
 exit 0

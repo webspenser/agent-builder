@@ -1,34 +1,30 @@
 #!/usr/bin/env bash
-# Behavior of the Agent Standard 1.2 guard hook (_template/hooks/guard.sh).
+# Behavior of the Agent Standard guard hook (_template/hooks/guard.sh).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source tests/lib.sh
 GUARD="$PWD/_template/hooks/guard.sh"
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-PKG="$W/pkg"; AD="$PKG/capabilities/crm/adapters/demo"; mkdir -p "$AD"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "1.2"' > "$PKG/agent.yaml"
-printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: DemoCRM' 'block: delete, merge' 'guard: guard.py' \
-  'enforce_draft_only: adapter' > "$AD/adapter.yaml"
-cat > "$AD/guard.py" <<'EOF'
-import sys
-data = sys.stdin.read()
-if "FORBIDDEN" in data:
-    print("demo guard: FORBIDDEN value", file=sys.stderr)
-    sys.exit(2)
-if "CRASH" in data:
-    sys.exit(1)
-EOF
-chmod 755 "$AD/guard.py"
+PKG="$W/pkg"; AD="$PKG/capabilities/crm/adapters/demo"; mkdir -p "$AD" "$PKG/hooks"
+cp _template/hooks/guard_policy.py "$PKG/hooks/"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "2.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: DemoCRM' > "$AD/adapter.yaml"
+write_policy() {
+  printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
+    'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+    'rules:' '  - field: status' '    update: [voided]' > "$AD/guard.yaml"
+}
+write_policy
 
 I="$W/inst"; mkdir -p "$I/sub"
-printf '%s\n' 'agent: demo-agent' 'agent_version: 1.0.0' 'standard: "1.2"' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
+printf '%s\n' 'agent: demo-agent' 'agent_version: 1.0.0' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
 
 call() { # call <tool_name> [tool_input JSON] — hook input on one line
   local args=${2:-}; [ -n "$args" ] || args='{}'
   printf '{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"%s","tool_input":%s}' "$1" "$args"
 }
-run_guard() { # run_guard <project dir> <input> — output (stdout+stderr) in $OUT, exit code in $RC
+run_guard() { # run_guard <project dir> <input> — output in $OUT, exit code in $RC
   OUT=$(printf '%s' "$2" | CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$1" bash "$GUARD" 2>&1); RC=$?
 }
 expect() { # expect <rc> <label> [text the output must contain]
@@ -36,98 +32,84 @@ expect() { # expect <rc> <label> [text the output must contain]
     _report ok "$2"; else _report no "$2 (rc=$RC): $OUT"; fi
 }
 
-run_guard "$I" "$(call Bash '{"command":"ls"}')";                 expect 0 "non-MCP tool allowed"
-run_guard "$W" "$(call mcp__claude_ai_DemoCRM__delete-record)";   expect 0 "no instance: allowed"
-run_guard "$I" "$(call mcp__other__delete-record)";               expect 0 "unbound server allowed"
+echo "-- scope"
+run_guard "$I" "$(call Bash '{"command":"ls"}')";                expect 0 "non-MCP tool allowed"
+run_guard "$W" "$(call mcp__claude_ai_DemoCRM__delete-record)";  expect 0 "no instance: allowed"
+run_guard "$I" "$(call mcp__other__delete-record)";              expect 0 "unbound server allowed"
+O="$W/other"; mkdir -p "$O"; printf '%s\n' 'agent: someone-else' 'bind_crm: demo' > "$O/instance.yaml"
+run_guard "$O" "$(call mcp__democrm__delete-record)";            expect 0 "another agent's instance allowed"
+
+echo "-- policy enforcement"
 run_guard "$I" "$(call mcp__claude_ai_DemoCRM__delete-record)"
-expect 2 "blocked tool on matched server" "Blocked by demo-agent guard: delete-record is blocked for crm (demo adapter)"
-run_guard "$I" "$(call mcp__democrm__merge-records)";             expect 2 "server match is case-insensitive"
-run_guard "$I/sub" "$(call mcp__democrm__merge-records)";         expect 2 "found from a subfolder"
-run_guard "$I" "$(call mcp__democrm__update-record '{"v":"ok"}')"; expect 0 "allowed call passes the guard"
-run_guard "$I" "$(call mcp__democrm__update-record '{"v":"FORBIDDEN"}')"
-expect 2 "guard exit 2 blocks with its message" "demo guard: FORBIDDEN value"
-run_guard "$I" "$(call mcp__democrm__update-record '{"v":"CRASH"}')"
-expect 2 "guard crash blocks" "failed (exit 1)"
-run_guard "$I" "$(call mcp__other__update-record '{"v":"FORBIDDEN"}')"; expect 0 "guard not run for other servers"
+expect 2 "denied tool blocked" "Blocked by demo-agent guard policy (crm/demo): delete-record is denied"
+run_guard "$I" "$(call mcp__democrm__merge-records)";            expect 2 "server match is case-insensitive"
+run_guard "$I/sub" "$(call mcp__democrm__merge-records)";        expect 2 "found from a subfolder"
+run_guard "$I" "$(call mcp__x__DemoCRM__delete-record)";         expect 2 "server containing __ still matches"
+run_guard "$I" "$(call mcp__democrm__delete__record)";           expect 2 "tool containing __ still denied"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 0 "allowed tool passes"
+run_guard "$I" "$(call mcp__democrm__drop-table)";               expect 2 "tool outside allow blocked" "is not in the allow list"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"status":"sent"}}')"; expect 2 "field rule enforced" "status may only be written as voided on update"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"status":"voided"}}')"; expect 0 "field rule allows voided"
 
-# Two different tool names (one hidden in tool_input) block.
-run_guard "$I" "$(call mcp__other__x '{"tool_name":"mcp__democrm__delete-record"}')"
-expect 2 "two tool names block" "more than one tool"
-# An escaped "tool_name" inside a string is not a second name.
-run_guard "$I" "$(call mcp__other__x '{"note":"say \"tool_name\": \"y\""}')"; expect 0 "escaped tool_name ignored"
+echo "-- tool name input"
+run_guard "$I" "$(call mcp__other__x '{"tool_name":"mcp__democrm__delete-record"}')"; expect 2 "two tool names block" "more than one tool"
+run_guard "$I" "$(call mcp__other__x '{"note":"say \"tool_name\": \"y\""}')";         expect 0 "escaped tool_name ignored"
 
-# Guard file missing.
-mv "$AD/guard.py" "$AD/guard.bak"
-run_guard "$I" "$(call mcp__democrm__update-record)"; expect 2 "missing guard blocks" "is missing"
-run_guard "$I" "$(call mcp__other__update-record)";   expect 0 "missing guard: other servers allowed"
-mv "$AD/guard.bak" "$AD/guard.py"
-
-# python3 absent from PATH.
-BIN="$W/bin"; mkdir -p "$BIN"
-for t in bash cat sed head tr grep sort dirname cut; do ln -s "$(command -v "$t")" "$BIN/$t"; done
-OUT=$(printf '%s' "$(call mcp__democrm__update-record)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
-expect 2 "no python3 blocks" "python3 is required"
-OUT=$(printf '%s' "$(call mcp__other__update-record)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
-expect 0 "no python3: other servers allowed"
-
-# Custom adapter: block applies, guard never runs.
-C="$W/custom"; mkdir -p "$C/custom-adapters/crm"
-printf '%s\n' 'agent: demo-agent' 'agent_version: 1.0.0' 'mode: plugin' 'bind_crm: custom' > "$C/instance.yaml"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' 'block: delete' 'guard: evil.py' > "$C/custom-adapters/crm/adapter.yaml"
-printf '%s\n' 'import pathlib' "pathlib.Path('$W/EVIL-RAN').touch()" > "$C/custom-adapters/crm/evil.py"
-run_guard "$C" "$(call mcp__democrm__update-record)"
-[ "$RC" -eq 0 ] && [ ! -e "$W/EVIL-RAN" ] && _report ok "custom guard never runs" || _report no "custom guard ran or blocked (rc=$RC): $OUT"
-run_guard "$C" "$(call mcp__democrm__delete-record)"; expect 2 "custom block applies"
-
-# Hostile binding lines are unreadable: the call is blocked and nothing executes.
+echo "-- bindings"
+PL="$PKG/capabilities/email/adapters/plain"; mkdir -p "$PL"
+printf '%s\n' 'capability: email' 'provider: plain' 'server_match: plainmail' > "$PL/adapter.yaml"
+P2="$W/plain"; mkdir -p "$P2"; printf '%s\n' 'agent: demo-agent' 'bind_email: plain' > "$P2/instance.yaml"
+run_guard "$P2" "$(call mcp__plainmail__send_message)";          expect 0 "adapter without guard.yaml: instruction-only, allowed"
+G2="$W/ghost"; mkdir -p "$G2"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' > "$G2/instance.yaml"
+run_guard "$G2" "$(call mcp__democrm__delete-record)";           expect 0 "missing adapter.yaml: allowed with a note" "no adapter.yaml"
+R="$W/repeat"; mkdir -p "$R"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' 'bind_crm: demo' > "$R/instance.yaml"
+run_guard "$R" "$(call mcp__democrm__delete-record)";            expect 2 "repeated bind_ key applies every adapter"
+SP="$W/spaced"; mkdir -p "$SP"; printf '%s\n' 'agent: demo-agent' 'bind_crm : "Demo"  # note' > "$SP/instance.yaml"
+run_guard "$SP" "$(call mcp__democrm__delete-record)";           expect 2 "spaced colon, quoted uppercase provider"
 H="$W/hostile"; mkdir -p "$H"
 printf '%s\n' 'agent: demo-agent' 'bind_crm: ../../x' 'bind_$(touch PWNED): demo' > "$H/instance.yaml"
-run_guard "$H" "$(call mcp__democrm__delete-record)"
-[ "$RC" -eq 2 ] && [ ! -e PWNED ] && [ ! -e "$H/PWNED" ] && printf '%s\n' "$OUT" | grep -qF "binding line it cannot read" \
-  && _report ok "hostile bindings block, nothing runs" || _report no "hostile bindings (rc=$RC): $OUT"
+run_guard "$H" "$(call mcp__democrm__list-records)"
+[ "$RC" -eq 2 ] && [ ! -e PWNED ] && [ ! -e "$H/PWNED" ] && printf '%s' "$OUT" | grep -qF "cannot read" \
+  && _report ok "unreadable binding blocks, nothing executed" || _report no "hostile bindings (rc=$RC): $OUT"
 
-# A repeated bind_ key: every line applies its own adapter.
-HA="$PKG/capabilities/crm/adapters/harmless"; mkdir -p "$HA"
-printf '%s\n' 'capability: crm' 'provider: harmless' 'server_match: harmlesscrm' > "$HA/adapter.yaml"
-R="$W/repeat"; mkdir -p "$R"
-printf '%s\n' 'agent: demo-agent' 'bind_crm: harmless' 'bind_crm: demo' > "$R/instance.yaml"
-run_guard "$R" "$(call mcp__democrm__update-record '{"v":"FORBIDDEN"}')"
-expect 2 "repeated bind_ key: second adapter's guard runs" "demo guard: FORBIDDEN value"
+echo "-- field IDs from bindings"
+printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+  'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
+mkdir -p "$I/bindings"; printf '%s\n' 'field_status: fldS' > "$I/bindings/crm.md"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"voided"}}')"; expect 0 "binding ID recognized"
+run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "binding ID enforced"
+rm -r "$I/bindings"; write_policy
 
-# Spaced colon, uppercase provider, quotes and comment are normalized.
-SP="$W/spaced"; mkdir -p "$SP"
-printf '%s\n' 'agent: demo-agent' 'bind_crm : Demo' > "$SP/instance.yaml"
-run_guard "$SP" "$(call mcp__democrm__delete-record)"; expect 2 "spaced colon and uppercase provider block" "delete-record is blocked"
-printf '%s\n' 'agent: demo-agent' "bind_crm: 'DEMO'  # note" > "$SP/instance.yaml"
-run_guard "$SP" "$(call mcp__democrm__delete-record)"; expect 2 "quoted provider with comment block" "delete-record is blocked"
+echo "-- custom adapters"
+C="$W/custom"; mkdir -p "$C/custom-adapters/crm"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$C/instance.yaml"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$C/custom-adapters/crm/adapter.yaml"
+printf '%s\n' 'covers: [draft_only]' 'allow: [list-*]' > "$C/custom-adapters/crm/guard.yaml"
+printf '%s\n' 'import pathlib' "pathlib.Path('$W/EVIL-RAN').touch()" > "$C/custom-adapters/crm/guard.py"
+run_guard "$C" "$(call mcp__democrm__drop-table)";               expect 2 "custom policy enforced" "is not in the allow list"
+run_guard "$C" "$(call mcp__democrm__list-records)"
+[ "$RC" -eq 0 ] && [ ! -e "$W/EVIL-RAN" ] && _report ok "no code from the instance runs" || _report no "instance code ran (rc=$RC): $OUT"
 
-# Another agent's instance: allowed.
-O="$W/other"; mkdir -p "$O"; printf '%s\n' 'agent: someone-else' 'bind_crm: demo' > "$O/instance.yaml"
-run_guard "$O" "$(call mcp__democrm__delete-record)"; expect 0 "another agent's instance allowed"
+echo "-- fail closed"
+mv "$PKG/hooks/guard_policy.py" "$W/gp.bak"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "engine missing blocks" "engine is missing"
+run_guard "$I" "$(call mcp__other__list-records)";               expect 0 "engine missing: other servers allowed"
+mv "$W/gp.bak" "$PKG/hooks/guard_policy.py"
+BIN="$W/bin"; mkdir -p "$BIN"
+for t in bash cat sed head tr grep sort dirname cut; do ln -s "$(command -v "$t")" "$BIN/$t"; done
+OUT=$(printf '%s' "$(call mcp__democrm__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
+expect 2 "no python3 blocks" "python3 is required"
+OUT=$(printf '%s' "$(call mcp__other__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
+expect 0 "no python3: other servers allowed"
+printf '%s\n' 'covers: [draft_only]' 'allow: [list-*' > "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "invalid policy blocks" "cannot check this call"
+write_policy
 
-# Spaces in paths.
+echo "-- paths"
 S="$W/with space/inst"; mkdir -p "$S"; cp "$I/instance.yaml" "$S/"
-run_guard "$S" "$(call mcp__democrm__delete-record)"; expect 2 "path with spaces"
-
-# A server name containing __ still matches; the block applies to the real tool name.
-run_guard "$I" "$(call mcp__x__DemoCRM__delete-record)"; expect 2 "server name containing __ matches" "delete-record is blocked"
-run_guard "$I" "$(call mcp__x__DemoCRM__update-record)"; expect 0 "server containing __, allowed tool passes"
-run_guard "$I" "$(call mcp__democrm__delete__record)";   expect 2 "tool name containing __ still blocked" "delete__record is blocked"
-
-# Invalid guard name in a bound adapter blocks.
-BAD="$PKG/capabilities/crm/adapters/bad"; mkdir -p "$BAD"
-printf '%s\n' 'capability: crm' 'provider: bad' 'server_match: badcrm' 'guard: ../x.py' > "$BAD/adapter.yaml"
-B="$W/badinst"; mkdir -p "$B"
-printf '%s\n' 'agent: demo-agent' 'bind_crm: bad' > "$B/instance.yaml"
-run_guard "$B" "$(call mcp__badcrm__update-record)"; expect 2 "invalid guard name blocks" "invalid guard"
-
-# Bound provider with no adapter.yaml: allowed, with a note on stderr.
-G="$W/ghostinst"; mkdir -p "$G"
-printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' > "$G/instance.yaml"
-run_guard "$G" "$(call mcp__democrm__update-record)"; expect 0 "missing adapter.yaml allowed" "no adapter.yaml"
-
-# Source mode: no CLAUDE_PLUGIN_ROOT; the package root is the script's parent folder.
-mkdir -p "$PKG/hooks"; cp "$GUARD" "$PKG/hooks/guard.sh"
+run_guard "$S" "$(call mcp__democrm__delete-record)";            expect 2 "path with spaces"
+cp "$GUARD" "$PKG/hooks/guard.sh"
 printf '%s\n' 'agent: demo-agent' 'mode: source' 'bind_crm: demo' > "$PKG/instance.yaml"
 OUT=$(printf '%s' "$(call mcp__democrm__delete-record)" | env -u CLAUDE_PLUGIN_ROOT CLAUDE_PROJECT_DIR="$PKG" bash "$PKG/hooks/guard.sh" 2>&1); RC=$?
 expect 2 "source mode guards"
