@@ -18,7 +18,8 @@ for d in */; do  # _template/ is matched here
   bin/validate-agent.sh "$d" || STATUS=1
 done
 
-echo "== template is Agent Standard 1.0"
+echo "== template is Agent Standard 1.1"
+if ! grep -q '^standard: "1.1"' _template/agent.yaml; then echo "FAIL: _template is not 1.1"; STATUS=1; fi
 TEMPLATE_OUTPUT=$(bin/validate-agent.sh _template 2>&1)
 if echo "$TEMPLATE_OUTPUT" | grep -q '^WARN:'; then
   echo "FAIL: _template is still pre-1.0"; STATUS=1

@@ -40,6 +40,12 @@ distributable, then the agent section by section — writes the files as
 it goes, and finishes when the validator passes. Personal agents are
 for you alone; distributable agents are ones others install.
 
+## Instances
+
+Installed agents keep your data in your own folder, not in the agent.
+Run `/<agent>:setup` in an empty folder; opening your host there loads
+the agent.
+
 ## Validate
 
     /agent-builder:validate-agent            # inside the host

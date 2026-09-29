@@ -35,7 +35,8 @@ The template lives at `_template/` in this plugin's root
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "1.0"`. Set the same name, version, and description in
+   `standard: "1.1"`. The template is Agent Standard 1.1: keep `hooks/`
+   exactly as copied (the validator checks it byte for byte). Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
@@ -62,6 +63,8 @@ The template lives at `_template/` in this plugin's root
      allowed, Stop conditions, Handoff, Inline fallback) and
      frontmatter `name` and `description`.
    - Guardrails / never do, and Escalate to human when.
+   - Interview — which skill gathers the user's context; replace
+     `<interview-skill>` in `skills/setup/SKILL.md` with its name.
    Fill the Sub-agents and Skills tables in `AGENT.md` to match.
 6. **Evals.** Write at least three cases in `evals/cases.md`, each a
    thing the agent must refuse or never do, in the form Given / Expect
@@ -72,14 +75,15 @@ The template lives at `_template/` in this plugin's root
 8. **Validate.** Run `bash <validator> <folder>`. Fix every `FAIL:`
    line and run it again until it prints `OK`.
 9. **Finish.**
-   - Personal: offer to fill the `context/` files now by interviewing
-     the user with each file's bracketed prompts, writing their
-     answers in place.
+   - Personal: run `setup` in source mode: write `instance.yaml` at the
+     agent folder with `mode: source`, then run the interview to fill
+     `context/` in place.
    - Distributable: offer `git init` and a first commit; explain
      publishing — push to a GitHub repo, enable "Template repository" in
      its settings so others can copy it without forking, and list it in
      a catalog — Webspenser's is `webspenser/agent-library`; its README
-     says how to add a plugin. Every later change bumps `version` in
+     says how to add a plugin. If you publish to a catalog, set
+     `catalog` and `catalog_repo` in `agent.yaml`. Every later change bumps `version` in
      `agent.yaml` and all four host manifests.
 
 ## Worked example (abridged)
