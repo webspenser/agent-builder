@@ -3,12 +3,14 @@
 
 Usage: check_manifests.py <agent-dir>
        check_manifests.py --get <key> <agent.yaml | ->
-The first form prints one 'FAIL: <message>' line per problem and exits 0;
-bin/validate-agent.sh counts the lines and treats any other exit status as
-a crash. The second prints one parsed top-level value from agent.yaml (or
+The first form prints one 'FAIL: <message>' line per problem and one
+'WARN: <message>' line per advisory, and exits 0; bin/validate-agent.sh
+counts the FAIL lines, passes WARN lines through uncounted, and treats any
+other exit status as a crash. The second prints one parsed top-level value from agent.yaml (or
 stdin, with '-'), or nothing when the key is absent.
 """
 import json
+import os
 import pathlib
 import re
 import sys
@@ -17,6 +19,12 @@ REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 SUPPORTED_STANDARD = re.compile(r"^1\.\d+$")
+REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
+SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
+TEMPLATE_NAME = "agent-template"
+HOOK_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"'
+REFERENCE_HOOK = pathlib.Path(__file__).resolve().parents[2] / "_template" / "hooks" / "session-start.sh"
 IDENTITY_MANIFESTS = (".claude-plugin/plugin.json", "gemini-extension.json", ".codex-plugin/plugin.json")
 ALL_MANIFESTS = IDENTITY_MANIFESTS + (".claude-plugin/marketplace.json",)
 
@@ -56,6 +64,98 @@ def parse_agent_yaml(text):
     return data
 
 
+class Warn(str):
+    """An advisory: printed as WARN, never counted as a failure."""
+
+
+def check_v11(root, meta, name):
+    """Agent Standard 1.1: entry hook, start/setup skills, migrations, catalog, instance marker."""
+    fails = []
+    agent_md = root / "AGENT.md"
+    if agent_md.is_file():
+        size = agent_md.stat().st_size
+        if size > AGENT_MD_INLINE_MAX:
+            fails.append(Warn(f"AGENT.md is {size} bytes; the entry hook will point the model at the file instead of inlining it"))
+    hooks, parsed = None, False
+    try:
+        hooks = json.loads(read_text(root / "hooks" / "hooks.json"))
+        parsed = True
+    except ReadError as err:
+        fails.append(f"hooks/hooks.json: {err}")
+    except json.JSONDecodeError as err:
+        fails.append(f"hooks/hooks.json: not valid JSON ({err.msg}, line {err.lineno})")
+    if parsed:
+        commands = []
+        if not isinstance(hooks, dict):
+            fails.append("hooks/hooks.json must be a JSON object")
+        events = hooks.get("hooks") if isinstance(hooks, dict) else None
+        groups = events.get("SessionStart") if isinstance(events, dict) else None
+        for group in groups if isinstance(groups, list) else []:
+            inner = group.get("hooks") if isinstance(group, dict) else None
+            for hook in inner if isinstance(inner, list) else []:
+                if isinstance(hook, dict) and hook.get("type") == "command":
+                    commands.append(hook.get("command"))
+        if HOOK_COMMAND not in commands:
+            fails.append(f"hooks/hooks.json: needs a SessionStart command hook {HOOK_COMMAND}")
+
+    script = root / "hooks" / "session-start.sh"
+    if not script.is_file():
+        fails.append("missing hooks/session-start.sh")
+    else:
+        if not os.access(script, os.X_OK):
+            fails.append("hooks/session-start.sh is not executable")
+        if not REFERENCE_HOOK.is_file():
+            fails.append(f"validator is missing its reference hook at {REFERENCE_HOOK}")
+        else:
+            try:
+                same = script.read_bytes() == REFERENCE_HOOK.read_bytes()
+            except OSError:
+                fails.append("hooks/session-start.sh cannot be read")
+            else:
+                if not same:
+                    fails.append("hooks/session-start.sh differs from the Agent Standard reference copy (_template/hooks/session-start.sh in agent-builder)")
+
+    for skill in ("start", "setup"):
+        if not (root / "skills" / skill / "SKILL.md").is_file():
+            fails.append(f"missing skills/{skill}/SKILL.md")
+    setup = root / "skills" / "setup" / "SKILL.md"
+    if name != TEMPLATE_NAME and setup.is_file():
+        try:
+            setup_text = read_text(setup)
+        except ReadError as err:
+            fails.append(f"skills/setup/SKILL.md: {err}")
+        else:
+            for placeholder in SETUP_PLACEHOLDERS:
+                if placeholder in setup_text:
+                    fails.append(f"skills/setup/SKILL.md still has the {placeholder} placeholder")
+    if not (root / "migrations").is_dir():
+        fails.append("missing directory: migrations/")
+
+    catalog, catalog_repo = meta.get("catalog", ""), meta.get("catalog_repo", "")
+    if ("catalog" in meta or "catalog_repo" in meta) and not (catalog and catalog_repo):
+        fails.append("agent.yaml: catalog and catalog_repo must be set together as flat keys")
+    if catalog and not KEBAB.match(catalog):
+        fails.append(f"agent.yaml: catalog '{catalog}' is not kebab-case")
+    if catalog_repo and not REPO.match(catalog_repo):
+        fails.append(f"agent.yaml: catalog_repo '{catalog_repo}' is not owner/repo")
+
+    marker = root / "instance.yaml"
+    if marker.is_dir():
+        fails.append("instance.yaml must be a file")
+    elif marker.is_file():
+        try:
+            inst = parse_agent_yaml(read_text(marker))
+        except ReadError as err:
+            fails.append(f"instance.yaml: {err}")
+            inst = None
+        if inst is not None:
+            if inst.get("agent") != name:
+                fails.append(f"instance.yaml: agent {inst.get('agent')!r} does not match agent.yaml {name!r}")
+            if inst.get("mode") != "source":
+                fails.append("instance.yaml in a package must have mode: source")
+    return fails
+
+
 def check(root):
     fails = []
     try:
@@ -73,6 +173,8 @@ def check(root):
         fails.append(f"agent.yaml: version '{version}' is not MAJOR.MINOR.PATCH")
     if std and not SUPPORTED_STANDARD.match(std):
         fails.append(f"agent.yaml: standard '{std}' is not supported (this validator understands 1.x)")
+    if std and SUPPORTED_STANDARD.match(std) and int(std.split(".")[1]) >= 1:
+        fails.extend(check_v11(root, meta, name))
 
     manifests = {}
     for rel in ALL_MANIFESTS:
@@ -177,7 +279,7 @@ def main(argv):
         print("FAIL: usage: check_manifests.py <agent-dir> | --get <key> <agent.yaml|->")
         return 2
     for message in check(pathlib.Path(argv[0])):
-        print(f"FAIL: {message}")
+        print(f"{'WARN' if isinstance(message, Warn) else 'FAIL'}: {message}")
     return 0
 
 

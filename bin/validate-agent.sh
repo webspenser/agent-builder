@@ -122,7 +122,11 @@ if [ -f "$DIR/agent.yaml" ]; then
   if have_python; then
     out=$("$PYTHON" "$CHECKER" "$DIR" 2>&1); rc=$?
     while IFS= read -r line; do
-      [ -n "$line" ] && fail "${line#FAIL: }"
+      case "$line" in
+        "") ;;
+        "WARN: "*) echo "$line" ;;  # advisory: shown, not counted
+        *) fail "${line#FAIL: }" ;;
+      esac
     done <<< "$out"
     [ "$rc" -eq 0 ] || fail "manifest checker crashed (exit $rc)"
   else

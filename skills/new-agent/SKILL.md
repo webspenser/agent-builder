@@ -35,12 +35,14 @@ The template lives at `_template/` in this plugin's root
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "1.0"`. Set the same name, version, and description in
+   `standard: "1.1"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
    publisher the user named in step 3. Set the title in `AGENT.md` and the
    three `adapters/` files to the agent's display name.
+   The template is Agent Standard 1.1: keep `hooks/` exactly as copied
+   (the validator checks it byte for byte).
 5. **Specification, section by section.** For each, ask, draft,
    confirm, write:
    - Identity and Mission — a role a person could hold; one outcome.
@@ -62,6 +64,18 @@ The template lives at `_template/` in this plugin's root
      allowed, Stop conditions, Handoff, Inline fallback) and
      frontmatter `name` and `description`.
    - Guardrails / never do, and Escalate to human when.
+   - Interview — which skill gathers the user's context; replace
+     `<interview-skill>` in `skills/setup/SKILL.md` with its name. If
+     the agent has no interview skill, delete the `<interview-skill>`
+     wording from setup (its step 8 and source mode) instead of
+     leaving it. Replace `<context-files>` in setup's step 8 with the
+     list of context files the interview fills (for example
+     `context/athlete-profile.md`); package-owned context files the
+     user never edits stay off that list and are read from the
+     package. The user's own examples go in the instance's
+     `context/samples/`; `samples/` in the package holds only the
+     examples the agent ships with. The validator fails while either
+     placeholder is left.
    Fill the Sub-agents and Skills tables in `AGENT.md` to match.
 6. **Evals.** Write at least three cases in `evals/cases.md`, each a
    thing the agent must refuse or never do, in the form Given / Expect
@@ -72,15 +86,18 @@ The template lives at `_template/` in this plugin's root
 8. **Validate.** Run `bash <validator> <folder>`. Fix every `FAIL:`
    line and run it again until it prints `OK`.
 9. **Finish.**
-   - Personal: offer to fill the `context/` files now by interviewing
-     the user with each file's bracketed prompts, writing their
-     answers in place.
+   - Personal: run the `setup` skill's source mode (writes
+     `instance.yaml` with `mode: source` at the agent folder), then
+     the interview fills `context/` in place.
    - Distributable: offer `git init` and a first commit; explain
      publishing — push to a GitHub repo, enable "Template repository" in
      its settings so others can copy it without forking, and list it in
      a catalog — Webspenser's is `webspenser/agent-library`; its README
-     says how to add a plugin. Every later change bumps `version` in
-     `agent.yaml` and all four host manifests.
+     says how to add a plugin.
+   - Catalog: if you publish to one, set both `catalog` and
+     `catalog_repo` in `agent.yaml` as two flat keys, or neither.
+   - Every later change bumps `version` in `agent.yaml` and all four
+     host manifests.
 
 ## Worked example (abridged)
 
