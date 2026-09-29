@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent Standard 1.x manifest checks.
+"""Agent Standard manifest checks.
 
 Usage: check_manifests.py <agent-dir>
        check_manifests.py --get <key> <agent.yaml | ->
@@ -9,16 +9,19 @@ counts the FAIL lines, passes WARN lines through uncounted, and treats any
 other exit status as a crash. The second prints one parsed top-level value from agent.yaml (or
 stdin, with '-'), or nothing when the key is absent.
 """
+import importlib.util
 import json
 import os
 import pathlib
 import re
 import sys
 
+sys.dont_write_bytecode = True
+
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-SUPPORTED_STANDARD = re.compile(r"^1\.\d+$")
+CURRENT_STANDARD = "2.0"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -27,15 +30,26 @@ HOOK_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"'
 TEMPLATE_HOOKS = pathlib.Path(__file__).resolve().parents[2] / "_template" / "hooks"
 REFERENCE_HOOK = TEMPLATE_HOOKS / "session-start.sh"
 REFERENCE_GUARD = TEMPLATE_HOOKS / "guard.sh"
+REFERENCE_POLICY = TEMPLATE_HOOKS / "guard_policy.py"
+ADAPTER_KEYS = ("capability", "provider", "server_match")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
-LEVELS = ("adapter", "host-deny", "instruction")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
-GUARD_FILE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")
 IDENTITY_MANIFESTS = (".claude-plugin/plugin.json", "gemini-extension.json", ".codex-plugin/plugin.json")
 ALL_MANIFESTS = IDENTITY_MANIFESTS + (".claude-plugin/marketplace.json",)
+
+
+def load_policy_engine():
+    """The reference guard_policy module, or None when it cannot be loaded."""
+    try:
+        spec = importlib.util.spec_from_file_location("guard_policy_reference", REFERENCE_POLICY)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
 
 
 class ReadError(Exception):
@@ -126,8 +140,8 @@ def section(text, heading):
     return lines if found else None
 
 
-def check_v11(root, meta, name):
-    """Agent Standard 1.1: entry hook, start/setup skills, migrations, catalog, instance marker."""
+def check_runtime(root, meta, name):
+    """Entry hook, start/setup skills, migrations, catalog, instance marker."""
     fails = []
     agent_md = root / "AGENT.md"
     if agent_md.is_file():
@@ -211,38 +225,19 @@ def check_adapter(adir, cap, ops, invariants):
     if "adapter.yaml" in texts:
         rel = f"{prefix}/adapter.yaml"
         ay = parse_agent_yaml(texts["adapter.yaml"])
+        for key in ay:
+            if key not in ADAPTER_KEYS:
+                fails.append(f"{rel}: unknown key '{key}' (adapter.yaml holds capability, provider, server_match)")
         if ay.get("capability") != cap:
             fails.append(f"{rel}: capability {ay.get('capability')!r} must be {cap!r}")
         if ay.get("provider") != adir.name:
             fails.append(f"{rel}: provider {ay.get('provider')!r} must be {adir.name!r}")
-        if not ay.get("server_match") and not re.search(r"(?m)^server_match:\s*(#.*)?$", texts["adapter.yaml"]):
+        match = ay.get("server_match", "")
+        bare = re.search(r"(?m)^server_match:\s*(#.*)?$", texts["adapter.yaml"])
+        if "[" in match or "]" in match or bare:
+            fails.append(f"{rel}: server_match must be a plain value, not a YAML list")
+        elif not match:
             fails.append(f"{rel}: missing server_match")
-        # The guard reads these as flat scalars; a YAML list would be silently ignored (fail open).
-        for key in ("server_match", "block", "deny"):
-            value = ay.get(key, "")
-            empty = re.search(rf"(?m)^{key}:\s*(#.*)?$", texts["adapter.yaml"])
-            if "[" in value or "]" in value or empty:
-                fails.append(f"{rel}: {key} must be a plain comma-separated value, not a YAML list")
-        levels = {k[len("enforce_"):]: v for k, v in ay.items() if k.startswith("enforce_")}
-        for inv in sorted(invariants - levels.keys()):
-            fails.append(f"{rel}: missing enforce_{inv}")
-        for inv in sorted(levels.keys() - invariants):
-            fails.append(f"{rel}: enforce_{inv} names no invariant in the contract")
-        for inv, level in sorted(levels.items()):
-            if level not in LEVELS:
-                fails.append(f"{rel}: enforce_{inv} must be adapter, host-deny, or instruction")
-        if "host-deny" in levels.values() and not ay.get("deny"):
-            fails.append(f"{rel}: host-deny needs a deny list of tool names")
-        if levels.get("no_send") == "instruction":
-            fails.append(f"{rel}: no_send cannot be enforced by instruction")
-        guard = ay.get("guard")
-        if guard:
-            if not GUARD_FILE.match(guard):
-                fails.append(f"{rel}: guard '{guard}' must be a file name in the adapter folder")
-            elif not (adir / guard).is_file():
-                fails.append(f"{rel}: guard {guard} does not exist")
-            elif not os.access(adir / guard, os.X_OK):
-                fails.append(f"{prefix}/{guard} is not executable")
     if "adapter.md" in texts:
         rel = f"{prefix}/adapter.md"
         for op in ops:
@@ -250,6 +245,27 @@ def check_adapter(adir, cap, ops, invariants):
                 fails.append(f"{rel}: does not map operation `{op}`")
         if section(texts["adapter.md"], "Probe") is None:
             fails.append(f"{rel}: needs a ## Probe section")
+    policy = adir / "guard.yaml"
+    covers = None
+    if policy.is_file():
+        engine = load_policy_engine()
+        if engine is None:
+            fails.append("validator cannot load its guard-policy engine (_template/hooks/guard_policy.py)")
+        else:
+            try:
+                covers = engine.parse(read_text(policy))["covers"]
+            except ReadError as err:
+                fails.append(f"{prefix}/guard.yaml: {err}")
+            except engine.PolicyError as err:
+                fails.append(f"{prefix}/guard.yaml: {err}")
+    for inv in covers or []:
+        if inv not in invariants:
+            fails.append(f"{prefix}/guard.yaml: covers names {inv}, which is not an invariant of the contract")
+    if "no_send" in invariants:
+        if not policy.is_file():
+            fails.append(f"{prefix}: the contract has no_send, so guard.yaml must cover it")
+        elif covers is not None and "no_send" not in covers:
+            fails.append(f"{prefix}/guard.yaml: covers must include no_send")
     return fails
 
 
@@ -282,16 +298,17 @@ def check_capability(root, cap):
     return fails
 
 
-def check_v12(root, meta):
-    """Agent Standard 1.2: guard hook, capability contracts, adapters."""
+def check_tools(root, meta):
+    """Guard hook and engine, capability contracts, adapters, guard policies."""
     fails = []
     try:
         hooks = json.loads(read_text(root / "hooks" / "hooks.json"))
     except (ReadError, json.JSONDecodeError):
-        hooks = None  # already reported by check_v11
+        hooks = None  # already reported by check_runtime
     if hooks is not None and GUARD_COMMAND not in hook_commands(hooks, "PreToolUse", GUARD_MATCHER):
         fails.append(f"hooks/hooks.json: needs a PreToolUse command hook {GUARD_COMMAND} with matcher {GUARD_MATCHER}")
     fails.extend(check_reference_script(root, "hooks/guard.sh", REFERENCE_GUARD))
+    fails.extend(check_reference_script(root, "hooks/guard_policy.py", REFERENCE_POLICY))
     caps = [c.strip() for c in meta.get("capabilities", "").split(",") if c.strip()]
     for cap in caps:
         if not SNAKE.match(cap):
@@ -304,6 +321,7 @@ def check_v12(root, meta):
             if d.is_dir() and d.name not in caps:
                 fails.append(f"capabilities/{d.name} is not listed in agent.yaml capabilities")
     return fails
+
 
 def check(root):
     fails = []
@@ -320,13 +338,10 @@ def check(root):
         fails.append(f"agent.yaml: name '{name}' is not kebab-case")
     if version and not SEMVER.match(version):
         fails.append(f"agent.yaml: version '{version}' is not MAJOR.MINOR.PATCH")
-    if std and not SUPPORTED_STANDARD.match(std):
-        fails.append(f"agent.yaml: standard '{std}' is not supported (this validator understands 1.x)")
-    minor = int(std.split(".")[1]) if std and SUPPORTED_STANDARD.match(std) else 0
-    if minor >= 1:
-        fails.extend(check_v11(root, meta, name))
-    if minor >= 2:
-        fails.extend(check_v12(root, meta))
+    if std and std != CURRENT_STANDARD:
+        fails.append(f"agent.yaml: standard '{std}' is not {CURRENT_STANDARD}; update the agent to the current Agent Standard")
+    fails.extend(check_runtime(root, meta, name))
+    fails.extend(check_tools(root, meta))
 
     manifests = {}
     for rel in ALL_MANIFESTS:

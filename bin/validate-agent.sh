@@ -45,7 +45,7 @@ done
 BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 PYTHON="${AGENT_VALIDATOR_PYTHON:-python3}"
 CHECKER="$BIN_DIR/lib/check_manifests.py"
-PY_MISSING="python3 is required for Agent Standard 1.0 checks (set AGENT_VALIDATOR_PYTHON to its path)"
+PY_MISSING="python3 is required for Agent Standard checks (set AGENT_VALIDATOR_PYTHON to its path)"
 have_python() { command -v "$PYTHON" >/dev/null 2>&1; }
 
 # Required directories
@@ -117,7 +117,7 @@ while IFS= read -r f; do
   [ "$filtered" = "$expected" ] || fail "$f: headings missing or out of order"
 done < <(find "$DIR/subagents" -maxdepth 1 -name '*.md' 2>/dev/null)
 
-# Agent Standard 1.0: agent.yaml and host manifests
+# agent.yaml, host manifests, hooks, capabilities
 if [ -f "$DIR/agent.yaml" ]; then
   if have_python; then
     out=$("$PYTHON" "$CHECKER" "$DIR" 2>&1); rc=$?
@@ -133,7 +133,7 @@ if [ -f "$DIR/agent.yaml" ]; then
     fail "$PY_MISSING"
   fi
 else
-  echo "WARN: $DIR has no agent.yaml — checked as pre-1.0"
+  fail "missing agent.yaml"
 fi
 
 # Release rule: files changed since the ref require a version bump.

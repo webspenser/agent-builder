@@ -36,14 +36,14 @@ skeleton is `_capability-template/` in the same root. The validator is
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "1.2"`. Set the same name, version, and description in
+   `standard: "2.0"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
    publisher the user named in step 3. Set the title in `AGENT.md` and the
    three `adapters/` files to the agent's display name.
-   The template is Agent Standard 1.2: keep `hooks/` exactly as copied
-   (the validator checks it byte for byte).
+   Keep `hooks/` exactly as copied — three scripts, which the validator
+   checks byte for byte.
 5. **Specification, section by section.** For each, ask, draft,
    confirm, write:
    - Identity and Mission — a role a person could hold; one outcome.
@@ -58,22 +58,26 @@ skeleton is `_capability-template/` in the same root. The validator is
      `_capability-template/` (beside `_template/`) to
      `capabilities/<name>/`, write the contract's operations and
      invariants, and rename `adapters/example-provider/` to the first
-     system's kebab-case name. Fill its `adapter.md` (every operation
-     in backticks, plus `## Probe`) and `adapter.yaml`: set
-     `capability` and `provider` to the folder names; `server_match`
-     to a substring of the real MCP server's name; `block` to the
-     tool-name substrings to refuse, or remove it. Replace the
-     skeleton's `enforce_example_invariant` with exactly one
-     `enforce_<id>: adapter|host-deny|instruction` line per contract
-     invariant, none left over; `host-deny` also needs a `deny` list.
-     `server_match`, `block`, and `deny` are plain comma-separated
-     values, never YAML lists. List the names in `agent.yaml` as
-     `capabilities: a, b`. Skills and sub-agents name operations,
-     never a system's tools. If the agent must never send messages,
-     give the capability a `no_send` invariant with
-     `enforce_no_send: adapter` (never `instruction`) and `block: send`.
-     `block: send` removes only tools whose names contain "send", so
-     confirm in `adapter.md` that the provider has no other way to
+     system's kebab-case name. An adapter pack is `adapter.md`,
+     `adapter.yaml`, and `guard.yaml` (from the skeleton). Fill
+     `adapter.md` (every operation in backticks, plus `## Probe`) and
+     `adapter.yaml`, which has three keys: `capability` and `provider`
+     equal to the folder names, and `server_match`, a substring of the
+     real MCP server's name. In `guard.yaml`, list every tool the
+     adapter uses in `allow`, and replace the skeleton's
+     `example_invariant` in `covers` with the real contract invariant
+     ids it enforces; an invariant left out is held only by the agent's
+     instructions. Replace or remove the example `rules`,
+     `create_tools` and `update_tools`. Verify with
+     `python3 _template/hooks/guard_policy.py --check <path>`, which
+     only parses; the validator step checks `covers` against the
+     contract. List the
+     names in `agent.yaml` as `capabilities: a, b`. Skills and
+     sub-agents name operations, never a system's tools. If the agent
+     must never send messages, give the capability a `no_send`
+     invariant and cover it: usually `deny: ["*send*", "*reply*",
+     "*forward*"]` plus an `allow` list of the tools the adapter uses.
+     Confirm in `adapter.md` that the provider has no other way to
      send.
    - Operating rules — numbered, about how it works.
    - Workflow — ordered steps, each tagged T1, T2, or T3; no critical

@@ -43,21 +43,28 @@ describe it as a capability in two layers.
   operations the agent thinks in and the invariants any system must
   uphold, such as `no_send`.
 - An **adapter** (one folder per system) maps each operation to that
-  system's tools and says how each invariant is enforced.
+  system's tools. Its `guard.yaml` is a guard policy: it names the
+  tools the agent may call, the values it may write, and which
+  invariants that enforces.
 
 Skills name operations, not tools, so they work on any system that has
 an adapter.
 
-An invariant is enforced at one of three levels: `adapter` (the
-package holds it), `host-deny` (setup writes host deny rules), or
-`instruction` (only the agent's instructions). Prefer `adapter`; a
-`no_send` invariant can never be `instruction`.
+A guard policy is a short file:
 
-Two ways to hold a rule at `adapter` level: `block` refuses tools whose
-names contain a listed word (`block: send`); `guard` runs a script on
-each call's arguments and refuses the ones that break a rule. Use
-`block` for a tool you never want, `guard` for a tool that is fine
-until its arguments are not.
+```yaml
+covers: [no_send]
+allow: [create_draft, list_drafts, get_draft, search_threads, get_thread]
+deny: ["*send*", "*reply*", "*forward*"]
+```
+
+An invariant in `covers` is enforced by the guard before every call. One
+left out is held only by the agent's instructions. A capability is
+unattended-safe when every invariant is covered, and a `no_send`
+invariant must always be covered. With `allow` present, every other tool
+of that system is blocked, so a new tool stays blocked until you allow
+it. Field rules can also limit the values a write may set. Check a
+policy with `python3 hooks/guard_policy.py --check guard.yaml`.
 
 The user binds each capability to their own system in `instance.yaml`
 (`bind_crm: attio`) during setup. `STANDARD.md` has the details.

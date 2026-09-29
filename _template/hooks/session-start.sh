@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Agent Standard 1.1 entry hook — identical in every agent.
+# Agent Standard entry hook — identical in every agent.
 # When the session's folder is (inside) a plugin-mode instance of this agent,
 # prints where its files live and the agent's instructions (AGENT.md inline up
 # to 9000 bytes, otherwise a pointer to the file). Prints nothing otherwise.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
+BOM=$(printf '\357\273\277')  # a leading UTF-8 byte-order mark must not hide line 1
 yaml_get() { # yaml_get <file> <key>: top-level scalar; quotes and trailing comments removed
-  sed -n "s/^$2:[[:space:]]*//p" "$1" 2>/dev/null | head -n 1 \
+  sed -e "1s/^$BOM//" -n -e "s/^$2:[[:space:]]*//p" "$1" 2>/dev/null | head -n 1 \
     | sed -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
           -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }

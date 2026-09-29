@@ -12,8 +12,8 @@ tools.
 
 ## Invariants
 
-Each adapter declares in its `adapter.yaml` how it enforces each of
-these: `adapter`, `host-deny`, or `instruction`.
+An adapter's `guard.yaml` lists in `covers` the invariants it enforces
+by mechanism; the rest rely on the agent's instructions.
 
 - `example_invariant` — a rule every adapter must uphold. Name one
   `no_send` if the capability must never send a message to anyone.

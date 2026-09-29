@@ -8,6 +8,7 @@ echo "== validator tests"; tests/test-validate-agent.sh || STATUS=1
 echo "== install tests";   tests/test-install.sh        || STATUS=1
 echo "== hook";  tests/test-hook.sh || STATUS=1
 echo "== guard"; tests/test-guard.sh || STATUS=1
+echo "== guard policy"; tests/test-guard-policy.sh || STATUS=1
 echo "== builder manifests"; tests/test-builder-manifests.sh || STATUS=1
 echo "== action";  tests/test-action.sh || STATUS=1
 
@@ -19,13 +20,12 @@ for d in */; do  # _template/ is matched here
   bin/validate-agent.sh "$d" || STATUS=1
 done
 
-echo "== template is Agent Standard 1.2"
-if ! grep -q '^standard: "1.2"' _template/agent.yaml; then echo "FAIL: _template is not 1.2"; STATUS=1; fi
+echo "== template is Agent Standard 2.0"
+if ! grep -q '^standard: "2.0"' _template/agent.yaml; then echo "FAIL: _template is not 2.0"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
-TEMPLATE_OUTPUT=$(bin/validate-agent.sh _template 2>&1)
-if echo "$TEMPLATE_OUTPUT" | grep -q '^WARN: .* has no agent.yaml'; then
-  echo "FAIL: _template is still pre-1.0"; STATUS=1
-fi
+if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
+if ! python3 _template/hooks/guard_policy.py --check _capability-template/adapters/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
+if [ -d _template/hooks/__pycache__ ]; then echo "FAIL: bytecode in _template/hooks"; STATUS=1; fi
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"
 exit "$STATUS"
