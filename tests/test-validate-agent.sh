@@ -413,4 +413,98 @@ for ph in '<interview-skill>' '<context-files>'; do
   rm -rf "$FIX/v11-ph" "$FIX/v11-tpl"
 done
 
+echo "-- Agent Standard 1.2"
+make_valid_v12_agent() { # make_valid_v12_agent <dir> [name]
+  local d="$1"
+  make_valid_v11_agent "$d" "${2:-demo-agent}"
+  sed -i.bak 's/^standard:.*/standard: "1.2"/' "$d/agent.yaml" && rm -f "$d/agent.yaml.bak"
+  echo 'capabilities: crm' >> "$d/agent.yaml"
+  cp _template/hooks/guard.sh "$d/hooks/"; chmod 755 "$d/hooks/guard.sh"
+  local c="$d/capabilities/crm" a="$d/capabilities/crm/adapters/demo"
+  mkdir -p "$a"
+  printf '%s\n' '# CRM contract' '' '## Operations' '' '| Operation | Arguments |' '|---|---|' \
+    '| `create_lead` | `company` |' '| `get_lead` | `lead_id` |' '' '## Invariants' '' \
+    '- `draft_only` — only drafts' '- `no_send` — never sends' > "$c/contract.md"
+  printf '%s\n' '# Demo adapter' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/adapter.md"
+  printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' 'block: send' 'guard: guard.py' \
+    'enforce_draft_only: adapter' 'enforce_no_send: adapter' > "$a/adapter.yaml"
+  printf '%s\n' '#!/usr/bin/env python3' 'import sys' 'sys.exit(0)' > "$a/guard.py"; chmod 755 "$a/guard.py"
+}
+fails_with() { # fails_with <dir> <message> — non-zero exit and that exact FAIL line, no traceback
+  local out rc; out=$($V "$1" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF -- "FAIL: $2" && ! printf '%s\n' "$out" | grep -qE 'Traceback|checker error'; then
+    _report ok "$(basename "$1"): $2"; else _report no "$(basename "$1") (rc=$rc) wanted '$2': $out"; fi
+}
+AD=capabilities/crm/adapters/demo
+make_valid_v12_agent "$FIX/v12"; assert_pass $V "$FIX/v12"
+make_valid_v11_agent "$FIX/v11-again"; assert_pass $V "$FIX/v11-again"   # 1.1 unchanged
+make_valid_v12_agent "$FIX/v12-notools"; sed -i.bak '/^capabilities:/d' "$FIX/v12-notools/agent.yaml"; rm -rf "$FIX/v12-notools/capabilities" "$FIX/v12-notools/agent.yaml.bak"; assert_pass $V "$FIX/v12-notools"
+
+make_valid_v12_agent "$FIX/v12-noguard"; rm "$FIX/v12-noguard/hooks/guard.sh"
+fails_with "$FIX/v12-noguard" "missing hooks/guard.sh"
+make_valid_v12_agent "$FIX/v12-edited"; echo "# tweak" >> "$FIX/v12-edited/hooks/guard.sh"
+fails_with "$FIX/v12-edited" "hooks/guard.sh differs from the Agent Standard reference copy (_template/hooks/guard.sh in agent-builder)"
+make_valid_v12_agent "$FIX/v12-noexec"; chmod 644 "$FIX/v12-noexec/hooks/guard.sh"
+fails_with "$FIX/v12-noexec" "hooks/guard.sh is not executable"
+make_valid_v12_agent "$FIX/v12-nopre"
+printf '%s\n' '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\""}]}]}}' > "$FIX/v12-nopre/hooks/hooks.json"
+fails_with "$FIX/v12-nopre" 'hooks/hooks.json: needs a PreToolUse command hook "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh" with matcher mcp__.*'
+
+make_valid_v12_agent "$FIX/v12-nocontract"; rm "$FIX/v12-nocontract/capabilities/crm/contract.md"
+fails_with "$FIX/v12-nocontract" "missing capabilities/crm/contract.md"
+make_valid_v12_agent "$FIX/v12-noops"; sed -i.bak '/^| `/d' "$FIX/v12-noops/capabilities/crm/contract.md"
+fails_with "$FIX/v12-noops" 'capabilities/crm/contract.md: needs a ## Operations table with at least one `operation` in its first column'
+make_valid_v12_agent "$FIX/v12-noinv"; sed -i.bak '/^## Invariants/,$d' "$FIX/v12-noinv/capabilities/crm/contract.md"
+fails_with "$FIX/v12-noinv" 'capabilities/crm/contract.md: needs a ## Invariants list with at least one `invariant_id`'
+make_valid_v12_agent "$FIX/v12-badinv"; echo '- `Draft-Only` — bad id' >> "$FIX/v12-badinv/capabilities/crm/contract.md"
+fails_with "$FIX/v12-badinv" "capabilities/crm/contract.md: invariant 'Draft-Only' is not snake_case"
+make_valid_v12_agent "$FIX/v12-noadapter"; rm -r "$FIX/v12-noadapter/capabilities/crm/adapters"
+fails_with "$FIX/v12-noadapter" "capabilities/crm: needs at least one adapter in adapters/"
+make_valid_v12_agent "$FIX/v12-noyaml"; rm "$FIX/v12-noyaml/$AD/adapter.yaml"
+fails_with "$FIX/v12-noyaml" "missing $AD/adapter.yaml"
+
+make_valid_v12_agent "$FIX/v12-missenf"; sed -i.bak '/^enforce_no_send/d' "$FIX/v12-missenf/$AD/adapter.yaml"
+fails_with "$FIX/v12-missenf" "$AD/adapter.yaml: missing enforce_no_send"
+make_valid_v12_agent "$FIX/v12-extraenf"; echo 'enforce_other: adapter' >> "$FIX/v12-extraenf/$AD/adapter.yaml"
+fails_with "$FIX/v12-extraenf" "$AD/adapter.yaml: enforce_other names no invariant in the contract"
+make_valid_v12_agent "$FIX/v12-badlevel"; sed -i.bak 's/^enforce_draft_only: .*/enforce_draft_only: maybe/' "$FIX/v12-badlevel/$AD/adapter.yaml"
+fails_with "$FIX/v12-badlevel" "$AD/adapter.yaml: enforce_draft_only must be adapter, host-deny, or instruction"
+make_valid_v12_agent "$FIX/v12-nodeny"; sed -i.bak 's/^enforce_draft_only: .*/enforce_draft_only: host-deny/' "$FIX/v12-nodeny/$AD/adapter.yaml"
+fails_with "$FIX/v12-nodeny" "$AD/adapter.yaml: host-deny needs a deny list of tool names"
+make_valid_v12_agent "$FIX/v12-deny"; sed -i.bak 's/^enforce_draft_only: .*/enforce_draft_only: host-deny/' "$FIX/v12-deny/$AD/adapter.yaml"; echo 'deny: update-record' >> "$FIX/v12-deny/$AD/adapter.yaml"
+assert_pass $V "$FIX/v12-deny"
+make_valid_v12_agent "$FIX/v12-nosend"; sed -i.bak 's/^enforce_no_send: .*/enforce_no_send: instruction/' "$FIX/v12-nosend/$AD/adapter.yaml"
+fails_with "$FIX/v12-nosend" "$AD/adapter.yaml: no_send cannot be enforced by instruction"
+make_valid_v12_agent "$FIX/v12-wrongcap"; sed -i.bak 's/^capability: .*/capability: crmx/' "$FIX/v12-wrongcap/$AD/adapter.yaml"
+fails_with "$FIX/v12-wrongcap" "$AD/adapter.yaml: capability 'crmx' must be 'crm'"
+make_valid_v12_agent "$FIX/v12-wrongprov"; sed -i.bak 's/^provider: .*/provider: other/' "$FIX/v12-wrongprov/$AD/adapter.yaml"
+fails_with "$FIX/v12-wrongprov" "$AD/adapter.yaml: provider 'other' must be 'demo'"
+make_valid_v12_agent "$FIX/v12-nomatch"; sed -i.bak '/^server_match/d' "$FIX/v12-nomatch/$AD/adapter.yaml"
+fails_with "$FIX/v12-nomatch" "$AD/adapter.yaml: missing server_match"
+make_valid_v12_agent "$FIX/v12-guardgone"; rm "$FIX/v12-guardgone/$AD/guard.py"
+fails_with "$FIX/v12-guardgone" "$AD/adapter.yaml: guard guard.py does not exist"
+make_valid_v12_agent "$FIX/v12-guardnx"; chmod 644 "$FIX/v12-guardnx/$AD/guard.py"
+fails_with "$FIX/v12-guardnx" "$AD/guard.py is not executable"
+make_valid_v12_agent "$FIX/v12-guardpath"; sed -i.bak 's|^guard: .*|guard: ../x.py|' "$FIX/v12-guardpath/$AD/adapter.yaml"
+fails_with "$FIX/v12-guardpath" "$AD/adapter.yaml: guard '../x.py' must be a file name in the adapter folder"
+make_valid_v12_agent "$FIX/v12-unmapped"; sed -i.bak '/get_lead/d' "$FIX/v12-unmapped/$AD/adapter.md"
+fails_with "$FIX/v12-unmapped" "$AD/adapter.md: does not map operation \`get_lead\`"
+make_valid_v12_agent "$FIX/v12-noprobe"; sed -i.bak '/^## Probe/d' "$FIX/v12-noprobe/$AD/adapter.md"
+fails_with "$FIX/v12-noprobe" "$AD/adapter.md: needs a ## Probe section"
+make_valid_v12_agent "$FIX/v12-unlisted"; mkdir -p "$FIX/v12-unlisted/capabilities/email"
+fails_with "$FIX/v12-unlisted" "capabilities/email is not listed in agent.yaml capabilities"
+make_valid_v12_agent "$FIX/v12-badcap"; sed -i.bak 's/^capabilities: .*/capabilities: crm, Email-Drafts/' "$FIX/v12-badcap/agent.yaml"
+fails_with "$FIX/v12-badcap" "agent.yaml: capability 'Email-Drafts' is not snake_case"
+make_valid_v12_agent "$FIX/v12-badprov"; mv "$FIX/v12-badprov/$AD" "$FIX/v12-badprov/capabilities/crm/adapters/Demo_X"
+sed -i.bak 's/^provider: .*/provider: Demo_X/' "$FIX/v12-badprov/capabilities/crm/adapters/Demo_X/adapter.yaml"
+fails_with "$FIX/v12-badprov" "capabilities/crm/adapters/Demo_X: adapter folder name is not kebab-case"
+make_valid_v12_agent "$FIX/v12-unread"; chmod 000 "$FIX/v12-unread/capabilities/crm/contract.md"
+out=$($V "$FIX/v12-unread" 2>&1); rc=$?
+if [ "$rc" -eq 1 ] && ! printf '%s\n' "$out" | grep -qE 'Traceback|checker error'; then _report ok "unreadable contract fails cleanly"; else _report no "unreadable contract (rc=$rc): $out"; fi
+chmod 644 "$FIX/v12-unread/capabilities/crm/contract.md"
+make_valid_v12_agent "$FIX/v12-blocklist"; sed -i.bak 's/^block: .*/block: [send, delete]/' "$FIX/v12-blocklist/$AD/adapter.yaml"
+fails_with "$FIX/v12-blocklist" "$AD/adapter.yaml: block must be a plain comma-separated value, not a YAML list"
+make_valid_v12_agent "$FIX/v12-blockseq"; sed -i.bak 's/^block: .*/block:/' "$FIX/v12-blockseq/$AD/adapter.yaml"; printf '%s\n' '  - send' >> "$FIX/v12-blockseq/$AD/adapter.yaml"
+fails_with "$FIX/v12-blockseq" "$AD/adapter.yaml: block must be a plain comma-separated value, not a YAML list"
+
 finish
