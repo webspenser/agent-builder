@@ -1,4 +1,4 @@
-# Agent Standard 1.0
+# Agent Standard 1.1
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
@@ -13,12 +13,15 @@ bug.
 
 The standard uses semantic versioning: a minor release adds optional
 rules, a major release changes what an agent must do to conform. It
-grows with the builder's sub-projects — 1.0 packaging (this version),
-1.1 instance rules, 1.2 capability contracts and adapters. An agent
+grows with the builder's sub-projects — 1.0 packaging,
+1.1 instance rules (this version), 1.2 capability contracts and adapters. An agent
 declares the version it follows in `agent.yaml`; the validator
 understands `1.x` and fails any other. A folder with no `agent.yaml` is
 a pre-1.0 agent: it is checked by the pre-1.0 rules below only and passes with
 a warning.
+
+1.1 (this version) adds instances, the entry hook, setup, and migrations;
+a 1.0 agent still validates as 1.0.
 
 ## Directory layout
 
@@ -28,7 +31,9 @@ agent-builder/
   STANDARD.md               # the Agent Standard
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
-    agent.yaml              # identity + standard version (1.0)
+    agent.yaml              # identity + standard version (1.1)
+    hooks/                  # hooks.json + session-start.sh (1.1)
+    migrations/             # <from>-<to>.md upgrade notes (1.1)
     .claude-plugin/         # plugin.json, marketplace.json
     .codex-plugin/          # plugin.json
     gemini-extension.json
@@ -252,6 +257,66 @@ enforces this against a git ref when asked:
     bin/validate-agent.sh <agent-dir> --require-bump origin/main
 
 An agent that did not exist at the ref needs no bump.
+
+## Instances (1.1)
+
+A folder is an instance of an agent when it holds `instance.yaml`:
+
+```yaml
+agent: sales-partner       # the agent's name
+agent_version: 1.0.0       # version setup (or the last migration) ran with
+standard: "1.1"
+mode: plugin               # plugin | source
+```
+
+`context/<file>` in `AGENT.md`, skills, and contracts means the
+instance's file; if it is missing, run the step that produces it —
+never act on the package's blank default. Setup copies into the
+instance only the context files the interview fills (listed in
+`skills/setup/SKILL.md`); package-owned context files the user never
+edits stay in the package, are read from there, and `AGENT.md` says
+so. The user's own examples live in the instance's `context/samples/`;
+the package's `samples/` holds only the examples the agent ships with.
+`templates/`, `samples/`, `skills/`, `subagents/`, and `migrations/`
+mean the package's files. Package paths are read-only in plugin mode:
+write only into the instance. In source mode the package folder is the
+instance (`instance.yaml` with `mode: source` at its root).
+
+## Entry hook (1.1)
+
+Every 1.1 agent ships `hooks/hooks.json` with at least one `SessionStart`
+command hook, `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"`, and
+`hooks/session-start.sh` byte-identical to `_template/hooks/session-start.sh`
+and executable. It finds the nearest `instance.yaml` above the session
+folder and stops there (it never looks further up); if that file names
+this agent, it prints where the instance and package live, a migration
+notice when the instance's `agent_version` is older than the package's
+`version` (dot-separated fields compared as numbers), and a line telling
+the model to read `AGENT.md` in full. It then inlines `AGENT.md` only
+when it is at most 9000 bytes; above that it points at the file
+(Claude Code truncates hook output past 10,000 characters). The
+validator prints a `WARN:` for an `AGENT.md` over 9000 bytes. A missing
+or malformed `agent_version`, or an instance newer than the package,
+suppresses the migration notice. It prints nothing for a `mode: source`
+instance (source copies load `AGENT.md` through their own host files)
+and nothing elsewhere.
+
+## Setup and start (1.1)
+
+Both skills are required. `skills/setup/SKILL.md` creates an instance;
+`skills/start/SKILL.md` loads `AGENT.md` by hand when the hook did not
+run. Setup's `<interview-skill>` and `<context-files>` placeholders must
+be filled (the validator fails while either is left, except in the
+template itself). Optional `agent.yaml` keys `catalog` (marketplace
+name) and `catalog_repo` (`owner/repo`) let setup enable the plugin in
+the instance's `.claude/settings.json`; they are two flat top-level
+keys (not a nested map), set both or neither.
+
+## Migrations (1.1)
+
+`migrations/` is required. It holds one `<from>-<to>.md` note per
+release that changes the shape of a context file: what changed and how
+to convert. It may be empty (keep a `.gitkeep` so git tracks it).
 
 ## Validation
 

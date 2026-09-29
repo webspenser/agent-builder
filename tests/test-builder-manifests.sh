@@ -15,7 +15,7 @@ c = json.load(open(".claude-plugin/plugin.json"))
 m = json.load(open(".claude-plugin/marketplace.json"))
 g = json.load(open("gemini-extension.json"))
 x = json.load(open(".codex-plugin/plugin.json"))
-ok = (c["name"] == "agent-builder" and c["version"] == "1.0.1"
+ok = (c["name"] == "agent-builder" and c["version"] == "1.1.0"
       and all(d.get(k) == c.get(k) for d in (g, x) for k in ("name", "version", "description"))
       and m["name"] == "agent-builder" and m["owner"]["name"]
       and len(m["plugins"]) == 1 and m["plugins"][0]["name"] == "agent-builder" and m["plugins"][0]["source"] == "./"
