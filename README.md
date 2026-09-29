@@ -58,7 +58,7 @@ In CI, from any agent repo:
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
-- uses: webspenser/agent-builder/validate@v1
+- uses: webspenser/agent-builder/validate@v2
   with:
     path: .
     require-bump-against: origin/main   # optional: enforce version bumps
