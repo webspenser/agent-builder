@@ -13,6 +13,7 @@ yaml_get() { # yaml_get <file> <key>: top-level scalar; quotes and trailing comm
 }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 block() { printf 'Blocked by %s guard: %s\n' "$name" "$1" >&2; exit 2; }
+pblock() { printf 'Blocked by %s guard policy (%s/%s): %s\n' "$name" "$cap" "$provider" "$1" >&2; exit 2; }
 
 name=$(yaml_get "$root/agent.yaml" name)
 [ -n "$name" ] || exit 0
@@ -69,15 +70,16 @@ while IFS= read -r line || [ -n "$line" ]; do
   match=$(lower "$(yaml_get "$adir/adapter.yaml" server_match)")
   [ -n "$match" ] || continue
   case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
-  [ -f "$adir/guard.yaml" ] || continue  # no policy: this adapter's invariants are instruction-only
+  # A dangling symlink or a directory still counts as a policy: the engine fails closed on it.
+  { [ -e "$adir/guard.yaml" ] || [ -L "$adir/guard.yaml" ]; } || continue  # no policy: this adapter's invariants are instruction-only
   engine="$root/hooks/guard_policy.py"
-  [ -f "$engine" ] || block "the guard policy engine is missing from $name"
-  command -v python3 >/dev/null 2>&1 || block "python3 is required to run the $provider guard policy for $cap"
+  [ -f "$engine" ] || pblock "the guard policy engine is missing from $name"
+  command -v python3 >/dev/null 2>&1 || pblock "python3 is required to run the guard policy"
   bfile="$instance/bindings/$cap.md"
   [ -f "$bfile" ] || bfile=-
-  printf '%s' "$input" | python3 "$engine" "$adir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)"; rc=$?
+  printf '%s' "$input" | python3 "$engine" "$adir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
   [ "$rc" -eq 0 ] && continue
   [ "$rc" -eq 2 ] && exit 2
-  block "the $provider guard policy for $cap failed (exit $rc)"
+  pblock "the guard policy engine failed (exit $rc)"
 done < "$instance/instance.yaml"
 exit 0

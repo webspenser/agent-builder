@@ -125,12 +125,20 @@ rules:
 
 ### Grammar (the subset)
 
-- The top level is a map of `key: value` lines at column 0. Comments
-  (`#` to end of line, outside quotes) and blank lines are ignored.
+- The top level is a map of `key: value` lines at column 0; the key is
+  followed by a space or the end of the line (`covers:[a]` is an error).
+  Comments (`#` to end of line, outside quotes) and blank lines are
+  ignored; a `#` starts a comment only at the start of the line's content
+  or after whitespace (`[a]#x` is an error).
 - A value is a scalar (plain, or single/double quoted) or a flow list
   `[a, b, "c*"]`. A flow list may continue over following indented
-  lines until its closing `]`. A plain scalar may not start with
-  `* & ! | > % @` or a backtick, or contain `[ ] { }` or `: ` — quote it.
+  lines until its closing `]`, and nothing may follow the `]`. A plain
+  scalar may not start with `* & ! | > % @ :` `,` a backtick, `- ` or
+  `? `, may not be `-` or `?` alone, may not end with `:`, and may not
+  contain `[ ] { }`, `: ` or a quote character — quote it. A quoted
+  scalar may not contain its own quote character, and a double-quoted
+  one may not contain a backslash. A list item is one scalar
+  (`["a" "b"]` is an error).
 - The one exception is `rules:`, whose value is a block list: each item
   starts with `  - ` and holds `field:` plus any of `binding_id:`,
   `create:`, `update:`, `any:` — lists on one line — with further keys
@@ -147,7 +155,7 @@ rules:
 | `deny` | no | Tool-name glob patterns that are always blocked |
 | `create_tools` | if `rules` | Tools whose writes create new data |
 | `update_tools` | if `rules` | Tools whose writes change existing data |
-| `values_at` | if `rules` | Where attribute maps sit in the tool input: a key (`values`) or a list path (`records[].fields`) |
+| `values_at` | if `rules` or `refuse_keys` | Where attribute maps sit in the tool input: a key (`values`) or a list path (`records[].fields`) |
 | `unwrap` | no | Keys whose value stands for a wrapped value (`{"option": "draft"}`); without them any object value on a write is an error |
 | `unknown_writes` | no | `update` (default) or `block`: a tool in neither list whose input holds an attribute map |
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
@@ -158,12 +166,21 @@ rules:
 1. **Tool name.** Candidate names are every suffix of the tool name
    after `mcp__` that follows a `__`. A `deny` pattern matching any
    candidate blocks. With `allow` present, some candidate must match an
-   `allow` pattern. Patterns are case-insensitive shell globs.
+   `allow` pattern; `allow` only counts suffixes whose server segment
+   (the text between the previous `__` and that suffix's `__`) contains
+   the adapter's `server_match` (`guard.sh` passes it), so
+   `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
+   `server_match` (direct runs, `--check`), every suffix counts.
+   Patterns are case-insensitive shell globs.
 2. **Writes.** A tool in `create_tools` or `update_tools`, or (per
    `unknown_writes`) any other tool whose input holds an attribute map
-   at a `values_at` path, is a write; each map found is checked.
+   at a `values_at` path, is a write; each map found is checked. Walking
+   a path, a missing key is skipped, but any other unexpected shape (a
+   list inside a list, a list item that is not an object) blocks. An
+   attribute key containing invisible (Unicode format) characters blocks.
 3. **Values.** Lists flatten to their items; objects to the values
-   under their `unwrap` keys (none present is an error); booleans to
+   under their `unwrap` keys (an object may hold only `unwrap` keys;
+   any other key, or none, is an error); booleans to
    `true`/`false`. Leaves compare as trimmed lowercase strings.
 4. **Rules.** A rule whose field appears in a map requires the
    flattened value to equal exactly one entry of the applicable list —
@@ -184,7 +201,7 @@ rules:
 ## Engine and hook
 
 - `hooks/guard_policy.py` — the engine:
-  `python3 guard_policy.py <guard.yaml> <bindings-file|-> [label]` with
+  `python3 guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]` with
   the hook input on stdin; `--check <guard.yaml>` parses only. Never
   tracebacks.
 - `hooks/guard.sh` — for each `bind_<capability>: <provider>` line in
@@ -192,7 +209,9 @@ rules:
   `custom-adapters/<capability>/`), when the tool name after `mcp__`
   contains the adapter's `server_match` (case-insensitive): if the
   adapter has `guard.yaml`, run the engine with it and the instance's
-  `bindings/<capability>.md` (or `-`). Exit 2 blocks; engine or
+  `bindings/<capability>.md` (or `-`) and the `server_match`. A
+  `guard.yaml` that exists but is unreadable (a directory, a dangling
+  symlink) still reaches the engine, which blocks. Exit 2 blocks; engine or
   `python3` missing blocks; other nonzero blocks. It keeps today's
   instance walk, single-tool-name check, unreadable-binding block, and
   silence outside instances. It no longer reads `block` or runs

@@ -2,17 +2,22 @@
 """Agent Standard guard-policy engine — identical in every agent.
 
 Usage:
-  guard_policy.py <guard.yaml> <bindings-file|-> [label]   hook input JSON on stdin
-  guard_policy.py --check <guard.yaml>                      parse only
+  guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]   hook input JSON on stdin
+  guard_policy.py --check <guard.yaml>                                      parse only
 
 Decides one PreToolUse call against one adapter's guard policy: exit 2 blocks
 (stderr says why), exit 0 allows. Any error blocks — a bug fails closed.
+With server_match, `allow` only counts a tool-name suffix whose server segment
+(the text between the previous "__" and that suffix's "__") contains it, so
+"mcp__attio__purge__get-x" cannot ride on `allow: [get-*]`; `deny` still checks
+every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset; see STANDARD.md "Guard policy".
 """
 import fnmatch
 import json
 import re
 import sys
+import unicodedata
 
 KEYS = ("covers", "allow", "deny", "create_tools", "update_tools", "values_at",
         "unwrap", "unknown_writes", "refuse_keys", "rules")
@@ -22,7 +27,7 @@ RULE_KEYS = ("field", "binding_id", "create", "update", "any")
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
 }
-KEY_LINE = re.compile(r"^([a-z_]+):(.*)$")
+KEY_LINE = re.compile(r"^([a-z_]+):(?: (.*))?$")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\])?)*$")
 BINDING_LINE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(\S.*?)\s*$")
@@ -43,6 +48,8 @@ def _strip_comment(text, lineno):
         elif ch in "'\"":
             quote = ch
         elif ch == "#":
+            if out and not out[-1].isspace():
+                raise PolicyError(f"line {lineno}: '#' must follow whitespace to start a comment")
             break
         out.append(ch)
     if quote:
@@ -57,9 +64,18 @@ def _scalar(token, lineno):
     if token[0] in "'\"":
         if len(token) < 2 or token[-1] != token[0]:
             raise PolicyError(f"line {lineno}: bad quoted value {token}")
-        return token[1:-1]
+        body = token[1:-1]
+        if token[0] in body:
+            raise PolicyError(f"line {lineno}: quoted value {token} contains its own quote or a second value")
+        if token[0] == '"' and "\\" in body:
+            raise PolicyError(f"line {lineno}: backslashes are not allowed in double quotes; use single quotes")
+        return body
     if token[0] in "*&!|>%@`" or any(c in token for c in "[]{}") or ": " in token:
         raise PolicyError(f"line {lineno}: value {token!r} must be quoted")
+    if token.startswith(("- ", "? ", ":", ",")) or token in ("-", "?") or token.endswith(":"):
+        raise PolicyError(f"line {lineno}: value {token!r} must be quoted")
+    if "'" in token or '"' in token:
+        raise PolicyError(f"line {lineno}: value {token!r} mixes quotes with plain text; quote the whole value")
     return token
 
 
@@ -111,7 +127,7 @@ def _parse_rules(lines, i):
         m = KEY_LINE.match(body)
         if not m:
             raise PolicyError(f"line {lineno}: expected 'key: value'")
-        key, value = m.group(1), m.group(2).strip()
+        key, value = m.group(1), (m.group(2) or "").strip()
         if key not in RULE_KEYS:
             raise PolicyError(f"line {lineno}: unknown rule key '{key}'")
         if key in rules[-1]:
@@ -144,11 +160,13 @@ def _validate(policy):
             raise PolicyError(f"refuse_keys: unknown preset '{preset}'")
     for path in policy.get("values_at", []):
         if not PATH.match(path):
-            raise PolicyError(f"values_at: '{path}' is not a path like values or records[].fields")
+            raise PolicyError(f"values_at: {path} is not a path like values or \"records[].fields\"")
     for key in ("allow", "deny", "create_tools", "update_tools", "unwrap"):
         for item in policy.get(key, []):
             if not item:
                 raise PolicyError(f"{key}: empty entry")
+    if ("rules" in policy or "refuse_keys" in policy) and not policy.get("values_at"):
+        raise PolicyError("values_at is required (and must name a path) when rules or refuse_keys are present")
     if "rules" in policy:
         for key in ("create_tools", "update_tools", "values_at"):
             if key not in policy:
@@ -184,7 +202,7 @@ def parse(text):
         m = KEY_LINE.match(line)
         if line[0] == " " or not m:
             raise PolicyError(f"line {lineno}: expected 'key: value' at column 0")
-        key, value = m.group(1), m.group(2).strip()
+        key, value = m.group(1), (m.group(2) or "").strip()
         if key not in KEYS:
             raise PolicyError(f"line {lineno}: unknown key '{key}'")
         if key in policy:
@@ -221,6 +239,8 @@ def _norm(name):
 
 
 def _candidates(tool_name):
+    """(suffix, server segment) for every suffix after a '__'; the server
+    segment is the text between the previous '__' and this one."""
     if not isinstance(tool_name, str) or not tool_name.startswith("mcp__"):
         raise PolicyError("not an MCP tool name")
     rest, found, at = tool_name[5:], [], 0
@@ -229,7 +249,7 @@ def _candidates(tool_name):
         if at < 0:
             break
         if rest[at + 2:]:
-            found.append(rest[at + 2:].lower())
+            found.append((rest[at + 2:].lower(), rest[:at].rsplit("__", 1)[-1].lower()))
         at += 2
     if not found:
         raise PolicyError("no tool name after the server")
@@ -247,7 +267,9 @@ def _maps_at(obj, path):
         name = part[:-2] if many else part
         nxt = []
         for node in nodes:
-            if not isinstance(node, dict) or name not in node:
+            if not isinstance(node, dict):
+                raise PolicyError(f"{path}: unexpected shape at {name}")
+            if name not in node:
                 continue
             value = node[name]
             if many:
@@ -267,6 +289,8 @@ def _leaves(value, unwrap):
     if isinstance(value, list):
         return [leaf for item in value for leaf in _leaves(item, unwrap)]
     if isinstance(value, dict):
+        if any(key not in unwrap for key in value):
+            raise PolicyError("unrecognized value shape")
         leaves = [leaf for key in unwrap if key in value for leaf in _leaves(value[key], unwrap)]
         if not leaves:
             raise PolicyError("unrecognized value shape")
@@ -290,14 +314,20 @@ def read_bindings(path):
     return data
 
 
-def problems(policy, event, bindings):
+def problems(policy, event, bindings, server_match=None):
     tool_name = event.get("tool_name")
-    names = _candidates(tool_name)
+    pairs = _candidates(tool_name)
+    names = [suffix for suffix, _ in pairs]
+    if server_match:
+        wanted = server_match.lower()
+        allow_names = [suffix for suffix, server in pairs if wanted in server]
+    else:
+        allow_names = names
     shown = names[0]
     for pattern in policy.get("deny", []):
         if _matches(names, [pattern]):
             return [f"{shown} is denied ({pattern})"]
-    if "allow" in policy and not _matches(names, policy["allow"]):
+    if "allow" in policy and not _matches(allow_names, policy["allow"]):
         return [f"{shown} is not in the allow list"]
     rules = policy.get("rules", [])
     refuse = [REFUSE_PRESETS[p] for p in policy.get("refuse_keys", [])]
@@ -332,6 +362,8 @@ def problems(policy, event, bindings):
     unwrap = policy.get("unwrap", [])
     for amap in maps:
         for key in amap:
+            if any(unicodedata.category(ch) == "Cf" for ch in str(key)):
+                raise PolicyError("attribute key contains invisible characters")
             if any(p.match(str(key)) for p in refuse):
                 found.append(f"attribute {key} is addressed by ID; use its name")
         for rule in rules:
@@ -352,14 +384,15 @@ def main(argv):
         try:
             with open(argv[1], encoding="utf-8") as fh:
                 parse(fh.read())
-        except (OSError, UnicodeDecodeError, PolicyError) as err:
-            print(f"FAIL: {err}")
+        except Exception as err:  # never a traceback
+            print(f"FAIL: {type(err).__name__}: {err}")
             return 1
         return 0
-    if len(argv) not in (2, 3):
-        print("usage: guard_policy.py <guard.yaml> <bindings-file|-> [label] | --check <guard.yaml>", file=sys.stderr)
+    if len(argv) not in (2, 3, 4):
+        print("usage: guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match] | --check <guard.yaml>", file=sys.stderr)
         return 2
-    label = argv[2] if len(argv) == 3 else "guard policy"
+    label = argv[2] if len(argv) >= 3 else "guard policy"
+    server_match = argv[3] if len(argv) == 4 else None
     try:
         with open(argv[0], encoding="utf-8") as fh:
             policy = parse(fh.read())
@@ -367,7 +400,7 @@ def main(argv):
         event = json.load(sys.stdin)
         if not isinstance(event, dict):
             raise PolicyError("hook input is not an object")
-        found = problems(policy, event, bindings)
+        found = problems(policy, event, bindings, server_match)
     except Exception as err:  # fail closed
         print(f"Blocked by {label}: cannot check this call ({type(err).__name__}: {err})", file=sys.stderr)
         return 2

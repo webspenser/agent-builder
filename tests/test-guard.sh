@@ -48,6 +48,8 @@ run_guard "$I" "$(call mcp__x__DemoCRM__delete-record)";         expect 2 "serve
 run_guard "$I" "$(call mcp__democrm__delete__record)";           expect 2 "tool containing __ still denied"
 run_guard "$I" "$(call mcp__democrm__list-records)";             expect 0 "allowed tool passes"
 run_guard "$I" "$(call mcp__democrm__drop-table)";               expect 2 "tool outside allow blocked" "is not in the allow list"
+run_guard "$I" "$(call mcp__democrm__purge__get-x)";             expect 2 "tool with __ cannot ride on allow" "is not in the allow list"
+run_guard "$I" "$(call mcp__x__DemoCRM__get-x)";                 expect 0 "server containing __: allowed tool passes"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"status":"sent"}}')"; expect 2 "field rule enforced" "status may only be written as voided on update"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"status":"voided"}}')"; expect 0 "field rule allows voided"
 
@@ -93,18 +95,27 @@ run_guard "$C" "$(call mcp__democrm__list-records)"
 
 echo "-- fail closed"
 mv "$PKG/hooks/guard_policy.py" "$W/gp.bak"
-run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "engine missing blocks" "engine is missing"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "engine missing blocks" "Blocked by demo-agent guard policy (crm/demo): the guard policy engine is missing"
 run_guard "$I" "$(call mcp__other__list-records)";               expect 0 "engine missing: other servers allowed"
 mv "$W/gp.bak" "$PKG/hooks/guard_policy.py"
 BIN="$W/bin"; mkdir -p "$BIN"
 for t in bash cat sed head tr grep sort dirname cut; do ln -s "$(command -v "$t")" "$BIN/$t"; done
 OUT=$(printf '%s' "$(call mcp__democrm__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
-expect 2 "no python3 blocks" "python3 is required"
+expect 2 "no python3 blocks" "Blocked by demo-agent guard policy (crm/demo): python3 is required"
 OUT=$(printf '%s' "$(call mcp__other__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
 expect 0 "no python3: other servers allowed"
 printf '%s\n' 'covers: [draft_only]' 'allow: [list-*' > "$AD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "invalid policy blocks" "cannot check this call"
+rm "$AD/guard.yaml"; mkdir "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "guard.yaml as a directory blocks" "cannot check this call"
+rmdir "$AD/guard.yaml"; ln -s "$W/nowhere.yaml" "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "dangling guard.yaml symlink blocks" "cannot check this call"
+rm "$AD/guard.yaml"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 0 "no guard.yaml: instruction-only, allowed"
 write_policy
+printf '%s\n' '#!/usr/bin/env python3' 'import sys' 'sys.exit(1)' > "$PKG/hooks/guard_policy.py"
+run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "engine exiting 1 blocks" "Blocked by demo-agent guard policy (crm/demo): the guard policy engine failed (exit 1)"
+cp _template/hooks/guard_policy.py "$PKG/hooks/"
 
 echo "-- paths"
 S="$W/with space/inst"; mkdir -p "$S"; cp "$I/instance.yaml" "$S/"

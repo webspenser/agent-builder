@@ -11,9 +11,9 @@ parses() { # parses <0|1> <label>
   local out rc; out=$(python3 "$E" --check "$W/guard.yaml" 2>&1); rc=$?
   if [ "$rc" -eq "$1" ] && ! printf '%s' "$out" | grep -q Traceback; then _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
 }
-run() { # run <rc> <label> <tool_name> <tool_input JSON> [text] [bindings]
+run() { # run <rc> <label> <tool_name> <tool_input JSON> [text] [bindings] [server_match]
   local out rc
-  out=$(printf '{"tool_name":"%s","tool_input":%s}' "$3" "$4" | python3 "$E" "$W/guard.yaml" "${6:--}" "demo guard policy (crm/demo)" 2>&1); rc=$?
+  out=$(printf '{"tool_name":"%s","tool_input":%s}' "$3" "$4" | python3 "$E" "$W/guard.yaml" "${6:--}" "demo guard policy (crm/demo)" ${7:+"$7"} 2>&1); rc=$?
   if [ "$rc" -eq "$1" ] && { [ -z "${5:-}" ] || printf '%s\n' "$out" | grep -qF -- "$5"; } && ! printf '%s' "$out" | grep -q Traceback; then
     _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
 }
@@ -37,6 +37,24 @@ policy 'covers: [x]' 'rules:' '  - field: status' '    create: [draft]'; parses 
 policy 'covers: [x]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]' 'rules:' '  - field: status'; parses 1 "rule without a list"
 policy 'covers: [x]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: ["bad path!"]' 'rules:' '  - field: s' '    any: [a]'; parses 1 "bad values_at path"
 policy 'covers: [x]' 'rules:';                        parses 1 "empty rules"
+policy 'covers:[a]';                                  parses 1 "top-level key without a space after the colon"
+policy 'covers: [a]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]' 'rules:' '  - field: s' '    any:[a]'; parses 1 "rule key without a space after the colon"
+policy 'covers: [a]#x';                               parses 1 "# right after a list"
+policy 'covers: [a]' 'unknown_writes: block#x';       parses 1 "# right after a scalar"
+policy 'covers: [a]  # fine' '# whole-line comment';  parses 0 "# after whitespace is a comment"
+policy 'covers: [x]' 'allow: [get:, x]';              parses 1 "plain scalar ending with a colon"
+policy 'covers: [x]' 'allow: [- x]';                  parses 1 "plain scalar starting with '- '"
+policy 'covers: [x]' 'allow: [? x]';                  parses 1 "plain scalar starting with '? '"
+policy 'covers: [x]' 'allow: [-]';                    parses 1 "plain scalar that is just -"
+policy 'covers: [x]' 'allow: [:x]';                   parses 1 "plain scalar starting with a colon"
+policy 'covers: [x]' 'allow: ["\x2adelete\x2a"]';     parses 1 "backslash in double quotes"
+policy 'covers: [x]' 'allow: ["a"b"]';                parses 1 "quoted scalar containing its own quote"
+policy 'covers: [x]' 'allow: ["a" "b"]';              parses 1 "two adjacent scalars in one item"
+policy 'covers: [x]' 'allow: [a "b"]';                parses 1 "plain scalar followed by a quoted one"
+policy 'covers: [x]' 'allow: [a] b';                  parses 1 "text after the closing ]"
+policy 'covers: [x]' "allow: ['a\\b']";               parses 0 "backslash in single quotes is literal"
+policy 'covers: [x]' 'refuse_keys: [uuid]';           parses 1 "refuse_keys without values_at"
+policy 'covers: [x]' 'refuse_keys: [uuid]' 'values_at: [v]'; parses 0 "refuse_keys with values_at"
 : > "$W/guard.yaml"; parses 1 "empty file"
 
 echo "-- tool names"
@@ -46,6 +64,13 @@ run 2 "not in allow list"            mcp__attio__create-list '{}' "is not in the
 run 2 "deny beats allow"             mcp__attio__list-delete-me '{}' "is denied"
 run 2 "deny on a later __ suffix"    mcp__attio__delete__record '{}' "is denied"
 run 0 "server containing __"         mcp__x__Attio__list-records '{}'
+policy 'covers: [no_delete]' 'allow: [list-*, get-*]' 'deny: ["*delete*"]'
+run 0 "server_match: plain server"   mcp__attio__get-x '{}' "" - attio
+run 0 "server_match: server with __" mcp__x__Attio__get-x '{}' "" - attio
+run 2 "server_match: tool with __ cannot ride on allow" mcp__attio__purge__get-x '{}' "is not in the allow list" - attio
+run 0 "no server_match: any suffix counts" mcp__attio__purge__get-x '{}'
+run 2 "server_match: deny still checks every suffix" mcp__attio__get__delete-x '{}' "is denied" - attio
+policy 'covers: [no_delete]' 'allow: [list-*, update-record]' 'deny: ["*delete*"]'
 run 0 "case-insensitive"             mcp__attio__LIST-Records '{}'
 policy 'covers: [no_delete]' 'deny: ["*delete*"]'
 run 0 "no allow list: others allowed" mcp__attio__create-list '{}'
@@ -58,6 +83,7 @@ run 0 "create draft"                 mcp__a__add-record-to-list '{"entry_values"
 run 2 "create approved"              mcp__a__add-record-to-list '{"entry_values":{"status":"approved"}}' "status may only be written as draft on create"
 run 0 "wrapped value"                mcp__a__add-record-to-list '{"entry_values":{"status":{"option":"Draft"}}}'
 run 2 "mixed wrapped values"         mcp__a__add-record-to-list '{"entry_values":{"status":{"option":"draft","value":"sent"}}}'
+run 2 "unwrap key plus a sibling key" mcp__a__add-record-to-list '{"entry_values":{"status":{"option":"draft","option_id":"approved-id"}}}' "cannot check this call"
 run 2 "unknown object shape"         mcp__a__add-record-to-list '{"entry_values":{"status":{"foo":1}}}' "cannot check this call"
 run 0 "update voided"                mcp__a__update-entry '{"entry_values":{"status":"voided"}}'
 run 2 "update draft"                 mcp__a__update-entry '{"entry_values":{"status":"draft"}}' "on update"
@@ -69,6 +95,10 @@ run 2 "unknown tool with values is an update" mcp__a__assert-entry '{"entry_valu
 run 0 "unknown tool without values"  mcp__a__create-note '{"title":"x"}'
 run 2 "list path"                    mcp__a__update-entry '{"records":[{"fields":{"status":"voided"}},{"fields":{"Status":"sent"}}]}'
 run 2 "field name normalization"     mcp__a__update-entry '{"records":[{"fields":{"Do Not Contact":false}}]}'
+run 2 "list inside a list at values_at" mcp__a__update-entry '{"records":[[{"fields":{"status":"approved"}}]]}' "cannot check this call"
+run 2 "non-object list item at values_at" mcp__a__update-entry '{"records":["x"]}' "cannot check this call"
+run 0 "missing values_at key is skipped" mcp__a__update-entry '{"other":1}'
+run 2 "zero-width space in a key"    mcp__a__update-entry $'{"values":{"status\u200b":"approved"}}' "invisible characters"
 run 2 "attribute map not an object"  mcp__a__update-entry '{"entry_values":[1]}' "cannot check this call"
 policy 'covers: [x]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]' 'unknown_writes: block' 'rules:' '  - field: s' '    any: [a]'
 run 2 "unknown_writes: block"        mcp__a__other '{"v":{"s":"a"}}' "not a known create or update tool"
@@ -89,6 +119,14 @@ out=$(printf '{not json' | python3 "$E" "$W/guard.yaml" - x 2>&1); rc=$?
 [ "$rc" -eq 2 ] && _report ok "bad JSON blocks" || _report no "bad JSON (rc=$rc): $out"
 out=$(printf '{}' | python3 "$E" "$W/missing.yaml" - x 2>&1); rc=$?
 [ "$rc" -eq 2 ] && _report ok "missing policy blocks" || _report no "missing policy (rc=$rc): $out"
+mkdir "$W/dirpolicy.yaml"
+out=$(printf '{}' | python3 "$E" "$W/dirpolicy.yaml" - x 2>&1); rc=$?
+[ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q Traceback && _report ok "directory as policy blocks" || _report no "directory policy (rc=$rc): $out"
+out=$(python3 "$E" --check "$W/dirpolicy.yaml" 2>&1); rc=$?
+[ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q '^FAIL: IsADirectoryError' && ! printf '%s' "$out" | grep -q Traceback && _report ok "--check on a directory: FAIL, no traceback" || _report no "--check directory (rc=$rc): $out"
+printf '\xff\xfe' > "$W/bin.yaml"
+out=$(python3 "$E" --check "$W/bin.yaml" 2>&1); rc=$?
+[ "$rc" -eq 1 ] && ! printf '%s' "$out" | grep -q Traceback && _report ok "--check on binary junk: FAIL, no traceback" || _report no "--check junk (rc=$rc): $out"
 [ -x "$E" ] && _report ok "engine executable" || _report no "engine not executable"
 
 finish
