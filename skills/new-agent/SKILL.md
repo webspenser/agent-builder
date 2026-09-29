@@ -66,8 +66,9 @@ The template lives at `_template/` in this plugin's root
    - Guardrails / never do, and Escalate to human when.
    - Interview — which skill gathers the user's context; replace
      `<interview-skill>` in `skills/setup/SKILL.md` with its name. If
-     the agent has no interview skill, delete step 6's interview
-     sentence from setup instead of leaving `<interview-skill>`.
+     the agent has no interview skill, delete the `<interview-skill>`
+     wording from setup (its step 7 and source mode) instead of
+     leaving it.
    Fill the Sub-agents and Skills tables in `AGENT.md` to match.
 6. **Evals.** Write at least three cases in `evals/cases.md`, each a
    thing the agent must refuse or never do, in the form Given / Expect
