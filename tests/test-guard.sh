@@ -6,10 +6,10 @@ source tests/lib.sh
 GUARD="$PWD/_template/hooks/guard.sh"
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-PKG="$W/pkg"; AD="$PKG/capabilities/crm/adapters/demo"; mkdir -p "$AD" "$PKG/hooks"
+PKG="$W/pkg"; AD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$AD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "2.0"' > "$PKG/agent.yaml"
-printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: DemoCRM' > "$AD/adapter.yaml"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "3.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$AD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
     'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
@@ -66,12 +66,12 @@ run_guard "$I" "$(call mcp__other__x '{"tool_name":"mcp__democrm__delete-record"
 run_guard "$I" "$(call mcp__other__x '{"note":"say \"tool_name\": \"y\""}')";         expect 0 "escaped tool_name ignored"
 
 echo "-- bindings"
-PL="$PKG/capabilities/email/adapters/plain"; mkdir -p "$PL"
-printf '%s\n' 'capability: email' 'provider: plain' 'server_match: plainmail' > "$PL/adapter.yaml"
+PL="$PKG/capabilities/email/tools/plain"; mkdir -p "$PL"
+printf '%s\n' 'capability: email' 'provider: plain' 'server_match: plainmail' > "$PL/identity.yaml"
 P2="$W/plain"; mkdir -p "$P2"; printf '%s\n' 'agent: demo-agent' 'bind_email: plain' > "$P2/instance.yaml"
 run_guard "$P2" "$(call mcp__plainmail__send_message)";          expect 0 "adapter without guard.yaml: instruction-only, allowed"
 G2="$W/ghost"; mkdir -p "$G2"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' > "$G2/instance.yaml"
-run_guard "$G2" "$(call mcp__democrm__delete-record)";           expect 0 "missing adapter.yaml: allowed with a note" "no adapter.yaml"
+run_guard "$G2" "$(call mcp__democrm__delete-record)";           expect 2 "bound tool without identity.yaml: blocked" "has no identity.yaml"
 R="$W/repeat"; mkdir -p "$R"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' 'bind_crm: demo' > "$R/instance.yaml"
 run_guard "$R" "$(call mcp__democrm__delete-record)";            expect 2 "repeated bind_ key applies every adapter"
 SP="$W/spaced"; mkdir -p "$SP"; printf '%s\n' 'agent: demo-agent' 'bind_crm : "Demo"  # note' > "$SP/instance.yaml"
@@ -91,12 +91,12 @@ run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"voided"}}'
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "binding ID enforced"
 rm -r "$I/bindings"; write_policy
 
-echo "-- custom adapters"
-C="$W/custom"; mkdir -p "$C/custom-adapters/crm"
+echo "-- custom tools"
+C="$W/custom"; mkdir -p "$C/custom-tools/crm"
 printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$C/instance.yaml"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$C/custom-adapters/crm/adapter.yaml"
-printf '%s\n' 'covers: [draft_only]' 'allow: [list-*]' > "$C/custom-adapters/crm/guard.yaml"
-printf '%s\n' 'import pathlib' "pathlib.Path('$W/EVIL-RAN').touch()" > "$C/custom-adapters/crm/guard.py"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$C/custom-tools/crm/identity.yaml"
+printf '%s\n' 'covers: [draft_only]' 'allow: [list-*]' > "$C/custom-tools/crm/guard.yaml"
+printf '%s\n' 'import pathlib' "pathlib.Path('$W/EVIL-RAN').touch()" > "$C/custom-tools/crm/guard.py"
 run_guard "$C" "$(call mcp__democrm__drop-table)";               expect 2 "custom policy enforced" "is not in the allow list"
 run_guard "$C" "$(call mcp__democrm__list-records)"
 [ "$RC" -eq 0 ] && [ ! -e "$W/EVIL-RAN" ] && _report ok "no code from the instance runs" || _report no "instance code ran (rc=$RC): $OUT"
@@ -137,5 +137,14 @@ rm "$PKG/instance.yaml"
 assert_contains _template/hooks/hooks.json '"\"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\""'
 assert_contains _template/hooks/hooks.json '"matcher": "mcp__.*"'
 [ -x "$GUARD" ] && _report ok "guard is executable" || _report no "guard not executable"
+
+echo "-- 3.0 migration"
+M="$W/migrate"; mkdir -p "$M/custom-adapters/crm"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$M/instance.yaml"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$M/custom-adapters/crm/adapter.yaml"
+run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom-adapters/ left after upgrade: blocked" "apply the 3.0 migration"
+rm -r "$M/custom-adapters"
+run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom binding with no custom tool: blocked" "run the add-tool skill"
+run_guard "$M" "$(call mcp__other__list-records)";              expect 2 "missing identity blocks every MCP call (fail closed)" "has no identity.yaml"
 
 finish
