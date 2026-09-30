@@ -27,6 +27,7 @@ if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: set
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/adapters/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
 if [ -d _template/hooks/__pycache__ ]; then echo "FAIL: bytecode in _template/hooks"; STATUS=1; fi
+if [ ! -f _template/skills/schedule/SKILL.md ]; then echo "FAIL: template has no schedule skill"; STATUS=1; fi
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"
 exit "$STATUS"

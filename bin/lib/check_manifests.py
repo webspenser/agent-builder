@@ -307,6 +307,18 @@ def check_activities(root, meta, caps):
     """activity_<name>: capabilities (or none); a schedule skill when any exist."""
     fails = []
     acts = {k[len("activity_"):]: v for k, v in meta.items() if k.startswith("activity_")}
+    try:
+        raw = read_text(root / "agent.yaml").splitlines()
+    except ReadError:
+        raw = []  # already reported
+    seen = set()
+    for line in raw:
+        m = re.match(r"[ \t]*activity_([^:\s]+)[ \t]*:", line)
+        if not m:
+            continue
+        if m.group(1) in seen:
+            fails.append(f"agent.yaml: activity_{m.group(1)} is declared more than once")
+        seen.add(m.group(1))
     for act, value in sorted(acts.items()):
         if not ACTIVITY.match(act):
             fails.append(f"agent.yaml: activity '{act}' is not kebab-case")

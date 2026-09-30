@@ -9,7 +9,10 @@ procedures, optional sub-agent roles, the context it needs about your
 world, and evals that say what it must never do. The same folder runs
 on Claude Code, Gemini CLI, and Codex. Agents can declare tools
 (capabilities) that users bind to their own CRM or mailbox, with guard
-policies that enforce the agent's safety rules before every call.
+policies that enforce the agent's safety rules before every call. An
+agent's activities can also run on a schedule, unattended, as Claude
+cloud routines, but only when guard policies cover every rule they
+depend on.
 
 ## Install
 
@@ -68,7 +71,7 @@ In CI, from any agent repo:
 
 | Path | What it is |
 |---|---|
-| `STANDARD.md` | The Agent Standard 2.0 |
+| `STANDARD.md` | The Agent Standard 2.1 |
 | `_template/` | The skeleton every agent starts from |
 | `skills/` | `new-agent` (the wizard) and `validate-agent` |
 | `bin/validate-agent.sh` | The validator |
