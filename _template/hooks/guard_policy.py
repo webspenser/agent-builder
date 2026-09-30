@@ -22,7 +22,7 @@ import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "rules")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
-RULE_KEYS = ("field", "binding_id", "create", "update", "any")
+RULE_KEYS = ("field", "binding_id", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
@@ -193,8 +193,14 @@ def _validate(policy):
             if rule.get("binding_id", "required") != "required":
                 raise PolicyError("binding_id may only be 'required'")
             lists = [k for k in ("create", "update", "any") if k in rule]
+            if "forbid" in rule:
+                if rule["forbid"] != "true":
+                    raise PolicyError(f"rule for {rule['field']}: forbid may only be true")
+                if lists:
+                    raise PolicyError(f"rule for {rule['field']}: forbid cannot be combined with create, update, or any")
+                continue
             if not lists:
-                raise PolicyError(f"rule for {rule['field']} needs create, update, or any")
+                raise PolicyError(f"rule for {rule['field']} needs forbid, create, update, or any")
             for k in lists:
                 if not isinstance(rule[k], list) or not rule[k]:
                     raise PolicyError(f"rule for {rule['field']}: {k} must be a non-empty list")
@@ -399,6 +405,10 @@ def problems(policy, event, bindings, server_match=None):
                 found.append(f"attribute {key} is addressed by ID; use its name")
         for rule in rules:
             field = _norm(rule["field"])
+            if rule.get("forbid") == "true":
+                if any(_norm(key) in ids[field] for key in amap):
+                    found.append(f"{rule['field']} may not be written")
+                continue
             allowed = rule.get(kind) or rule.get("any")
             if not allowed:
                 continue
