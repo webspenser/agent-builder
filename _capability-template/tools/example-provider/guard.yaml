@@ -7,9 +7,13 @@
 covers: [example_invariant]
 allow: [whoami, list-*, get-*, search-*, create-thing, update-thing]
 deny: ["*delete*"]
-create_tools: [create-thing]
-update_tools: [update-thing]
-values_at: [values]
+writes:
+  - kind: create
+    tools: [create-thing]
+    at: [values]
+  - kind: update
+    tools: [update-thing]
+    at: [values]
 rules:
   - field: status
     create: [draft]

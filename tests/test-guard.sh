@@ -12,7 +12,7 @@ printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard:
 printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
-    'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+    'writes:' '  - kind: create' '    tools: [add-entry]' '    at: [values]' '  - kind: update' '    tools: [update-entry]' '    at: [values]' \
     'rules:' '  - field: status' '    update: [voided]' > "$TD/guard.yaml"
 }
 write_policy
@@ -98,7 +98,7 @@ run_guard "$H" "$(call mcp__democrm__list-records)"
   && _report ok "unreadable binding blocks, nothing executed" || _report no "hostile bindings (rc=$RC): $OUT"
 
 echo "-- field IDs from bindings"
-printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+printf '%s\n' 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [add-entry]' '    at: [values]' '  - kind: update' '    tools: [update-entry]' '    at: [values]' \
   'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
 mkdir -p "$I/bindings"; printf '%s\n' 'field_status: fldS' > "$I/bindings/crm.md"

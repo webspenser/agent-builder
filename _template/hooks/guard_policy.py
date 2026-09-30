@@ -11,7 +11,8 @@ With server_match, `allow` only counts a tool-name suffix whose server segment
 (the text between the previous "__" and that suffix's "__") contains it, so
 "mcp__attio__purge__get-x" cannot ride on `allow: [get-*]`; `deny` still checks
 every suffix. Without it, `allow` considers every suffix.
-The policy format is a strict YAML subset; see STANDARD.md "Guard policy".
+The policy format is a strict YAML subset (a `writes:` list says where values
+sit; `rules:` constrain them); see STANDARD.md "Guard policy".
 """
 import fnmatch
 import json
@@ -19,11 +20,11 @@ import re
 import sys
 import unicodedata
 
-KEYS = ("covers", "allow", "deny", "create_tools", "update_tools", "values_at",
-        "unwrap", "unknown_writes", "refuse_keys", "rules")
-LIST_KEYS = ("covers", "allow", "deny", "create_tools", "update_tools", "values_at",
-             "unwrap", "refuse_keys")
+KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "rules")
+LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
+OLD_KEYS = ("create_tools", "update_tools", "values_at")  # Agent Standard 3 keys
 RULE_KEYS = ("field", "binding_id", "create", "update", "any")
+WRITE_KEYS = ("kind", "tools", "at")
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
 }
@@ -105,8 +106,8 @@ def _flow_list(text, lineno):
     return [_scalar(item, lineno) for item in items]
 
 
-def _parse_rules(lines, i):
-    rules = []
+def _parse_items(lines, i, name, allowed):
+    items = []
     while i < len(lines):
         lineno = i + 1
         raw = lines[i]
@@ -119,28 +120,28 @@ def _parse_rules(lines, i):
         if not line.startswith(" "):
             break
         if line.startswith("  - "):
-            rules.append({})
+            items.append({})
             body = line[4:]
-        elif line.startswith("    ") and rules and not line[4:5].isspace():
+        elif line.startswith("    ") and items and not line[4:5].isspace():
             body = line[4:]
         else:
-            raise PolicyError(f"line {lineno}: rule items are '  - key: value' with further keys indented 4 spaces")
+            raise PolicyError(f"line {lineno}: {name} items are '  - key: value' with further keys indented 4 spaces")
         m = KEY_LINE.match(body)
         if not m:
             raise PolicyError(f"line {lineno}: expected 'key: value'")
         key, value = m.group(1), (m.group(2) or "").strip()
-        if key not in RULE_KEYS:
-            raise PolicyError(f"line {lineno}: unknown rule key '{key}'")
-        if key in rules[-1]:
-            raise PolicyError(f"line {lineno}: duplicate rule key '{key}'")
+        if key not in allowed:
+            raise PolicyError(f"line {lineno}: unknown {name} key '{key}'")
+        if key in items[-1]:
+            raise PolicyError(f"line {lineno}: duplicate {name} key '{key}'")
         if value.startswith("["):
-            rules[-1][key] = _flow_list(value, lineno)
+            items[-1][key] = _flow_list(value, lineno)
         else:
-            rules[-1][key] = _scalar(value, lineno)
+            items[-1][key] = _scalar(value, lineno)
         i += 1
-    if not rules:
-        raise PolicyError("rules: has no items")
-    return rules, i
+    if not items:
+        raise PolicyError(f"{name}: has no items")
+    return items, i
 
 
 def _validate(policy):
@@ -159,21 +160,22 @@ def _validate(policy):
     for preset in policy.get("refuse_keys", []):
         if preset not in REFUSE_PRESETS:
             raise PolicyError(f"refuse_keys: unknown preset '{preset}'")
-    for path in policy.get("values_at", []):
-        if not PATH.match(path):
-            raise PolicyError(f"values_at: {path} is not a path like values or \"records[].fields\"")
-    for key in ("allow", "deny", "create_tools", "update_tools", "unwrap"):
+    for key in ("allow", "deny", "unwrap"):
         for item in policy.get(key, []):
             if not item:
                 raise PolicyError(f"{key}: empty entry")
-    if ("rules" in policy or "refuse_keys" in policy) and not policy.get("values_at"):
-        raise PolicyError("values_at is required (and must name a path) when rules or refuse_keys are present")
+    for entry in policy.get("writes", []):
+        if entry.get("kind") not in ("create", "update"):
+            raise PolicyError("writes: kind must be create or update")
+        for k in ("tools", "at"):
+            if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
+                raise PolicyError(f"writes: each entry needs a non-empty {k} list")
+        for path in entry["at"]:
+            if not PATH.match(path):
+                raise PolicyError(f"writes: {path} is not a path like values or \"records[].fields\"")
+    if ("rules" in policy or "refuse_keys" in policy) and not policy.get("writes"):
+        raise PolicyError("writes is required when rules or refuse_keys are present")
     if "rules" in policy:
-        for key in ("create_tools", "update_tools", "values_at"):
-            if key not in policy:
-                raise PolicyError(f"{key} is required when rules are present")
-        if not policy["values_at"]:
-            raise PolicyError("values_at must name at least one path")
         for rule in policy["rules"]:
             if not isinstance(rule.get("field"), str) or not rule["field"]:
                 raise PolicyError("each rule needs a field")
@@ -204,15 +206,17 @@ def parse(text):
         if line[0] == " " or not m:
             raise PolicyError(f"line {lineno}: expected 'key: value' at column 0")
         key, value = m.group(1), (m.group(2) or "").strip()
+        if key in OLD_KEYS:
+            raise PolicyError(f'{key} is the Agent Standard 3 form; 4.0 uses writes: (see STANDARD.md "Guard policy")')
         if key not in KEYS:
             raise PolicyError(f"line {lineno}: unknown key '{key}'")
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
         i += 1
-        if key == "rules":
+        if key in ("rules", "writes"):
             if value:
-                raise PolicyError(f"line {lineno}: rules: takes '  - field: ...' items on the following lines")
-            policy["rules"], i = _parse_rules(lines, i)
+                raise PolicyError(f"line {lineno}: {key}: takes '  - ...' items on the following lines")
+            policy[key], i = _parse_items(lines, i, key, RULE_KEYS if key == "rules" else WRITE_KEYS)
             continue
         if not value:
             raise PolicyError(f"line {lineno}: {key} has no value")
@@ -342,24 +346,21 @@ def problems(policy, event, bindings, server_match=None):
     refuse = [REFUSE_PRESETS[p] for p in policy.get("refuse_keys", [])]
     if not rules and not refuse:
         return []
-    if _matches(names, policy.get("create_tools", [])):
-        kind = "create"
-    elif _matches(names, policy.get("update_tools", [])):
-        kind = "update"
-    else:
-        kind = None
+    writes = policy.get("writes", [])
+    matched = [w for w in writes if _matches(names, w["tools"])]
     args = event.get("tool_input")
     if not isinstance(args, dict):
-        if kind:
+        if matched:
             raise PolicyError("tool_input is not an object")
         return []
-    maps = [m for path in policy.get("values_at", []) for m in _maps_at(args, path)]
-    if kind is None:
-        if not maps:
+    tagged = [(w["kind"], m) for w in matched for path in w["at"] for m in _maps_at(args, path)]
+    if not matched:
+        loose = [m for w in writes for path in w["at"] for m in _maps_at(args, path)]
+        if not loose:
             return []
         if policy.get("unknown_writes", "update") == "block":
             return [f"{shown} writes values but is not a known create or update tool"]
-        kind = "update"
+        tagged = [("update", m) for m in loose]
     found = []
     ids = {}
     for rule in rules:
@@ -369,7 +370,7 @@ def problems(policy, event, bindings, server_match=None):
             found.append(f"the probe has not recorded field_{field} in bindings; re-run setup's tools step")
         ids[field] = {field} | ({_norm(bound)} if bound else set())
     unwrap = policy.get("unwrap", [])
-    for amap in maps:
+    for kind, amap in tagged:
         for key in amap:
             if any(unicodedata.category(ch) == "Cf" for ch in str(key)):
                 raise PolicyError("attribute key contains invisible characters")
