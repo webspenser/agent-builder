@@ -82,7 +82,7 @@ skills/add-tool/            adds a tool for a capability (an instance's own, or 
 ## What a client's instance holds
 
 ```
-instance.yaml               agent, agent_version, mode (plugin|source), bind_<cap>: <tool>
+instance.yaml               agent, mode (plugin|source), bind_<cap>: <tool>
 bindings/<cap>.md           what setup's probe found: workspace, object IDs, field IDs
 context/                    business-profile.md, icp.md, operating-config.md, samples/
 schedules.yaml              timezone, schedule_*, then_*, environment, routine_*

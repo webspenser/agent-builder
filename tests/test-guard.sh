@@ -18,7 +18,7 @@ write_policy() {
 write_policy
 
 I="$W/inst"; mkdir -p "$I/sub"
-printf '%s\n' 'agent: demo-agent' 'agent_version: 1.0.0' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
 
 call() { # call <tool_name> [tool_input JSON] — hook input on one line
   local args=${2:-}; [ -n "$args" ] || args='{}'

@@ -362,7 +362,7 @@ make_valid_agent "$FIX/rt-nosetup"; rm -r "$FIX/rt-nosetup/skills/setup"; fails_
 make_valid_agent "$FIX/rt-catalog"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' >> "$FIX/rt-catalog/agent.yaml"; assert_pass $V "$FIX/rt-catalog"
 make_valid_agent "$FIX/rt-halfcat"; printf '%s\n' 'catalog: webspenser' >> "$FIX/rt-halfcat/agent.yaml"; fails_with "$FIX/rt-halfcat" "agent.yaml: catalog and catalog_repo must be set together as flat keys"
 make_valid_agent "$FIX/rt-badrepo"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: not a repo' >> "$FIX/rt-badrepo/agent.yaml"; fails_with "$FIX/rt-badrepo" "agent.yaml: catalog_repo 'not a repo' is not owner/repo"
-make_valid_agent "$FIX/rt-srcinst"; printf '%s\n' 'agent: demo-agent' 'agent_version: 0.1.0' 'standard: "1.1"' 'mode: source' > "$FIX/rt-srcinst/instance.yaml"; assert_pass $V "$FIX/rt-srcinst"
+make_valid_agent "$FIX/rt-srcinst"; printf '%s\n' 'agent: demo-agent' 'standard: "1.1"' 'mode: source' > "$FIX/rt-srcinst/instance.yaml"; assert_pass $V "$FIX/rt-srcinst"
 make_valid_agent "$FIX/rt-pluginst"; printf '%s\n' 'agent: demo-agent' 'mode: plugin' > "$FIX/rt-pluginst/instance.yaml"; fails_with "$FIX/rt-pluginst" "instance.yaml in a package must have mode: source"
 make_valid_agent "$FIX/rt-wronginst"; printf '%s\n' 'agent: other' 'mode: source' > "$FIX/rt-wronginst/instance.yaml"; fails_with "$FIX/rt-wronginst" "instance.yaml: agent 'other' does not match agent.yaml 'demo-agent'"
 

@@ -28,7 +28,7 @@ cusage() { printf '%s\n' '`get`' '## Probe' 'x' > "$1/custom-tools/crm/usage.md"
 instance() { # instance <dir> <crm provider|-> <email provider|-> <schedule lines...>
   local d="$1" crm="$2" mail="$3"; shift 3
   mkdir -p "$d"
-  { echo 'agent: demo-agent'; echo 'agent_version: 3.0.0'; echo 'mode: plugin'
+  { echo 'agent: demo-agent'; echo; echo 'mode: plugin'
     [ "$crm" = - ] || echo "bind_crm: $crm"; [ "$mail" = - ] || echo "bind_email_drafts: $mail"; } > "$d/instance.yaml"
   printf '%s\n' "$@" > "$d/schedules.yaml"
 }

@@ -43,7 +43,7 @@ skill, if this agent has one.
    Every later step writes into this folder (the instance folder),
    not the current folder.
 4. **Marker.** Write `instance.yaml`:
-   `agent: <name>`, `agent_version: <version>`, `mode: plugin`.
+   `agent: <name>`, `mode: plugin`.
 5. **Host files.** Write `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`, each:
    "This folder is an instance of <name>. Its instructions load from the
    <name> plugin; if they didn't, run the `start` skill." Do not

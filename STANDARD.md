@@ -273,7 +273,6 @@ A folder is an instance of an agent when it holds `instance.yaml`:
 
 ```yaml
 agent: sales-partner       # the agent's name
-agent_version: 1.0.0       # version setup ran with
 mode: plugin               # plugin | source
 bind_crm: attio            # one line per bound capability
 ```
