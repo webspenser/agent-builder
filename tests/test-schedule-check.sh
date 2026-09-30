@@ -6,26 +6,29 @@ source tests/lib.sh
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
-cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py "$PKG/hooks/"
+cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 2.1.0' 'description: Demo' 'standard: "2.1"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "3.0"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
-mkdir -p "$PKG/capabilities/crm/adapters/good" "$PKG/capabilities/crm/adapters/half" "$PKG/capabilities/crm/adapters/bare" "$PKG/capabilities/email_drafts/adapters/mail"
+mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
 printf '%s\n' '# CRM' '' '## Operations' '' '| `get` | x |' '' '## Invariants' '' '- `draft_only` — x' '- `no_delete` — y' > "$PKG/capabilities/crm/contract.md"
 printf '%s\n' '# Email' '' '## Operations' '' '| `draft` | x |' '' '## Invariants' '' '- `no_send` — x' > "$PKG/capabilities/email_drafts/contract.md"
-printf '%s\n' 'capability: crm' 'provider: good' 'server_match: goodcrm' > "$PKG/capabilities/crm/adapters/good/adapter.yaml"
-printf '%s\n' 'covers: [draft_only, no_delete]' 'deny: ["*delete*"]' > "$PKG/capabilities/crm/adapters/good/guard.yaml"
-printf '%s\n' 'capability: crm' 'provider: half' 'server_match: halfcrm' > "$PKG/capabilities/crm/adapters/half/adapter.yaml"
-printf '%s\n' 'covers: [draft_only]' > "$PKG/capabilities/crm/adapters/half/guard.yaml"
-printf '%s\n' 'capability: crm' 'provider: bare' 'server_match: barecrm' > "$PKG/capabilities/crm/adapters/bare/adapter.yaml"
-printf '%s\n' 'capability: email_drafts' 'provider: mail' 'server_match: mail' > "$PKG/capabilities/email_drafts/adapters/mail/adapter.yaml"
-printf '%s\n' 'covers: [no_send]' 'deny: ["*send*"]' > "$PKG/capabilities/email_drafts/adapters/mail/guard.yaml"
+printf '%s\n' 'capability: crm' 'provider: good' 'server_match: goodcrm' > "$PKG/capabilities/crm/tools/good/identity.yaml"
+printf '%s\n' 'covers: [draft_only, no_delete]' 'deny: ["*delete*"]' > "$PKG/capabilities/crm/tools/good/guard.yaml"
+printf '%s\n' 'capability: crm' 'provider: half' 'server_match: halfcrm' > "$PKG/capabilities/crm/tools/half/identity.yaml"
+printf '%s\n' 'covers: [draft_only]' > "$PKG/capabilities/crm/tools/half/guard.yaml"
+printf '%s\n' 'capability: crm' 'provider: bare' 'server_match: barecrm' > "$PKG/capabilities/crm/tools/bare/identity.yaml"
+printf '%s\n' 'capability: email_drafts' 'provider: mail' 'server_match: mail' > "$PKG/capabilities/email_drafts/tools/mail/identity.yaml"
+printf '%s\n' 'covers: [no_send]' 'deny: ["*send*"]' > "$PKG/capabilities/email_drafts/tools/mail/guard.yaml"
+for t in good half bare; do printf '%s\n' '`get`' '## Probe' 'x' > "$PKG/capabilities/crm/tools/$t/usage.md"; done
+printf '%s\n' '`draft`' '## Probe' 'x' > "$PKG/capabilities/email_drafts/tools/mail/usage.md"
+cusage() { printf '%s\n' '`get`' '## Probe' 'x' > "$1/custom-tools/crm/usage.md"; }  # cusage <instance>: usage.md for a custom crm tool
 
 instance() { # instance <dir> <crm provider|-> <email provider|-> <schedule lines...>
   local d="$1" crm="$2" mail="$3"; shift 3
   mkdir -p "$d"
-  { echo 'agent: demo-agent'; echo 'agent_version: 2.1.0'; echo 'mode: plugin'
+  { echo 'agent: demo-agent'; echo 'agent_version: 3.0.0'; echo 'mode: plugin'
     [ "$crm" = - ] || echo "bind_crm: $crm"; [ "$mail" = - ] || echo "bind_email_drafts: $mail"; } > "$d/instance.yaml"
   printf '%s\n' "$@" > "$d/schedules.yaml"
 }
@@ -40,7 +43,7 @@ I="$W/ok"; instance "$I" good mail 'timezone: UTC' 'environment: env_01Abc' 'sch
 run check "$I" --repo acme/sales;                  expect 0 "all entries pass" "PASS  demo-agent: prospect (sales)"
 expect 0 "digest passes" "PASS  demo-agent: digest (sales)"
 expect 0 "env setup script" "claude plugin install demo-agent@webspenser"
-expect 0 "version comment" "# demo-agent 2.1.0"
+expect 0 "version comment" "# demo-agent 3.0.0"
 expect 0 "UTC cron" "(UTC cron: 0 7 * * 1)"
 expect 0 "connectors with server_match" 'connectors: good (matches "goodcrm"), mail (matches "mail")'
 expect 0 "prompt with then" 'prompt: Scheduled run of `prospect`, then `research` (unattended). Follow this agent'"'"'s instructions for each activity, in order.'
@@ -48,9 +51,9 @@ N="$W/nomail"; instance "$N" good - 'timezone: UTC' 'schedule_prospect: "Monday 
 run check "$N";                                    expect 1 "unbound capability fails its entry" "email_drafts is not bound"
 expect 1 "other entry still passes" "PASS  demo-agent: prospect (nomail)"
 H="$W/half"; instance "$H" half mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-run check "$H";                                    expect 1 "uncovered invariant fails" "crm: invariant no_delete is not covered by the half adapter's guard policy"
+run check "$H";                                    expect 1 "uncovered invariant fails" "crm: invariant no_delete is not covered by the half tool's guard policy"
 B="$W/bare"; instance "$B" bare mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-run check "$B";                                    expect 1 "adapter without a policy fails" "invariant draft_only is not covered"
+run check "$B";                                    expect 1 "tool without a policy fails" "invariant draft_only is not covered"
 T="$W/then"; instance "$T" good - 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: digest'
 run check "$T";                                    expect 1 "then activity's capabilities are gated" "email_drafts is not bound"
 R="$W/none"; instance "$R" - - 'timezone: UTC' 'schedule_research: "daily 06:30"'
@@ -60,10 +63,11 @@ run check "$U";                                    expect 1 "unknown activity fa
 X="$W/badwhen"; instance "$X" good mail 'timezone: UTC' 'schedule_prospect: "Mondays at 7"'
 run check "$X";                                    expect 1 "bad schedule fails" "is not '<weekday|daily> HH:MM'"
 C="$W/custom"; instance "$C" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-mkdir -p "$C/custom-adapters/crm"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: mycrm' > "$C/custom-adapters/crm/adapter.yaml"
-printf '%s\n' 'covers: [draft_only, no_delete]' > "$C/custom-adapters/crm/guard.yaml"
-run check "$C";                                    expect 0 "custom adapter with full policy passes" "connectors: custom"
+mkdir -p "$C/custom-tools/crm"
+cusage "$C"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: mycrm' > "$C/custom-tools/crm/identity.yaml"
+printf '%s\n' 'covers: [draft_only, no_delete]' > "$C/custom-tools/crm/guard.yaml"
+run check "$C";                                    expect 0 "custom tool with full policy passes" "connectors: custom"
 
 echo "-- time zones"
 K="$W/kolkata"; instance "$K" good mail 'timezone: Asia/Kolkata' 'schedule_prospect: "Monday 03:00"'
@@ -123,17 +127,18 @@ BX="$W/badbind"; instance "$BX" - mail 'timezone: UTC' 'schedule_prospect: "Mond
 run check "$BX";                                   expect 1 "unreadable binding line fails every entry" "cannot read (bind_crm: ../../x)"
 BD="$W/dupbind"; instance "$BD" half mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; echo 'bind_crm: good' >> "$BD/instance.yaml"
 run check "$BD";                                   expect 1 "duplicate binding fails" "crm is bound more than once; the guard applies every binding"
-expect 1 "every bound adapter is gated" "invariant no_delete is not covered by the half adapter"
+expect 1 "every bound tool is gated" "invariant no_delete is not covered by the half tool"
 BN="$W/nomatch"; instance "$BN" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-mkdir -p "$BN/custom-adapters/crm"
-printf '%s\n' 'capability: crm' 'provider: custom' > "$BN/custom-adapters/crm/adapter.yaml"
-printf '%s\n' 'covers: [draft_only, no_delete]' > "$BN/custom-adapters/crm/guard.yaml"
-run check "$BN";                                   expect 1 "adapter without server_match fails" "crm: the custom adapter has no server_match, so the guard never enforces it"
+mkdir -p "$BN/custom-tools/crm"
+cusage "$BN"
+printf '%s\n' 'capability: crm' 'provider: custom' > "$BN/custom-tools/crm/identity.yaml"
+printf '%s\n' 'covers: [draft_only, no_delete]' > "$BN/custom-tools/crm/guard.yaml"
+run check "$BN";                                   expect 1 "tool without server_match fails" "crm: the custom tool is not valid: custom-tools/crm/identity.yaml: missing server_match"
 BQ="$W/quoted"; instance "$BQ" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; echo "bind_crm: \"GOOD\"  # note" >> "$BQ/instance.yaml"
 run check "$BQ";                                   expect 0 "quotes, comments and case are normalized like the guard" "connectors: good"
-BA="$W/noadapter"; instance "$BA" ghost mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'schedule_digest: "Monday 08:00"'
-run check "$BA";                                   expect 1 "missing adapter fails the entries that use it" "crm: no adapter.yaml for ghost"
-expect 1 "missing adapter: the rest still prints" "FAIL  demo-agent: digest"
+BA="$W/notool"; instance "$BA" ghost mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'schedule_digest: "Monday 08:00"'
+run check "$BA";                                   expect 1 "missing tool fails the entries that use it" "crm: no identity.yaml for ghost"
+expect 1 "missing tool: the rest still prints" "FAIL  demo-agent: digest"
 BM="$W/nomatchmix"; instance "$BM" good mail 'timezone: UTC' 'schedule_research: "daily 06:30"' 'schedule_prospect: "Monday 07:00"'
 sed -i.bak 's/^bind_crm: good/bind_crm: ghost/' "$BM/instance.yaml"
 run check "$BM";                                   expect 1 "unaffected entry still printed" "PASS  demo-agent: research (nomatchmix)"
@@ -194,10 +199,11 @@ run check "$CL";                                   expect 0 "CRLF instance.yaml 
 RA="$W/repagent"; instance "$RA" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; sed -i.bak 's/^agent: demo-agent/agent: other/' "$RA/instance.yaml"; echo 'agent: demo-agent' >> "$RA/instance.yaml"
 run check "$RA";                                   expect 2 "first agent: line wins (like the guard)" "is not 'demo-agent'"
 RM="$W/repmatch"; instance "$RM" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-mkdir -p "$RM/custom-adapters/crm"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: first' 'server_match: second' > "$RM/custom-adapters/crm/adapter.yaml"
-printf '%s\n' 'covers: [draft_only, no_delete]' > "$RM/custom-adapters/crm/guard.yaml"
-run check "$RM";                                   expect 0 "first server_match wins" 'custom (matches "first")'
+mkdir -p "$RM/custom-tools/crm"
+cusage "$RM"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: first' 'server_match: second' > "$RM/custom-tools/crm/identity.yaml"
+printf '%s\n' 'covers: [draft_only, no_delete]' > "$RM/custom-tools/crm/guard.yaml"
+run check "$RM";                                   expect 1 "repeated server_match fails (tool_check refuses what the guard reads by first match)" "server_match appears more than once"
 RS="$W/repsched"; instance "$RS" good mail 'timezone: UTC' 'timezone: Asia/Tokyo' 'schedule_prospect: "Monday 07:00"'
 run check "$RS";                                   expect 0 "schedules.yaml: first timezone wins" "timezone UTC"
 NB="$W/nbsp"; instance "$NB" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf 'bind_crm: good\xc2\xa0\n' >> "$NB/instance.yaml"
@@ -241,23 +247,24 @@ cp "$A3" "$W/pkg3/agent.yaml"
 run check "$NU";                                   expect 2 "NUL in the instance agent: is an error" "instance.yaml line 1 has a control character (0x00)"
 DL="$W/delinst"; instance "$DL" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf '# note\177\n' >> "$DL/instance.yaml"
 run check "$DL";                                   expect 2 "DEL anywhere in instance.yaml is an error" "instance.yaml line 6 has a control character (0x7f)"
-sm() { # sm <dir> <printf format for the server_match line>: a custom crm adapter with a full policy
+sm() { # sm <dir> <printf format for the server_match line>: a custom crm tool with a full policy
   instance "$1" custom mail 'timezone: UTC' 'environment: env_01Abc' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'schedule_digest: "Monday 08:00"'
-  mkdir -p "$1/custom-adapters/crm"
-  { printf '%s\n' 'capability: crm' 'provider: custom'; printf "$2"'\n'; } > "$1/custom-adapters/crm/adapter.yaml"
-  printf '%s\n' 'covers: [draft_only, no_delete]' 'deny: ["*delete*"]' > "$1/custom-adapters/crm/guard.yaml"
+  mkdir -p "$1/custom-tools/crm"; cusage "$1"
+cusage "$1"
+  { printf '%s\n' 'capability: crm' 'provider: custom'; printf "$2"'\n'; } > "$1/custom-tools/crm/identity.yaml"
+  printf '%s\n' 'covers: [draft_only, no_delete]' 'deny: ["*delete*"]' > "$1/custom-tools/crm/guard.yaml"
 }
 sm "$W/sm-us" 'server_match: good\037crm'
-run check "$W/sm-us";                              expect 1 "0x1f in server_match fails the entry" "crm: the custom adapter's adapter.yaml line 3 has a control character (0x1f)"
-expect 1 "0x1f in adapter.yaml: other entries still print" "FAIL  demo-agent: digest"
+run check "$W/sm-us";                              expect 1 "0x1f in server_match fails the entry" "crm: the custom tool is not valid: custom-tools/crm/identity.yaml line 3 has a control character (0x1f)"
+expect 1 "0x1f in identity.yaml: other entries still print" "FAIL  demo-agent: digest"
 sm "$W/sm-sp" 'server_match: "goodcrm "'
-run check "$W/sm-sp";                              expect 1 "quoted trailing space in server_match fails" "crm: the custom adapter's server_match 'goodcrm ' can never match an MCP tool name, so the guard never enforces it"
+run check "$W/sm-sp";                              expect 1 "quoted trailing space in server_match fails" "crm: the custom tool is not valid: custom-tools/crm/identity.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
 sm "$W/sm-in" 'server_match: good crm'
-run check "$W/sm-in";                              expect 1 "space inside server_match fails" "server_match 'good crm' can never match an MCP tool name"
+run check "$W/sm-in";                              expect 1 "space inside server_match fails" "server_match must be lowercase letters, digits, _ or -"
 sm "$W/sm-dot" 'server_match: good.crm'
-run check "$W/sm-dot";                             expect 1 "dot in server_match fails" "server_match 'good.crm' can never match an MCP tool name"
+run check "$W/sm-dot";                             expect 1 "dot in server_match fails" "server_match must be lowercase letters, digits, _ or -"
 sm "$W/sm-uc" 'server_match: GoodCRM'
-run check "$W/sm-uc";                              expect 1 "uppercase server_match fails" "server_match 'GoodCRM' can never match an MCP tool name"
+run check "$W/sm-uc";                              expect 1 "uppercase server_match fails" "server_match must be lowercase letters, digits, _ or -"
 sm "$W/sm-ok" 'server_match: good-crm   # the Good CRM server'
 run check "$W/sm-ok";                              expect 0 "good-crm with a comment passes" 'custom (matches "good-crm")'
 routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "Good-CRM Prod" 2026-10-05T07:00:00Z
@@ -321,5 +328,19 @@ printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert
 OO="$W/onlyorphan"; instance "$OO" good mail 'timezone: UTC' 'routine_digest: trig_02B'
 run check "$OO";                                   expect 2 "only orphans: still an error, naming the routine" "routine_digest: trig_02B has no schedule_digest entry"
 [ -x _template/hooks/schedule_check.py ] && _report ok "script executable" || _report no "script not executable"
+
+echo "-- 3.0 tools"
+I="$W/nousage"; instance "$I" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+mv "$PKG/capabilities/crm/tools/good/usage.md" "$W/usage.bak"
+run check "$I";                                    expect 1 "bound tool failing tool_check fails the entry" "usage.md"
+mv "$W/usage.bak" "$PKG/capabilities/crm/tools/good/usage.md"
+cp "$PKG/capabilities/crm/tools/good/identity.yaml" "$PKG/capabilities/crm/tools/good/adapter.yaml"
+run check "$I";                                    expect 1 "leftover adapter.yaml fails the entry" "Agent Standard 2 name"
+rm "$PKG/capabilities/crm/tools/good/adapter.yaml"
+I="$W/oldcustom"; instance "$I" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+mkdir -p "$I/custom-adapters/crm"; printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$I/custom-adapters/crm/adapter.yaml"
+run check "$I";                                    expect 1 "custom-adapters/ after upgrade fails with migration hint" "apply the 3.0 migration"
+rm -r "$I/custom-adapters"
+run check "$I";                                    expect 1 "custom binding with no custom tool fails" "run the add-tool skill"
 
 finish

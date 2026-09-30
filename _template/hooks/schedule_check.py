@@ -7,7 +7,7 @@ Usage:
 
 check  — for every schedule_<activity> in the instance's schedules.yaml:
          applies the unattended gate (every capability its activities use is
-         bound, and every contract invariant is in the bound adapter's
+         bound, and every contract invariant is in the bound tool's
          guard.yaml covers) and prints what the user needs to create the
          routine: name, schedule and UTC cron, connectors, prompt, and the
          cloud-environment setup script. A routine_<activity> line with no
@@ -38,6 +38,11 @@ try:
     import guard_policy  # noqa: E402  (same folder, reference engine)
 except Exception:  # missing, unreadable or broken: never a traceback
     print("ERROR: cannot load guard_policy.py beside this script", file=sys.stderr)
+    sys.exit(2)
+try:
+    import tool_check  # noqa: E402  (same folder, reference tool checker)
+except Exception:  # missing, unreadable or broken: never a traceback
+    print("ERROR: cannot load tool_check.py beside this script", file=sys.stderr)
     sys.exit(2)
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -177,15 +182,29 @@ def invariants(cap):
     return found
 
 
-def adapter(instance, cap, provider):
-    """(folder, adapter.yaml dict) for a binding; package adapter or instance custom adapter."""
-    folder = instance / "custom-adapters" / cap if provider == "custom" else ROOT / "capabilities" / cap / "adapters" / provider
-    if not (folder / "adapter.yaml").is_file():
-        raise CheckError(f"no adapter.yaml for {provider}")
+def tool(instance, cap, provider):
+    """(folder, identity dict read as guard.sh reads it) for a binding: a package tool or the instance's custom tool."""
+    folder = instance / "custom-tools" / cap if provider == "custom" else ROOT / "capabilities" / cap / "tools" / provider
+    if not (folder / "identity.yaml").is_file():
+        if provider == "custom" and (instance / "custom-adapters" / cap).is_dir():
+            raise CheckError(f"custom-adapters/{cap}/ is the Agent Standard 2 layout; apply the 3.0 migration "
+                             f"(move it to custom-tools/{cap}/, rename adapter.yaml to identity.yaml and adapter.md to usage.md)")
+        if provider == "custom":
+            raise CheckError(f"custom-tools/{cap}/ has no identity.yaml; run the add-tool skill")
+        raise CheckError(f"no identity.yaml for {provider}")
+    contract = ROOT / "capabilities" / cap / "contract.md"
     try:
-        return folder, flat_yaml(folder / "adapter.yaml")
+        ops, invs = tool_check.read_contract(contract)
+    except tool_check.ToolError as err:
+        raise CheckError(str(err))
+    label = f"custom-tools/{cap}" if provider == "custom" else f"capabilities/{cap}/tools/{provider}"
+    fails, _ = tool_check.check_tool(folder, cap, ops, set(invs), provider == "custom", label)
+    if fails:
+        raise CheckError(f"the {provider} tool is not valid: " + "; ".join(fails))
+    try:
+        return folder, flat_yaml(folder / "identity.yaml")
     except CheckError as err:
-        raise CheckError(f"the {provider} adapter's {err}")
+        raise CheckError(f"the {provider} tool's {err}")
 
 
 def covers(folder):
@@ -293,14 +312,14 @@ def expected(instance, repo=None):
                 continue
             providers = bound.get(cap, [])
             if not providers:
-                entry["problems"].append(f"{cap} is not bound (run setup's tools step)")
+                entry["problems"].append(f"{cap} is not bound (run setup's tools step or the add-tool skill)")
                 continue
             if len(providers) > 1:
                 entry["problems"].append(f"{cap} is bound more than once; the guard applies every binding")
             invs = invariants(cap)
             for provider in providers:
                 try:
-                    folder, ay = adapter(instance, cap, provider)
+                    folder, ay = tool(instance, cap, provider)
                     covered = covers(folder)
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
@@ -308,15 +327,15 @@ def expected(instance, repo=None):
                 match = ay.get("server_match", "")  # exactly what yaml_get returns; no further trimming
                 if not match:
                     entry["problems"].append(
-                        f"{cap}: the {provider} adapter has no server_match, so the guard never enforces it")
+                        f"{cap}: the {provider} tool has no server_match, so the guard never enforces it")
                 elif not SERVER_MATCH.fullmatch(match):
                     entry["problems"].append(
-                        f"{cap}: the {provider} adapter's server_match {match!r} can never match an MCP tool name, "
+                        f"{cap}: the {provider} tool's server_match {match!r} can never match an MCP tool name, "
                         "so the guard never enforces it")
                 for inv in invs:
                     if inv not in covered:
                         entry["problems"].append(
-                            f"{cap}: invariant {inv} is not covered by the {provider} adapter's guard policy")
+                            f"{cap}: invariant {inv} is not covered by the {provider} tool's guard policy")
                 connectors.append(ay.get("provider", provider))
                 matches.append(match)
                 binds.append({"capability": cap, "provider": provider, "server_match": match})
