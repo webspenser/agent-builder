@@ -343,4 +343,11 @@ run check "$I";                                    expect 1 "custom-adapters/ af
 rm -r "$I/custom-adapters"
 run check "$I";                                    expect 1 "custom binding with no custom tool fails" "run the add-tool skill"
 
+echo "-- 4.0 old guard keys"
+I="$W/old4"; instance "$I" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+mkdir -p "$I/custom-tools/crm"; cusage "$I"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$I/custom-tools/crm/identity.yaml"
+printf '%s\n' 'covers: [draft_only]' 'update_tools: [edit]' > "$I/custom-tools/crm/guard.yaml"
+run check "$I";                                    expect 1 "old guard key in a custom tool fails the entry" "Agent Standard 3 form"
+
 finish

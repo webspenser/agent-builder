@@ -7,7 +7,7 @@ source tests/lib.sh
 FIX=$(mktemp -d)
 trap 'rm -rf "$FIX"' EXIT
 
-make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 3.0 agent
+make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 4.0 agent
   local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}"
   mkdir -p "$d"/{hosts,skills/start,skills/setup,skills/add-tool,subagents,templates,samples,context,evals,hooks,migrations,.claude-plugin,.codex-plugin}
   printf '%s\n' \
@@ -17,7 +17,7 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Ag
   for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/hosts/$a.md"; done
   echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
   echo '# Cases' > "$d/evals/cases.md"
-  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "3.0"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "4.0"' 'capabilities: crm' > "$d/agent.yaml"
   printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
@@ -33,7 +33,7 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Ag
     '- `draft_only` — only drafts' '- `no_send` — never sends' > "$c/contract.md"
   printf '%s\n' '# Demo tool' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/usage.md"
   printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' > "$a/identity.yaml"
-  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' > "$a/guard.yaml"
+  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [create-lead]' '    at: [values]' '  - kind: update' '    tools: [update-lead]' '    at: [values]' > "$a/guard.yaml"
   sync_agents "$d" "$name" "$ver"
 }
 sync_agents() { # sync_agents <dir> [name] [version] — rewrite plugin.json's agents list from subagents/
@@ -128,7 +128,7 @@ assert_pass $V "$FIX/mf-sub"
 # agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
 make_valid_agent "$FIX/mf-loose"
 printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
-  "version: '0.1.0'" 'description: A demo agent' 'standard: "3.0"' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "4.0"' \
   'capabilities: crm   # the only one' 'extra:' '  - nested' > "$FIX/mf-loose/agent.yaml"
 assert_pass $V "$FIX/mf-loose"
 
@@ -139,8 +139,8 @@ make_valid_agent "$FIX/mf-badname" "Demo_Agent"
 fails_with "$FIX/mf-badname" "agent.yaml: name 'Demo_Agent' is not kebab-case"
 make_valid_agent "$FIX/mf-badver" demo-agent "1.0"
 fails_with "$FIX/mf-badver" "agent.yaml: version '1.0' is not MAJOR.MINOR.PATCH"
-make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "2.1"/' "$FIX/mf-std20/agent.yaml"
-fails_with "$FIX/mf-std20" "agent.yaml: standard '2.1' is not 3.0; update the agent to the current Agent Standard"
+make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "3.0"/' "$FIX/mf-std20/agent.yaml"
+fails_with "$FIX/mf-std20" "agent.yaml: standard '3.0' is not 4.0; update the agent to the current Agent Standard"
 
 # Host manifest problems.
 make_valid_agent "$FIX/mf-nogem"; rm "$FIX/mf-nogem/gemini-extension.json"

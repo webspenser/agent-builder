@@ -162,4 +162,11 @@ rm -r "$M/custom-adapters"
 run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom binding with no custom tool: blocked" "run the add-tool skill"
 run_guard "$M" "$(call mcp__other__list-records)";              expect 2 "missing identity blocks every MCP call (fail closed)" "has no identity.yaml"
 
+echo "-- 4.0 old guard keys"
+O4="$W/old4"; mkdir -p "$O4/custom-tools/crm"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$O4/instance.yaml"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$O4/custom-tools/crm/identity.yaml"
+printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' > "$O4/custom-tools/crm/guard.yaml"
+run_guard "$O4" "$(call mcp__democrm__list-records)";  expect 2 "old guard keys in a custom tool: blocked" "Agent Standard 3 form"
+
 finish

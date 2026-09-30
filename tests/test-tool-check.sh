@@ -102,4 +102,11 @@ if python3 -B -c "import sys; sys.path.insert(0, '_template/hooks'); import tool
 
 echo "-- executable"
 if [ -x "$TC" ]; then _report ok "tool_check.py is executable"; else _report no "tool_check.py is not executable"; fi
+echo "-- Setup section (Agent Standard 4.0)"
+fresh; printf '%s\n' '# bootstrap' > "$T/bootstrap.py"; run "$T" "$C/contract.md"
+expect 1 "bootstrap.py without ## Setup" "needs a ## Setup section (bootstrap.py is optional; people must be able to create the fields by hand)"
+printf '%s\n' '## Setup' '' 'Create field status.' >> "$T/usage.md"; run "$T" "$C/contract.md"; expect 0 "bootstrap.py with ## Setup"
+rm "$T/bootstrap.py"; fresh; run "$T" "$C/contract.md";      expect 0 "no bootstrap.py: Setup not required"
+fresh; printf '%s\n' 'covers: [draft_only]' 'values_at: [v]' > "$T/guard.yaml"; run "$T" "$C/contract.md"
+expect 1 "old guard key fails tool_check" "values_at is the Agent Standard 3 form"
 finish

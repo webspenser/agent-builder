@@ -22,8 +22,8 @@ for d in */; do  # _template/ is matched here
   bin/validate-agent.sh "$d" || STATUS=1
 done
 
-echo "== template is Agent Standard 3.0"
-if ! grep -q '^standard: "3.0"' _template/agent.yaml; then echo "FAIL: _template is not 3.0"; STATUS=1; fi
+echo "== template is Agent Standard 4.0"
+if ! grep -q '^standard: "4.0"' _template/agent.yaml; then echo "FAIL: _template is not 4.0"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/tools/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi

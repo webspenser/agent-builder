@@ -156,6 +156,15 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
             if section(text, "Probe") is None:
                 fails.append(f"{label}/usage.md: needs a ## Probe section")
 
+    if (folder / "bootstrap.py").exists() and usage.is_file():
+        try:
+            has_setup = section(read(usage), "Setup") is not None
+        except ToolError:
+            has_setup = True  # the unreadable usage.md is already reported
+        if not has_setup:
+            fails.append(f"{label}/usage.md: needs a ## Setup section "
+                         "(bootstrap.py is optional; people must be able to create the fields by hand)")
+
     policy = folder / "guard.yaml"
     has_policy = policy.exists() or policy.is_symlink()
     covers = None
