@@ -114,6 +114,8 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
             fails.append(f"{label}/{old} is the Agent Standard 2 name; 3.0 uses {new}")
     if not custom and not KEBAB.fullmatch(folder.name):
         fails.append(f"{label}: tool folder name is not kebab-case")
+    if not custom and folder.name == "custom":
+        fails.append(f"{label}: 'custom' is reserved for an instance's own tool (bind_<cap>: custom); choose another tool name")
 
     rel = f"{label}/identity.yaml"
     if not (folder / "identity.yaml").is_file():
@@ -191,7 +193,7 @@ def main(argv):
     if not folder.is_dir():
         print(f"ERROR: not a folder: {folder}")
         return 2
-    parent = folder.resolve().parent
+    parent = folder.absolute().parent  # not resolve(): a symlinked folder keeps its place, as in schedule_check
     if custom and parent.name != "custom-tools":
         print("ERROR: --custom expects an instance's custom-tools/<cap>/ folder")
         return 2
@@ -206,7 +208,7 @@ def main(argv):
     if not ops or not invs:
         print(f"ERROR: {contract} has no ## Operations table or no ## Invariants list")
         return 2
-    cap = folder.resolve().name if custom else parent.parent.name
+    cap = folder.absolute().name if custom else parent.parent.name
     fails, _ = check_tool(folder, cap, ops, set(invs), custom, str(folder))
     for fail in fails:
         print(f"FAIL: {fail}")

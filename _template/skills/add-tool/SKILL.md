@@ -27,7 +27,8 @@ with `python3`.
    and its Invariants.
 3. **Tool.** Ask which system it is.
    - Package target: ask for a kebab-case tool name (e.g. `hubspot`), and
-     refuse one that already exists in `capabilities/<cap>/tools/`.
+     refuse `custom` and any name that already exists in
+     `capabilities/<cap>/tools/`.
    - Instance target: if `custom-tools/<cap>/` exists, show what is there
      and ask whether to replace it.
 

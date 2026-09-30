@@ -301,7 +301,10 @@ From then on, the guard and the schedule checker treat `custom` exactly
 like a shipped tool. They read its `identity.yaml` and `guard.yaml` from
 `custom-tools/<cap>/`. If its `guard.yaml` doesn't cover every invariant,
 the capability isn't unattended-safe, so its activities can't be scheduled.
-For email, it can't be bound at all unless `no_send` is covered. If a
+For email, setup and `add-tool` refuse to bind it unless `no_send` is
+covered. The guard doesn't re-check this at call time: it can't see the
+contract, so hand-edited files that skip it are a known gap (see "Guard
+policy" in the Agent Standard). If a
 bound tool has no `identity.yaml`, the guard blocks every connector call
 until it is fixed.
 

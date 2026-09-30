@@ -72,9 +72,9 @@ skeleton is `_capability-template/` in the same root. The validator is
      ids it enforces; an invariant left out is held only by the agent's
      instructions. Replace or remove the example `rules`,
      `create_tools` and `update_tools`. Verify with
-     `python3 _template/hooks/tool_check.py <tool folder> <contract.md>`
-     (the `add-tool` skill does the same for a system connected in this
-     session); the validator runs the same check. List the
+     `python3 <target>/hooks/tool_check.py <target>/capabilities/<cap>/tools/<tool> <target>/capabilities/<cap>/contract.md`
+     (the new agent's own copy of the checker; the `add-tool` skill
+     does the same for a system connected in this session); the validator runs the same check. List the
      names in `agent.yaml` as `capabilities: a, b`. Skills and
      sub-agents name operations, never a system's tools. If the agent
      must never send messages, give the capability a `no_send`

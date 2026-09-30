@@ -77,6 +77,19 @@ expect 1 "adapter.md refused" "adapter.md is the Agent Standard 2 name; 3.0 uses
 fresh; mv "$T" "$C/tools/Demo_X"; sed -i.bak 's/^provider: .*/provider: Demo_X/' "$C/tools/Demo_X/identity.yaml"
 run "$C/tools/Demo_X" "$C/contract.md";                  expect 1 "tool folder kebab-case" "tool folder name is not kebab-case"; rm -rf "$C/tools/Demo_X"
 
+echo "-- reserved name"
+good_tool "$C/tools/custom" custom; run "$C/tools/custom" "$C/contract.md"
+expect 1 "shipped tool named custom refused" "FAIL: $C/tools/custom: 'custom' is reserved for an instance's own tool (bind_<cap>: custom); choose another tool name"
+rm -rf "$C/tools/custom"
+
+echo "-- symlinked folders"
+RL="$W/elsewhere/crm-real"; good_tool "$RL" custom
+mkdir -p "$W/linked/custom-tools"; ln -s "$RL" "$W/linked/custom-tools/crm"
+run "$W/linked/custom-tools/crm" "$C/contract.md" --custom; expect 0 "symlinked custom-tools/crm passes" "OK: "
+RS="$W/elsewhere/demo-real"; good_tool "$RS" demo; ln -s "$RS" "$C/tools/demo2"
+sed -i.bak 's/^provider: .*/provider: demo2/' "$RS/identity.yaml"
+run "$C/tools/demo2" "$C/contract.md";                   expect 0 "symlinked shipped tool folder passes" "OK: "; rm "$C/tools/demo2"
+
 echo "-- errors"
 run "$W/nope" "$C/contract.md";                          expect 2 "missing folder" "ERROR:"
 fresh; run "$T" "$W/nope.md";                            expect 2 "missing contract" "ERROR:"

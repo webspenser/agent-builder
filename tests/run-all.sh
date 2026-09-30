@@ -33,6 +33,9 @@ SKEL=$(mktemp -d); mkdir -p "$SKEL/capabilities"; cp -R _capability-template "$S
 python3 -B _template/hooks/tool_check.py "$SKEL/capabilities/example_capability/tools/example-provider" "$SKEL/capabilities/example_capability/contract.md" >/dev/null || { echo "FAIL: skeleton tool fails tool_check"; STATUS=1; }
 rm -r "$SKEL"
 if [ ! -f _template/skills/schedule/SKILL.md ]; then echo "FAIL: template has no schedule skill"; STATUS=1; fi
+for f in CLAUDE GEMINI AGENTS; do  # hosts/ sources stay tracked though root links are ignored
+  if git check-ignore --no-index -q "_template/hosts/$f.md"; then echo "FAIL: .gitignore ignores _template/hosts/$f.md"; STATUS=1; fi
+done
 
 echo "== Agent Standard 3.0 text"
 if grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template \

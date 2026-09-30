@@ -421,7 +421,12 @@ propose a `server_match`; write `identity.yaml`, `usage.md` (from the
 system's real tool list, read-only) and `guard.yaml`; run
 `tool_check.py` until it prints `OK`; for an instance, run the probe,
 write `bindings/<capability>.md`, bind, and report each invariant as
-covered or instruction-only. It never writes credentials: logins stay in
+covered or instruction-only. A source-mode instance is its own package
+copy, so there the skill takes the package target and does not bind:
+setup's tools step continues with the new tool at its probe and binding
+sub-steps. The tool name `custom` is reserved for an instance's own tool,
+so the package target refuses it and `tool_check.py` fails a shipped tool
+folder with that name. It never writes credentials: logins stay in
 the host's connectors. It refuses to continue on a `no_send` contract
 until `guard.yaml` covers it.
 
@@ -617,6 +622,18 @@ For any other custom binding, the message
 says to run the `add-tool` skill. For a shipped tool, it says to fix
 the binding (setup's tools step).
 
+A bound tool whose `identity.yaml` has an empty `server_match` could
+never match a call. With no `guard.yaml` it is instruction-only and the
+guard goes on to the next binding. With a `guard.yaml` (or a dangling
+symlink by that name) it blocks every MCP call, since its policy could
+never apply; the message says to fix `identity.yaml` (`tool_check.py`
+reports it).
+
+Known gap: a custom tool for a `no_send` capability that has no
+`guard.yaml` is refused by `add-tool`, `tool_check.py` and the schedule
+gate, but the guard itself cannot see the contract, so a hand-edited
+instance like that is not blocked at call time.
+
 Matching over-covers on purpose, so a name containing `__` cannot hide
 a match: `server_match` is tested against everything after `mcp__` in
 the tool name.
@@ -630,7 +647,10 @@ prompt.
 Setup's tools step binds each capability:
 
 - Pick a shipped tool, or run the `add-tool` skill to write a custom
-  one (checked with `tool_check.py`).
+  one (checked with `tool_check.py`). In plugin mode `add-tool` binds it
+  itself, and setup moves to the next capability. In source mode it adds
+  the tool to the package copy, and setup continues with that tool at the
+  steps below.
 - Find the matching connected server and run the tool's `usage.md`
   `## Probe`.
 - Write `bindings/<capability>.md`, including any `field_<name>` IDs the

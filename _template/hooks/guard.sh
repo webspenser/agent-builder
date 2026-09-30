@@ -81,10 +81,14 @@ while IFS= read -r line || [ -n "$line" ]; do
     block "instance.yaml binds $cap to $provider, which has no identity.yaml in $name; fix the binding (setup's tools step)"
   fi
   match=$(lower "$(yaml_get "$tdir/identity.yaml" server_match)")
-  [ -n "$match" ] || continue
-  case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
   # A dangling symlink or a directory still counts as a policy: the engine fails closed on it.
-  { [ -e "$tdir/guard.yaml" ] || [ -L "$tdir/guard.yaml" ]; } || continue  # no policy: this tool's invariants are instruction-only
+  policy=""; { [ -e "$tdir/guard.yaml" ] || [ -L "$tdir/guard.yaml" ]; } && policy=1
+  if [ -z "$match" ]; then
+    [ -z "$policy" ] && continue  # no match and no policy: instruction-only
+    block "instance.yaml binds $cap to $provider, whose identity.yaml has no server_match, so its guard policy could never apply; fix identity.yaml (tool_check.py)"
+  fi
+  case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
+  [ -n "$policy" ] || continue  # no policy: this tool's invariants are instruction-only
   engine="$root/hooks/guard_policy.py"
   [ -f "$engine" ] || pblock "the guard policy engine is missing from $name"
   command -v python3 >/dev/null 2>&1 || pblock "python3 is required to run the guard policy"

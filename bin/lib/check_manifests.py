@@ -263,7 +263,7 @@ def check_capability(root, cap):
         if not SNAKE.match(inv):
             fails.append(f"{rel}: invariant '{inv}' is not snake_case")
     if (base / "adapters").exists():
-        fails.append(f"capabilities/{cap}/adapters/ is the Agent Standard 2 layout; 3.0 uses capabilities/{cap}/tools/<tool>/")
+        fails.append(f"capabilities/{cap}/adapters/ is the Agent Standard 2 layout; 3.0 uses capabilities/{cap}/tools/<tool>/ with identity.yaml and usage.md")
     folder = base / "tools"
     tools = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
     if not tools:

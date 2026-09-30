@@ -66,8 +66,10 @@ skill, if this agent has one.
    capability listed there:
    1. List the shipped tools (`capabilities/<capability>/tools/`
       in the package) and ask which system the user uses. If none
-      fits, run the `add-tool` skill for this capability, then continue
-      with the next capability.
+      fits, run the `add-tool` skill for this capability. In plugin mode
+      it binds the tool itself; continue with the next capability. In
+      source mode it adds the tool to this copy of the package; continue
+      at sub-step 2 with that new tool.
    2. Find the tools in this session whose name contains the tool's
       `server_match` after `mcp__`, ignoring case. If there are none,
       explain how to connect that system in the host (a connector or
