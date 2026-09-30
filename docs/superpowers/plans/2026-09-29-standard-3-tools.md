@@ -89,7 +89,7 @@ fresh; sed -i.bak 's/^capability: .*/capability: crmx/' "$T/identity.yaml"; run 
 expect 1 "wrong capability" "capability 'crmx' must be 'crm'"
 fresh; sed -i.bak 's/^provider: .*/provider: other/' "$T/identity.yaml"; run "$T" "$C/contract.md"
 expect 1 "wrong provider" "provider 'other' must be 'demo'"
-run "$I" "$C/contract.md";                               expect 1 "custom folder checked as shipped" "expected capabilities/<cap>/tools/<tool>/"
+run "$I" "$C/contract.md";                               expect 2 "custom folder checked as shipped" "expected capabilities/<cap>/tools/<tool>/"
 fresh; sed -i.bak '/^server_match/d' "$T/identity.yaml"; run "$T" "$C/contract.md"; expect 1 "missing server_match" "missing server_match"
 fresh; sed -i.bak 's/^server_match: .*/server_match: HubSpot CRM/' "$T/identity.yaml"; run "$T" "$C/contract.md"
 expect 1 "display-name server_match refused" "server_match must be lowercase letters, digits, _ or -"
@@ -184,7 +184,7 @@ SERVER_MATCH = re.compile(r"[a-z0-9_-]+")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL other than tab, LF, CR
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
-OLD_NAMES = (("adapter.yaml", "identity.yaml"), ("adapter.md", "usage.md"))
+OLD_NAMES = (("adapter.yaml", "identity.yaml"), ("adapter.md", "usage.md"))  # Agent Standard 2 names
 
 
 class ToolError(Exception):
@@ -383,7 +383,7 @@ Expected: every line `ok`, then `-- N passed, 0 failed`. If a message assertion 
 echo "== tool check"; tests/test-tool-check.sh || STATUS=1
 ```
 
-Also add `if [ -d _template/hooks/__pycache__ ]` coverage: it already exists, so nothing changes there. Confirm no `__pycache__` was created.
+Confirm that no `_template/hooks/__pycache__` was created (run-all.sh already fails on one).
 
 - [ ] **Step 6: Commit**
 
@@ -1041,7 +1041,7 @@ git push -u origin release/3.0.0
   1. Build a 3.0 instance: Attio and Gmail bound, `schedules.yaml` with `schedule_digest`. Run `python3 <sales-partner>/hooks/schedule_check.py check <instance>`: PASS.
   2. Pipe an Attio `update-list-entry-by-id` call with `status: approved` into `<sales-partner>/hooks/guard.sh` (with `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PROJECT_DIR` set): exit 2, `Blocked by`.
   3. Run the `add-tool` skill steps by hand in instance mode against a connected CRM (HubSpot if connected, otherwise Airtable as `custom`). The result `custom-tools/crm/` must pass `tool_check.py --custom`, and `guard.sh` must block a denied call through it.
-  4. Run the 3.0 validator on a checkout of sales-partner 2.1.0 (`git worktree add … v2.1.0-ish commit 17cddb2`). It must FAIL naming `hosts/`, `tools/`, `identity.yaml` and `usage.md`.
+  4. `git -C /Users/hochoy/Work/Webspenser/sales-partner worktree add <scratchpad>/sp-2.1 17cddb2` (the 2.1.0 merge). Run the 3.0 validator on it: it must FAIL naming `hosts/`, `tools/`, `identity.yaml` and `usage.md`. Then run `git worktree remove` on it.
 
   Record the results in the ledger.
 - [ ] **Step 6:** Clean up the merged branches in all three repos. Update the roadmap memory.
