@@ -29,16 +29,20 @@ instance's GitHub repository as `owner/name`.
    needs `bindings/` in the cloud). If not, say exactly what to do
    (create a private GitHub repository, commit, push) and stop until it
    is done. Take `<repo>` from the remote.
-3. **Gate.** Run `<checker> check . --repo <repo>`. Each entry prints
-   `PASS` or `FAIL`. A `FAIL` names every capability that is unbound or
-   whose contract invariants the bound adapter's guard policy does not
-   cover: tell the user, and that the fix is to bind an adapter whose
-   `guard.yaml` covers them (setup's tools step). Continue only with
-   `PASS` entries. Never offer to schedule a failing entry.
+3. **Gate.** Run `<checker> check . --repo <repo>`. If it prints
+   `ERROR:` and exits 2, show the error and stop (typical causes: the
+   timezone, a missing or empty `schedules.yaml`, an agent mismatch,
+   control characters). Otherwise each entry prints `PASS` or `FAIL`.
+   Report every `- ` problem line under a `FAIL` and fix what it names.
+   For an unbound capability or an uncovered invariant, the fix is to
+   bind an adapter whose `guard.yaml` covers it (setup's tools step).
+   Continue only with `PASS` entries. Never offer to schedule a failing
+   entry.
 4. **Environment.** Show the "Cloud environment setup script" lines the
    checker printed. Tell the user: in claude.ai/code, create (once) or
    open a cloud environment — suggested name `webspenser-agents` — and
-   put these lines in its setup script, merged with any other agents'
+   put these lines in its setup script (stop if any printed install
+   line has an empty value), merged with any other agents'
    lines. Every time this agent is updated, change the version comment
    so the environment reinstalls it. Every routine for this agent uses
    that environment.

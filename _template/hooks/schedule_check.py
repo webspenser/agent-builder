@@ -255,6 +255,8 @@ def expected(instance, repo=None):
             entry["problems"].append(f"{key} appears more than once")
         if bad_line is not None:
             entry["problems"].append(f"instance.yaml has a binding line the guard cannot read ({bad_line})")
+        if not meta.get("catalog") or not meta.get("catalog_repo"):
+            entry["problems"].append("agent.yaml has no catalog/catalog_repo, so the cloud environment cannot install the agent")
         chain = [act] + entry["then"]
         for a in chain:
             if a not in activities:

@@ -492,7 +492,7 @@ make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capab
 assert_pass $V "$FIX/instronly"   # an adapter without a policy is allowed: instruction-only
 
 echo "-- Agent Standard 2.1: activities"
-make_valid_agent "$FIX/act"; printf '%s\n' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"
+make_valid_agent "$FIX/act"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"
 mkdir -p "$FIX/act/skills/schedule"; printf '%s\n' '---' 'name: schedule' 'description: Use when scheduling' '---' 'x' > "$FIX/act/skills/schedule/SKILL.md"
 assert_pass $V "$FIX/act"
 make_valid_agent "$FIX/act-noskill"; echo 'activity_prospect: crm' >> "$FIX/act-noskill/agent.yaml"
@@ -503,6 +503,12 @@ make_valid_agent "$FIX/act-badname"; echo 'activity_Prospect_Now: crm' >> "$FIX/
 fails_with "$FIX/act-badname" "agent.yaml: activity 'Prospect_Now' is not kebab-case"
 make_valid_agent "$FIX/act-dup"; printf '%s\n' 'activity_prospect: crm' 'activity_prospect : none' >> "$FIX/act-dup/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-dup/skills/"
 fails_with "$FIX/act-dup" "agent.yaml: activity_prospect is declared more than once"
+make_valid_agent "$FIX/act-dup2"; printf '%s\n' 'activity_prospect: crm' 'activity_prospect: none' >> "$FIX/act-dup2/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-dup2/skills/"
+fails_with "$FIX/act-dup2" "agent.yaml: activity_prospect is declared more than once"
+make_valid_agent "$FIX/act-indent"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'activity_prospect: crm' '  activity_prospect: none' >> "$FIX/act-indent/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-indent/skills/"
+assert_pass $V "$FIX/act-indent"
+make_valid_agent "$FIX/act-nocat"; echo 'activity_prospect: crm' >> "$FIX/act-nocat/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-nocat/skills/"
+fails_with "$FIX/act-nocat" "agent.yaml: activities need catalog and catalog_repo (the cloud environment installs the agent from its catalog)"
 make_valid_agent "$FIX/act-empty"; echo 'activity_prospect:' >> "$FIX/act-empty/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-empty/skills/"
 fails_with "$FIX/act-empty" "agent.yaml: activity_prospect lists no capabilities (use none)"
 make_valid_agent "$FIX/act-mixed"; echo 'activity_prospect: none, crm' >> "$FIX/act-mixed/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-mixed/skills/"

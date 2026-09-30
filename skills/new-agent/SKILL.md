@@ -83,7 +83,10 @@ skeleton is `_capability-template/` in the same root. The validator is
      add `activity_<name>: <capabilities or none>` to `agent.yaml` and
      make the step's instructions work unattended under the scheduled
      prompt (no questions; stop and report when an input is missing;
-     write only to connected systems). If there are any, the interview
+     write only to connected systems). Every capability an activity uses
+     must be fully covered by guard policies, or the schedule gate
+     refuses it. Set `catalog` and `catalog_repo` in `agent.yaml`: the
+     cloud environment installs the agent from its catalog. If there are any, the interview
      must write `schedules.yaml` (`timezone`, `schedule_<activity>`).
    - Operating rules — numbered, about how it works.
    - Workflow — ordered steps, each tagged T1, T2, or T3; no critical

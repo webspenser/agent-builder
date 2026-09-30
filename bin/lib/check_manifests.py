@@ -312,13 +312,17 @@ def check_activities(root, meta, caps):
     except ReadError:
         raw = []  # already reported
     seen = set()
-    for line in raw:
-        m = re.match(r"[ \t]*activity_([^:\s]+)[ \t]*:", line)
-        if not m:
+    for line in raw:  # the same lines parse_agent_yaml reads: top-level keys only
+        if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
             continue
-        if m.group(1) in seen:
-            fails.append(f"agent.yaml: activity_{m.group(1)} is declared more than once")
-        seen.add(m.group(1))
+        key = line.split(":", 1)[0].strip()
+        if not key.startswith("activity_"):
+            continue
+        if key in seen:
+            fails.append(f"agent.yaml: {key} is declared more than once")
+        seen.add(key)
+    if acts and not (meta.get("catalog") and meta.get("catalog_repo")):
+        fails.append("agent.yaml: activities need catalog and catalog_repo (the cloud environment installs the agent from its catalog)")
     for act, value in sorted(acts.items()):
         if not ACTIVITY.match(act):
             fails.append(f"agent.yaml: activity '{act}' is not kebab-case")

@@ -581,8 +581,12 @@ activity_research: none
 
 Activity names are kebab-case. A value is `none` or a comma-separated
 list of names from `capabilities`. An agent with any `activity_*` key
-must ship `skills/schedule/SKILL.md`, and each activity's instructions
-must let it run to its stop conditions unattended.
+must ship `skills/schedule/SKILL.md`, must set `catalog` and
+`catalog_repo` (the cloud environment installs the agent from its
+catalog), and must write each activity's instructions so it runs to its
+stop conditions unattended. An activity whose capabilities are not all
+covered by guard policies is refused by the gate. An empty
+`activity_x:` fails validation; write `none`.
 
 ### schedules.yaml
 
@@ -647,15 +651,19 @@ activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
 bound adapter's `guard.yaml` `covers`. The gate also fails an entry when:
 
+- `agent.yaml` has no `catalog` or `catalog_repo`;
 - a bound adapter has no `server_match`, or one outside `[a-z0-9_-]+`;
 - a capability has more than one `bind_` line, or a `bind_` line the
   guard cannot read;
-- `agent.yaml`, `instance.yaml`, or `adapter.yaml` holds control
-  characters;
+- an `adapter.yaml` it uses holds control characters;
 - an `activity_` or `schedule_` key is repeated;
 - the time is not `<weekday|daily> HH:MM`.
 
-A timezone that is not an IANA name stops the checker with an error.
+Some problems stop the whole check with an error (exit 2) instead of
+failing one entry: a timezone that is not an IANA name, a missing or
+empty `schedules.yaml`, an `agent` in `instance.yaml` that is not the
+`name` in `agent.yaml`, and control characters in `agent.yaml` or
+`instance.yaml`.
 
 ### The schedule skill
 
