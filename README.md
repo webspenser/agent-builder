@@ -61,17 +61,19 @@ In CI, from any agent repo:
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
-- uses: webspenser/agent-builder/validate@v4
+- uses: webspenser/agent-builder/validate@main
   with:
     path: .
     require-bump-against: origin/main   # optional: enforce version bumps
 ```
 
+`@main` tracks the current standard while it is in development.
+
 ## What's here
 
 | Path | What it is |
 |---|---|
-| `STANDARD.md` | The Agent Standard 4.0 |
+| `STANDARD.md` | The Agent Standard |
 | `_template/` | The skeleton every agent starts from |
 | `skills/` | `new-agent` (the wizard) and `validate-agent` |
 | `bin/validate-agent.sh` | The validator |

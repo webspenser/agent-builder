@@ -154,16 +154,13 @@ out=$(python3 "$E" --check "$W/bin.yaml" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ! printf '%s' "$out" | grep -q Traceback && _report ok "--check on binary junk: FAIL, no traceback" || _report no "--check junk (rc=$rc): $out"
 [ -x "$E" ] && _report ok "engine executable" || _report no "engine not executable"
 
-echo "-- writes (Agent Standard 4.0)"
-policy 'covers: [x]' 'create_tools: [c]';             parses 1 "create_tools is the old form"
-policy 'covers: [x]' 'values_at: [v]';                parses 1 "values_at is the old form"
+echo "-- writes"
+policy 'covers: [x]' 'create_tools: [c]';             parses 1 "create_tools is an unknown key"
 policy 'covers: [x]' 'writes:' '  - kind: delete' '    tools: [t]' '    at: [v]'; parses 1 "kind must be create or update"
 policy 'covers: [x]' 'writes:' '  - kind: create' '    at: [v]';                    parses 1 "writes entry needs tools"
 policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [t]' '    at: ["bad path!"]'; parses 1 "writes at must be a path"
 policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [t]' '    at: [v]' '    extra: [y]'; parses 1 "unknown writes key"
 policy 'covers: [x]' 'rules:' '  - field: s' '    any: [a]';                          parses 1 "rules need writes"
-out=$(printf '%s\n' 'covers: [x]' 'update_tools: [u]' > "$W/old.yaml"; python3 "$E" --check "$W/old.yaml" 2>&1)
-printf '%s' "$out" | grep -qF 'update_tools is the Agent Standard 3 form; 4.0 uses writes:' && _report ok "old-key message names writes" || _report no "old-key message: $out"
 
 H() { policy 'covers: [draft_only, dnc_one_way]' 'allow: [manage_crm_objects, get_*]' 'deny: ["*delete*"]' \
   'writes:' '  - kind: create' '    tools: [manage_crm_objects]' '    at: ["createRequest.objects[].properties"]' \
@@ -199,8 +196,5 @@ G update; run 0 "same, allowed value passes" mcp__a__m '{"w":{"s":"a"}}'
 G;        run 0 "matched tool at its own path is fine" mcp__a__m '{"v":{"s":"a"}}'
 G;        run 0 "matched tool at a path no entry lists is unchecked" mcp__a__m '{"z":{"s":"approved"}}'
 G;        run 2 "matched tool with tool_input not an object" mcp__a__m '[1]' "cannot check this call"
-printf '%s\n' 'covers: [x]' 'update_tools: [u]' > "$W/old.yaml"
-out=$(python3 "$E" --check "$W/old.yaml" 2>&1)
-printf '%s' "$out" | grep -qF 'update_tools is the Agent Standard 3 form; 4.0 uses writes: (see STANDARD.md "Guard policy")' && _report ok "old-key message, full tail" || _report no "old-key tail: $out"
 
 finish

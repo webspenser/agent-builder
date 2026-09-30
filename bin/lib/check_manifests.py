@@ -155,7 +155,7 @@ def section(text, heading):
 
 
 def check_runtime(root, meta, name):
-    """Entry hook, start/setup skills, migrations, catalog, instance marker."""
+    """Entry hook, start/setup skills, catalog, instance marker."""
     fails = []
     agent_md = root / "AGENT.md"
     if agent_md.is_file():
@@ -192,8 +192,6 @@ def check_runtime(root, meta, name):
             for placeholder in SETUP_PLACEHOLDERS:
                 if placeholder in setup_text:
                     fails.append(f"skills/setup/SKILL.md still has the {placeholder} placeholder")
-    if not (root / "migrations").is_dir():
-        fails.append("missing directory: migrations/")
 
     catalog, catalog_repo = meta.get("catalog", ""), meta.get("catalog_repo", "")
     if ("catalog" in meta or "catalog_repo" in meta) and not (catalog and catalog_repo):
@@ -262,8 +260,6 @@ def check_capability(root, cap):
     for inv in invariants:
         if not SNAKE.match(inv):
             fails.append(f"{rel}: invariant '{inv}' is not snake_case")
-    if (base / "adapters").exists():
-        fails.append(f"capabilities/{cap}/adapters/ is the Agent Standard 2 layout; 3.0 uses capabilities/{cap}/tools/<tool>/ with identity.yaml and usage.md")
     folder = base / "tools"
     tools = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
     if not tools:
@@ -358,7 +354,7 @@ def check(root):
     if version and not SEMVER.match(version):
         fails.append(f"agent.yaml: version '{version}' is not MAJOR.MINOR.PATCH")
     if std and std != CURRENT_STANDARD:
-        fails.append(f"agent.yaml: standard '{std}' is not {CURRENT_STANDARD}; update the agent to the current Agent Standard")
+        fails.append(f"agent.yaml: standard '{std}' must be \"{CURRENT_STANDARD}\"")
     fails.extend(check_runtime(root, meta, name))
     fails.extend(check_tools(root, meta))
 

@@ -30,7 +30,6 @@ SERVER_MATCH = re.compile(r"[a-z0-9_-]+")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL other than tab, LF, CR
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
-OLD_NAMES = (("adapter.yaml", "identity.yaml"), ("adapter.md", "usage.md"))  # Agent Standard 2 names
 
 
 class ToolError(Exception):
@@ -109,9 +108,6 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
     """(FAIL messages, identity dict) for one tool folder. Never raises for bad content."""
     label = label or str(folder)
     fails, identity = [], {}
-    for old, new in OLD_NAMES:
-        if (folder / old).exists() or (folder / old).is_symlink():
-            fails.append(f"{label}/{old} is the Agent Standard 2 name; 3.0 uses {new}")
     if not custom and not KEBAB.fullmatch(folder.name):
         fails.append(f"{label}: tool folder name is not kebab-case")
     if not custom and folder.name == "custom":

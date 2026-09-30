@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "3.0"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "4.0"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
@@ -329,25 +329,12 @@ OO="$W/onlyorphan"; instance "$OO" good mail 'timezone: UTC' 'routine_digest: tr
 run check "$OO";                                   expect 2 "only orphans: still an error, naming the routine" "routine_digest: trig_02B has no schedule_digest entry"
 [ -x _template/hooks/schedule_check.py ] && _report ok "script executable" || _report no "script not executable"
 
-echo "-- 3.0 tools"
+echo "-- tools"
 I="$W/nousage"; instance "$I" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
 mv "$PKG/capabilities/crm/tools/good/usage.md" "$W/usage.bak"
 run check "$I";                                    expect 1 "bound tool failing tool_check fails the entry" "usage.md"
 mv "$W/usage.bak" "$PKG/capabilities/crm/tools/good/usage.md"
-cp "$PKG/capabilities/crm/tools/good/identity.yaml" "$PKG/capabilities/crm/tools/good/adapter.yaml"
-run check "$I";                                    expect 1 "leftover adapter.yaml fails the entry" "Agent Standard 2 name"
-rm "$PKG/capabilities/crm/tools/good/adapter.yaml"
-I="$W/oldcustom"; instance "$I" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-mkdir -p "$I/custom-adapters/crm"; printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$I/custom-adapters/crm/adapter.yaml"
-run check "$I";                                    expect 1 "custom-adapters/ after upgrade fails with migration hint" "apply the 3.0 migration"
-rm -r "$I/custom-adapters"
+I="$W/nocustom"; instance "$I" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
 run check "$I";                                    expect 1 "custom binding with no custom tool fails" "run the add-tool skill"
-
-echo "-- 4.0 old guard keys"
-I="$W/old4"; instance "$I" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
-mkdir -p "$I/custom-tools/crm"; cusage "$I"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$I/custom-tools/crm/identity.yaml"
-printf '%s\n' 'covers: [draft_only]' 'update_tools: [edit]' > "$I/custom-tools/crm/guard.yaml"
-run check "$I";                                    expect 1 "old guard key in a custom tool fails the entry" "Agent Standard 3 form"
 
 finish

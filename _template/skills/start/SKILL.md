@@ -12,16 +12,8 @@ description: Use when this agent's instructions did not load at the start of a s
    instance with `mode: source` normally loads `AGENT.md` through its
    own host files (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`), and the
    session-start hook stays silent there; this skill still works.
-3. If the instance's `agent_version` is older than the package's
-   `version` (compare the dot-separated fields as numbers; a
-   non-numeric field counts as different), follow `migrations/` as the
-   session-start hook would: show the diff, confirm with the user,
-   then update `agent_version`. If `migrations/` has no note covering
-   this change, just update `agent_version`. If the instance is newer,
-   change nothing.
-4. Follow `AGENT.md` from here on. `context/` means the instance's
+3. Follow `AGENT.md` from here on. `context/` means the instance's
    `context/`, except package-owned context files that `AGENT.md`
    says are read from the package; the user's own examples are in the
    instance's `context/samples/`. `templates/`, `samples/` (the
-   examples the agent ships with), `skills/`, `subagents/`, and
-   `migrations/` mean the package's. Write only into the instance.
+   examples the agent ships with), `skills/`, and `subagents/` mean the package's. Write only into the instance.

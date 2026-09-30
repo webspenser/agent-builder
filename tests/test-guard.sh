@@ -8,7 +8,7 @@ GUARD="$PWD/_template/hooks/guard.sh"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; TD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$TD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "3.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "4.0"' > "$PKG/agent.yaml"
 printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
@@ -153,20 +153,10 @@ assert_contains _template/hooks/hooks.json '"\"${CLAUDE_PLUGIN_ROOT}/hooks/guard
 assert_contains _template/hooks/hooks.json '"matcher": "mcp__.*"'
 [ -x "$GUARD" ] && _report ok "guard is executable" || _report no "guard not executable"
 
-echo "-- 3.0 migration"
-M="$W/migrate"; mkdir -p "$M/custom-adapters/crm"
+echo "-- custom binding without a tool"
+M="$W/nocustom"; mkdir -p "$M"
 printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$M/instance.yaml"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$M/custom-adapters/crm/adapter.yaml"
-run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom-adapters/ left after upgrade: blocked" "apply the 3.0 migration"
-rm -r "$M/custom-adapters"
 run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom binding with no custom tool: blocked" "run the add-tool skill"
 run_guard "$M" "$(call mcp__other__list-records)";              expect 2 "missing identity blocks every MCP call (fail closed)" "has no identity.yaml"
-
-echo "-- 4.0 old guard keys"
-O4="$W/old4"; mkdir -p "$O4/custom-tools/crm"
-printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$O4/instance.yaml"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$O4/custom-tools/crm/identity.yaml"
-printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' > "$O4/custom-tools/crm/guard.yaml"
-run_guard "$O4" "$(call mcp__democrm__list-records)";  expect 2 "old guard keys in a custom tool: blocked" "Agent Standard 3 form"
 
 finish

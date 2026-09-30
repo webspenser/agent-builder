@@ -22,7 +22,6 @@ import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "rules")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
-OLD_KEYS = ("create_tools", "update_tools", "values_at")  # Agent Standard 3 keys
 RULE_KEYS = ("field", "binding_id", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
 REFUSE_PRESETS = {
@@ -218,8 +217,6 @@ def parse(text):
         if line[0] == " " or not m:
             raise PolicyError(f"line {lineno}: expected 'key: value' at column 0")
         key, value = m.group(1), (m.group(2) or "").strip()
-        if key in OLD_KEYS:
-            raise PolicyError(f'{key} is the Agent Standard 3 form; 4.0 uses writes: (see STANDARD.md "Guard policy")')
         if key not in KEYS:
             raise PolicyError(f"line {lineno}: unknown key '{key}'")
         if key in policy:

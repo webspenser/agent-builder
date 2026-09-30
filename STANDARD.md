@@ -1,4 +1,4 @@
-# Agent Standard 4.0
+# Agent Standard
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
@@ -11,12 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 4.0. The validator checks only the current version: an
-agent that declares another version fails with a message to update it.
-Breaking changes are allowed, and every Webspenser agent is updated in
-the same release as the builder. Compatibility rules will return when
-agents have outside users. An agent declares the standard it follows in
-`agent.yaml`.
+The standard is 4.0. It is in active development: agents track
+agent-builder's main branch, and version tags come with the first
+official release. An agent declares the standard it follows in
+`agent.yaml`, and the validator requires `standard: "4.0"`.
 
 ## Directory layout
 
@@ -33,7 +31,6 @@ agent-builder/
       guard_policy.py       # guard policy engine
       schedule_check.py     # schedule gate and routine verifier
       tool_check.py         # tool folder checker
-    migrations/             # <from>-<to>.md upgrade notes
     capabilities/           # optional, one folder per capability
       <capability>/
         contract.md         # operations + invariants
@@ -276,7 +273,7 @@ A folder is an instance of an agent when it holds `instance.yaml`:
 
 ```yaml
 agent: sales-partner       # the agent's name
-agent_version: 1.0.0       # version setup (or the last migration) ran with
+agent_version: 1.0.0       # version setup ran with
 mode: plugin               # plugin | source
 bind_crm: attio            # one line per bound capability
 ```
@@ -289,7 +286,7 @@ instance only the context files the interview fills (listed in
 edits stay in the package, are read from there, and `AGENT.md` says
 so. The user's own examples live in the instance's `context/samples/`;
 the package's `samples/` holds only the examples the agent ships with.
-`templates/`, `samples/`, `skills/`, `subagents/`, and `migrations/`
+`templates/`, `samples/`, `skills/`, and `subagents/`
 mean the package's files. Package paths are read-only in plugin mode:
 write only into the instance. In source mode the package folder is the
 instance (`instance.yaml` with `mode: source` at its root). An agent
@@ -303,15 +300,11 @@ command hook, `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"`, and
 `hooks/session-start.sh` byte-identical to `_template/hooks/session-start.sh`
 and executable. It finds the nearest `instance.yaml` above the session
 folder and stops there (it never looks further up); if that file names
-this agent, it prints where the instance and package live, a migration
-notice when the instance's `agent_version` is older than the package's
-`version` (dot-separated fields compared as numbers), and a line telling
+this agent, it prints where the instance and package live, and a line telling
 the model to read `AGENT.md` in full. It then inlines `AGENT.md` only
 when it is at most 9000 bytes; above that it points at the file
 (Claude Code truncates hook output past 10,000 characters). The
-validator prints a `WARN:` for an `AGENT.md` over 9000 bytes. A missing
-or malformed `agent_version`, or an instance newer than the package,
-suppresses the migration notice. It prints nothing for a `mode: source`
+validator prints a `WARN:` for an `AGENT.md` over 9000 bytes. It prints nothing for a `mode: source`
 instance (source copies load `AGENT.md` through their own host files)
 and nothing elsewhere.
 
@@ -325,12 +318,6 @@ template itself). Optional `agent.yaml` keys `catalog` (marketplace
 name) and `catalog_repo` (`owner/repo`) let setup enable the plugin in
 the instance's `.claude/settings.json`; they are two flat top-level
 keys (not a nested map), set both or neither.
-
-## Migrations
-
-`migrations/` is required. It holds one `<from>-<to>.md` note per
-release that changes the shape of a context file: what changed and how
-to convert. It may be empty (keep a `.gitkeep` so git tracks it).
 
 ## Capabilities
 
@@ -408,7 +395,6 @@ exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
 - `guard.yaml`, when present, parses with the engine's parser and its
   `covers` names only contract invariants;
 - when the contract has `no_send`, `guard.yaml` exists and covers it;
-- a leftover Agent Standard 2 file, `adapter.yaml` or `adapter.md`, is a FAIL.
 
 ### The add-tool skill
 
@@ -598,10 +584,6 @@ Each is an invalid policy, and fails closed.
 - An `at` path is not a valid path.
 - A `writes` entry has an unknown key.
 - `rules` or `refuse_keys` is present without `writes`.
-- Any of the old keys is present: `create_tools` (Agent Standard 3),
-  `update_tools` (Agent Standard 3) or `values_at` (Agent Standard 3).
-  The message is `<key> is the Agent Standard 3 form; 4.0 uses writes:
-  (see STANDARD.md "Guard policy")`.
 
 ### Field identity
 
@@ -666,12 +648,7 @@ blocks the call, since the binding state is unknown.
 
 A bound tool with no `identity.yaml` blocks every MCP call, whatever
 the tool name: the binding state is unknown, so the guard fails closed.
-When the instance has `custom-adapters/<capability>/` (the Agent
-Standard 2 layout), the message says to apply the 3.0 migration: move
-it to `custom-tools/<capability>/`, then rename its
-Agent Standard 2 files: `adapter.yaml` to `identity.yaml`, and `adapter.md` to `usage.md`.
-For any other custom binding, the message
-says to run the `add-tool` skill. For a shipped tool, it says to fix
+For a custom binding, the message says to run the `add-tool` skill. For a shipped tool, it says to fix
 the binding (setup's tools step).
 
 A bound tool whose `identity.yaml` has an empty `server_match` could
@@ -922,12 +899,6 @@ The validator checks:
   identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
   and `guard.yaml` rules in Tools above, and
   `guard.yaml` covering `no_send` when the contract has it.
-- The Agent Standard 2 names FAIL, each with a message naming the 3.0
-  layout:
-  - a top-level `adapters/` folder (Agent Standard 2; 3.0 uses `hosts/`);
-  - a `capabilities/<name>/adapters/` folder (Agent Standard 2; 3.0 uses
-    `tools/<tool>/`);
-  - `adapter.yaml` or `adapter.md` in a tool folder (Agent Standard 2).
 - `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
   most 25 lines and pointing at `AGENT.md`.
 - An agent with capabilities ships `skills/add-tool/SKILL.md`,
@@ -941,56 +912,10 @@ The validator checks:
 ### CI
 
 An agent's repository runs the validator on every pull request and push
-with the Agent Builder's action. `v4` is the tag for this standard (`v3` stays frozen):
+with the Agent Builder's action. `main` tracks the current standard
+while it is in development:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: webspenser/agent-builder/validate@v4
+- uses: webspenser/agent-builder/validate@main
 ```
-
-## Changes from 2.1
-
-Agent Standard 3.0 replaces the Agent Standard 2 word for a tool
-folder with "tool". There is no compatibility mode: the old names fail
-validation.
-
-| Agent Standard 2 | Agent Standard 3.0 |
-|---|---|
-| `adapters/` (Agent Standard 2 host pointer files) | `hosts/` |
-| `capabilities/<cap>/adapters/<tool>/` (Agent Standard 2) | `capabilities/<cap>/tools/<tool>/` |
-| `adapter.yaml` (Agent Standard 2) | `identity.yaml` |
-| `adapter.md` (Agent Standard 2) | `usage.md` |
-| instance `custom-adapters/<cap>/` | instance `custom-tools/<cap>/` |
-| `validate@v2` | `validate@v3` |
-
-New in 3.0:
-
-- `hooks/tool_check.py`, the single checker for a tool folder, used by
-  the validator, the schedule checker and `add-tool`;
-- the `add-tool` skill, required in every agent with capabilities;
-- the missing-identity rule: a bound tool with no `identity.yaml`
-  blocks every MCP call.
-
-The schedule gate now also fails an entry whose bound tool fails
-`tool_check.py`.
-
-## Changes from 3.0
-
-Agent Standard 4.0 is a breaking change to the guard policy format.
-There is no compatibility mode: the Agent Standard 3 keys fail closed.
-
-| Agent Standard 3 | Agent Standard 4.0 |
-|---|---|
-| `create_tools`, `update_tools`, `values_at` (Agent Standard 3) | one `writes:` list of `{kind, tools, at}` entries |
-| `standard: "3.0"` | `standard: "4.0"` |
-| `validate@v3` | `validate@v4` |
-
-New in 4.0:
-
-- `writes:` describes a write once, whether it is found by tool name
-  (Attio) or by path (HubSpot's `createRequest` and `updateRequest`);
-- the Setup rule: a tool with `bootstrap.py` must have a `## Setup`
-  section in `usage.md`, and `bootstrap.py` stays optional;
-- setup's tools step offers two ways to create a tool's fields: by hand
-  from `## Setup`, or with an API key in the user's own terminal. Keys
-  never enter the chat.

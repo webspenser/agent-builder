@@ -22,7 +22,7 @@ for d in */; do  # _template/ is matched here
   bin/validate-agent.sh "$d" || STATUS=1
 done
 
-echo "== template is Agent Standard 4.0"
+echo "== template standard"
 if ! grep -q '^standard: "4.0"' _template/agent.yaml; then echo "FAIL: _template is not 4.0"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
@@ -37,26 +37,25 @@ for f in CLAUDE GEMINI AGENTS; do  # hosts/ sources stay tracked though root lin
   if git check-ignore --no-index -q "_template/hosts/$f.md"; then echo "FAIL: .gitignore ignores _template/hosts/$f.md"; STATUS=1; fi
 done
 
-echo "== Agent Standard 3.0 text"
-if grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template \
-     | grep -v 'Agent Standard 2' | grep -v 'custom-adapters' | grep -q .; then
-  echo "FAIL: 'adapter' still used outside 2.x migration notes:"; grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -v 'Agent Standard 2' | grep -v 'custom-adapters' | head; STATUS=1
+echo "== tool naming"
+if grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
+  echo "FAIL: 'adapter' still used:"; grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | head; STATUS=1
 fi
 for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'server_match' 'lowercase' 'no_send' 'tool_check.py'; do
   grep -qF -- "$want" _template/skills/add-tool/SKILL.md || { echo "FAIL: add-tool skill does not mention $want"; STATUS=1; }
 done
 grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }
 
-echo "== Agent Standard 4.0 text"
+echo "== setup and guard text"
 for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup' 'read -rs <VAR> && export <VAR>'; do
   grep -qF -- "$want" _template/skills/setup/SKILL.md || { echo "FAIL: setup does not say: $want"; STATUS=1; }
 done
 if grep -rniE 'paste (the|your) (api )?key|give us your (api )?key' _template/skills skills | grep -vi 'never' | grep -q .; then echo "FAIL: a skill asks for a key in chat"; STATUS=1; fi
-if grep -rnE 'create_tools|update_tools|values_at' STANDARD.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -v 'Agent Standard 3' | grep -q .; then
-  echo "FAIL: old guard keys outside Agent Standard 3 notes"; STATUS=1; fi
+if grep -rnE 'create_tools|update_tools|values_at' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
+  echo "FAIL: old guard keys still mentioned"; STATUS=1; fi
 if grep -rnE 'export [A-Z_]*(TOKEN|KEY)=' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
   echo "FAIL: a key is set with export VAR=..., which lands in shell history; use read -rs VAR && export VAR"; STATUS=1; fi
-grep -qF 'validate@v4' README.md || { echo "FAIL: README does not use validate@v4"; STATUS=1; }
+grep -qF 'validate@main' README.md || { echo "FAIL: README does not use validate@main"; STATUS=1; }
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"
 exit "$STATUS"
