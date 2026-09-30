@@ -36,7 +36,7 @@ skeleton is `_capability-template/` in the same root. The validator is
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "3.0"`. Set the same name, version, and description in
+   `standard: "4.0"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
@@ -70,8 +70,11 @@ skeleton is `_capability-template/` in the same root. The validator is
      that `usage.md` uses in `allow`, and replace the skeleton's
      `example_invariant` in `covers` with the real contract invariant
      ids it enforces; an invariant left out is held only by the agent's
-     instructions. Replace or remove the example `rules`,
-     `create_tools` and `update_tools`. Verify with
+     instructions. Replace or remove the example `rules` and
+     `writes` (each `writes` entry has a `kind`, the `tools` and the
+     argument paths `at`). If a tool needs fields the user must create,
+     give its `usage.md` a `## Setup` section; it is required when the
+     tool has a `bootstrap.py`. Verify with
      `python3 <target>/hooks/tool_check.py <target>/capabilities/<cap>/tools/<tool> <target>/capabilities/<cap>/contract.md`
      (the new agent's own copy of the checker; the `add-tool` skill
      does the same for a system connected in this session); the validator runs the same check. List the

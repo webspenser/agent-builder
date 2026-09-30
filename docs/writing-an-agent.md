@@ -67,7 +67,13 @@ left out is held only by the agent's instructions. A capability is
 unattended-safe when every invariant is covered, and a `no_send`
 invariant must always be covered. With `allow` present, every other tool
 of that system is blocked, so a new tool stays blocked until you allow
-it. Field rules can also limit the values a write may set. Check a
+it. Field rules can also limit the values a write may set: `writes`
+entries say which tools create or update data (`kind`, `tools`) and
+where the value maps sit in the call (`at`). If a tool needs fields
+created in the system, its `usage.md` has a `## Setup` section listing
+them; the section is required when the tool has a `bootstrap.py`, and
+setup offers to create the fields by hand or with an API key in the
+user's own terminal. Check a
 tool folder with `python3 hooks/tool_check.py <tool folder> <contract.md>`.
 
 The user binds each capability to their own system in `instance.yaml`

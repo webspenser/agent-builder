@@ -1,4 +1,4 @@
-# Agent Standard 3.0
+# Agent Standard 4.0
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
@@ -11,7 +11,7 @@ bug.
 
 ## Development phase
 
-The standard is 3.0. The validator checks only the current version: an
+The standard is 4.0. The validator checks only the current version: an
 agent that declares another version fails with a message to update it.
 Breaking changes are allowed, and every Webspenser agent is updated in
 the same release as the builder. Compatibility rules will return when
@@ -234,7 +234,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "3.0"                # the Agent Standard version followed
+standard: "4.0"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -373,7 +373,13 @@ files, each with one reader and one purpose:
   held only by the agent's instructions. A tool without `guard.yaml`
   works, but every invariant is instruction-only. An invariant named
   `no_send` must be covered.
-- `bootstrap.py` is optional, for tools that need a setup script.
+- `bootstrap.py` is optional, for tools that need a setup script. When
+  it exists, `usage.md` must have a `## Setup` section, so a person can
+  always create the fields by hand. `## Setup` lists each field or object
+  the tool needs (object, label, internal name, type, options), and, for a
+  tool with `bootstrap.py`, the environment variable the script reads,
+  the key scopes it needs and the command to run. A tool without
+  `bootstrap.py` may have `## Setup` too.
 
 An instance may bring one tool of its own per capability, in
 `custom-tools/<capability>/`, with the same three files
@@ -449,10 +455,14 @@ allow: [whoami, list-*, get-*, search-*, semantic-search-*, run-basic-report,
         create-note, create-task, update-task]
 deny: ["*delete*", "*merge*", create-list, update-list]
 
-create_tools: [add-record-to-list, create-record]
-update_tools: [update-list-entry-by-id, update-list-entry-by-record-id,
-               update-record, upsert-record]
-values_at: [entry_values, values]
+writes:
+  - kind: create
+    tools: [add-record-to-list, create-record]
+    at: [entry_values, values]
+  - kind: update
+    tools: [update-list-entry-by-id, update-list-entry-by-record-id,
+            update-record, upsert-record]
+    at: [entry_values, values]
 unwrap: [option, status, value, title]
 unknown_writes: update
 refuse_keys: [uuid]
@@ -489,10 +499,11 @@ validation error and, at runtime, a block.
   scalar may not contain its own quote character, and a double-quoted
   one may not contain a backslash. A list item is one scalar
   (`["a" "b"]` is an error).
-- The one exception is `rules:`, whose value is a block list: each item
-  starts with `  - ` and holds `field:` plus any of `binding_id:`,
-  `create:`, `update:`, `any:` — lists on one line — with further keys
-  indented four spaces.
+- The exceptions are `rules:` and `writes:`, whose values are block
+  lists: each item starts with `  - `, with further keys indented four
+  spaces. A `rules` item holds `field:` plus any of `binding_id:`,
+  `create:`, `update:`, `any:` — lists on one line. A `writes` item
+  holds `kind:`, `tools:` and `at:`, the last two as flow lists.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
   duplicate keys, and unknown keys are errors.
 
@@ -503,11 +514,9 @@ validation error and, at runtime, a block.
 | `covers` | yes | Invariant ids this policy enforces (snake_case) |
 | `allow` | no | Tool-name glob patterns that may be called; if present, everything else on the matched server is blocked |
 | `deny` | no | Tool-name glob patterns that are always blocked |
-| `create_tools` | if `rules` | Tools whose writes create new data |
-| `update_tools` | if `rules` | Tools whose writes change existing data |
-| `values_at` | if `rules` or `refuse_keys` | Where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`) |
+| `writes` | if `rules` or `refuse_keys` | A list of `{kind, tools, at}` entries. `kind` is `create` or `update`; `tools` are tool-name globs, matched as in `allow`/`deny`; `at` lists where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`) |
 | `unwrap` | no | Keys whose value stands for a wrapped value (`{"option": "draft"}`); without them any object value on a write is an error |
-| `unknown_writes` | no | `update` (default) or `block`: a tool in neither list whose input holds an attribute map |
+| `unknown_writes` | no | `update` (default) or `block`: a call that holds an attribute map at a `writes` path that no `writes` entry for that tool lists |
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
 | `rules` | no | Field rules |
 
@@ -522,12 +531,39 @@ validation error and, at runtime, a block.
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
-2. **Writes.** A tool in `create_tools` or `update_tools`, or (per
-   `unknown_writes`) any other tool whose input holds an attribute map
-   at a `values_at` path, is a write; each map found is checked. Walking
-   a path, a missing key is skipped, but any other unexpected shape (a
-   list inside a list, a list item that is not an object) blocks. An
-   attribute key containing invisible (Unicode format) characters blocks.
+2. **Writes.** The matching entries are the `writes` entries whose
+   `tools` match the call's tool name, using the same suffix matching as
+   `allow` and `deny`. For each matching entry, collect the value maps
+   found at each of its `at` paths, and tag each map with that entry's
+   `kind`. A listed path that is absent from the call is skipped.
+   Walking a path, a missing key is skipped, but any other unexpected
+   shape (a list inside a list, a list item that is not an object)
+   blocks. An attribute key containing invisible (Unicode format)
+   characters blocks.
+
+   A tool matched by entries of both kinds is allowed. HubSpot's
+   `manage_crm_objects` has a create entry at
+   `createRequest.objects[].properties` and an update entry at
+   `updateRequest.objects[].properties`, and each map gets the kind of
+   the entry whose path found it.
+
+   **Unknown writes.** A value map sits at a path listed in some entry,
+   and either no entry matches the tool, or the tool matches entries but
+   none of them lists that path (a matched tool writing at a path listed
+   only by other entries). With `unknown_writes: block` the call is
+   blocked (`<tool> writes values at <path>, which no writes entry for
+   this tool lists`, when the tool matched some entry). With
+   `unknown_writes: update` (the default) those maps are checked as
+   `update`.
+
+   **Stated limits.** When a tool matches an entry but uses a path that
+   no `writes` entry lists anywhere, its values are not found and go
+   unchecked; the `allow` and `deny` lists are the backstop. When one
+   tool matches both a create entry and an update entry that share a
+   path, each map at that path is checked with both kinds, so a rule
+   whose `create` and `update` lists differ can never pass for a field
+   there: such a field can't be written at all. The policy fails closed,
+   but give each kind its own path.
 3. **Values.** Lists flatten to their items; objects to the values
    under their `unwrap` keys (an object may hold only `unwrap` keys;
    any other key, or none, is an error); booleans to
@@ -550,6 +586,20 @@ validation error and, at runtime, a block.
    `Blocked by <label>: `; exit 0 otherwise. `--check` prints
    `FAIL: …` and exits 1 on an invalid policy. `guard.sh` passes the label
    `<agent> guard policy (<capability>/<provider>)`.
+
+### Parse errors
+
+Each is an invalid policy, and fails closed.
+
+- `kind` is not `create` or `update`.
+- `tools` or `at` is missing or empty.
+- An `at` path is not a valid path.
+- A `writes` entry has an unknown key.
+- `rules` or `refuse_keys` is present without `writes`.
+- Any of the old keys is present: `create_tools` (Agent Standard 3),
+  `update_tools` (Agent Standard 3) or `values_at` (Agent Standard 3).
+  The message is `<key> is the Agent Standard 3 form; 4.0 uses writes:
+  (see STANDARD.md "Guard policy")`.
 
 ### Field identity
 
@@ -652,7 +702,18 @@ Setup's tools step binds each capability:
   the tool to the package copy, and setup continues with that tool at the
   steps below.
 - Find the matching connected server and run the tool's `usage.md`
-  `## Probe`.
+  `## Probe`. If it fails because fields or objects are missing and the
+  tool has a `## Setup` section, offer two choices:
+  - **Create them yourself.** Show the `## Setup` list as plain steps in
+    that system, then probe again.
+  - **Use an API key.** Only when the tool has a `bootstrap.py`. Show the
+    exact command and the environment variable and key scopes from
+    `## Setup`. The user runs it in their own terminal, with the key set
+    only in that terminal's environment.
+  The key never enters the chat or any file. The probe must pass before
+  the tool is bound. Setup's opening message tells the user up front to
+  connect each system to their host and that fields may need creating,
+  by hand or with an API key.
 - Write `bindings/<capability>.md`, including any `field_<name>` IDs the
   probe records.
 - Refuse to bind when the contract has `no_send` and the tool's
@@ -735,7 +796,7 @@ from a cloud environment. The user keeps one environment per account
 agent, a version comment and two install lines:
 
 ```bash
-# sales-partner 3.0.0
+# sales-partner 4.0.0
 claude plugin marketplace add webspenser/agent-library
 claude plugin install sales-partner@webspenser
 ```
@@ -840,7 +901,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"3.0"`.
+- `agent.yaml` exists, and its `standard` is `"4.0"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -855,7 +916,8 @@ The validator checks:
   holding at least one backticked id; invariant ids are `snake_case`.
 - Each capability has at least one tool folder, and each tool folder
   passes `tool_check.py` (the validator loads the template's copy): the
-  identity, `usage.md` and `guard.yaml` rules in Tools above, and
+  identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
+  and `guard.yaml` rules in Tools above, and
   `guard.yaml` covering `no_send` when the contract has it.
 - The Agent Standard 2 names FAIL, each with a message naming the 3.0
   layout:
@@ -876,11 +938,11 @@ The validator checks:
 ### CI
 
 An agent's repository runs the validator on every pull request and push
-with the Agent Builder's action. `v3` is the tag for this standard:
+with the Agent Builder's action. `v4` is the tag for this standard (`v3` stays frozen):
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: webspenser/agent-builder/validate@v3
+- uses: webspenser/agent-builder/validate@v4
 ```
 
 ## Changes from 2.1
@@ -908,3 +970,24 @@ New in 3.0:
 
 The schedule gate now also fails an entry whose bound tool fails
 `tool_check.py`.
+
+## Changes from 3.0
+
+Agent Standard 4.0 is a breaking change to the guard policy format.
+There is no compatibility mode: the Agent Standard 3 keys fail closed.
+
+| Agent Standard 3 | Agent Standard 4.0 |
+|---|---|
+| `create_tools`, `update_tools`, `values_at` (Agent Standard 3) | one `writes:` list of `{kind, tools, at}` entries |
+| `standard: "3.0"` | `standard: "4.0"` |
+| `validate@v3` | `validate@v4` |
+
+New in 4.0:
+
+- `writes:` describes a write once, whether it is found by tool name
+  (Attio) or by path (HubSpot's `createRequest` and `updateRequest`);
+- the Setup rule: a tool with `bootstrap.py` must have a `## Setup`
+  section in `usage.md`, and `bootstrap.py` stays optional;
+- setup's tools step offers two ways to create a tool's fields: by hand
+  from `## Setup`, or with an API key in the user's own terminal. Keys
+  never enter the chat.
