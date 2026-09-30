@@ -676,10 +676,10 @@ the check: that routine still runs without the gate, so the checker
 names it for the user to disable or delete.
 
 Some problems stop the whole check with an error (exit 2) instead of
-failing one entry, for example: a timezone that is not an IANA name, a missing or
-empty `schedules.yaml`, an `agent` in `instance.yaml` that is not the
-`name` in `agent.yaml`, and control characters in `agent.yaml` or
-`instance.yaml`.
+failing one entry, for example: a timezone that is not an IANA name,
+a missing or empty `schedules.yaml`, an `agent` in `instance.yaml` that
+is not the `name` in `agent.yaml`, and control characters in
+`agent.yaml` or `instance.yaml`.
 
 ### The schedule skill
 
