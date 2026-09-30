@@ -77,6 +77,7 @@ In CI, from any agent repo:
 | `bin/validate-agent.sh` | The validator |
 | `validate/` | The GitHub Action |
 | `docs/writing-an-agent.md` | How to write a good agent by hand |
+| `docs/how-it-works.md` | Product overview: repositories, vocabulary, and every check (CI, runtime guard, scheduling), with diagrams |
 
 ## Agents built with this
 
