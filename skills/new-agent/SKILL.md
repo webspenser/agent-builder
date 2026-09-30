@@ -36,14 +36,16 @@ skeleton is `_capability-template/` in the same root. The validator is
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "2.1"`. Set the same name, version, and description in
+   `standard: "3.0"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
    publisher the user named in step 3. Set the title in `AGENT.md` and the
-   three `adapters/` files to the agent's display name.
-   Keep `hooks/` exactly as copied — four scripts, which the validator
-   checks byte for byte. Keep the `schedule` skill as copied.
+   three `hosts/` files (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`) to the
+   agent's display name. Keep `hooks/` exactly as copied — five scripts
+   (`session-start.sh`, `guard.sh`, `guard_policy.py`,
+   `schedule_check.py`, `tool_check.py`), which the validator checks
+   byte for byte. Keep `skills/add-tool` and `skills/schedule` as copied.
 5. **Specification, section by section.** For each, ask, draft,
    confirm, write:
    - Identity and Mission — a role a person could hold; one outcome.
@@ -57,27 +59,28 @@ skeleton is `_capability-template/` in the same root. The validator is
      a mailbox). For each, pick a `snake_case` capability name, copy
      `_capability-template/` (beside `_template/`) to
      `capabilities/<name>/`, write the contract's operations and
-     invariants, and rename `adapters/example-provider/` to the first
-     system's kebab-case name. An adapter pack is `adapter.md`,
-     `adapter.yaml`, and `guard.yaml` (from the skeleton). Fill
-     `adapter.md` (every operation in backticks, plus `## Probe`) and
-     `adapter.yaml`, which has three keys: `capability` and `provider`
-     equal to the folder names, and `server_match`, a substring of the
-     real MCP server's name. In `guard.yaml`, list every tool the
-     adapter uses in `allow`, and replace the skeleton's
+     invariants, and rename `tools/example-provider/` to the first
+     system's kebab-case name. A tool folder is `identity.yaml`,
+     `usage.md`, and `guard.yaml` (from the skeleton). Fill
+     `usage.md` (every operation in backticks, plus `## Probe`) and
+     `identity.yaml`, which has three keys: `capability` and `provider`
+     equal to the folder names, and `server_match`, lowercase text
+     from the real MCP server's tool names (letters, digits, `_`, `-`).
+     In `guard.yaml`, list every MCP tool
+     that `usage.md` uses in `allow`, and replace the skeleton's
      `example_invariant` in `covers` with the real contract invariant
      ids it enforces; an invariant left out is held only by the agent's
      instructions. Replace or remove the example `rules`,
      `create_tools` and `update_tools`. Verify with
-     `python3 _template/hooks/guard_policy.py --check <path>`, which
-     only parses; the validator step checks `covers` against the
-     contract. List the
+     `python3 <target>/hooks/tool_check.py <target>/capabilities/<cap>/tools/<tool> <target>/capabilities/<cap>/contract.md`
+     (the new agent's own copy of the checker; the `add-tool` skill
+     does the same for a system connected in this session); the validator runs the same check. List the
      names in `agent.yaml` as `capabilities: a, b`. Skills and
      sub-agents name operations, never a system's tools. If the agent
      must never send messages, give the capability a `no_send`
      invariant and cover it: usually `deny: ["*send*", "*reply*",
-     "*forward*"]` plus an `allow` list of the tools the adapter uses.
-     Confirm in `adapter.md` that the provider has no other way to
+     "*forward*"]` plus an `allow` list of the MCP tools `usage.md` uses.
+     Confirm in `usage.md` that the provider has no other way to
      send.
    - Schedules — which Workflow steps may run on a schedule. For each,
      add `activity_<name>: <capabilities or none>` to `agent.yaml` and

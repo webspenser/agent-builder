@@ -64,30 +64,25 @@ skill, if this agent has one.
    `schedule_*` lines) when the agent declares activities.
 9. **Tools.** Skip if `agent.yaml` lists no `capabilities`. For each
    capability listed there:
-   1. List the shipped adapters (`capabilities/<capability>/adapters/`
+   1. List the shipped tools (`capabilities/<capability>/tools/`
       in the package) and ask which system the user uses. If none
-      fits, offer a custom adapter: interview the user about their
-      tool and write, in the instance's
-      `custom-adapters/<capability>/`, an `adapter.md` mapping every
-      operation in the contract, an `adapter.yaml` (`capability`,
-      `provider: custom`, `server_match`), and — for every invariant
-      the user wants enforced by mechanism — a `guard.yaml` guard
-      policy: an `allow` list of the tools the adapter uses, a `deny`
-      list, and any field rules. Check it with
-      `python3 <package>/hooks/guard_policy.py --check custom-adapters/<capability>/guard.yaml`.
-   2. Find the tools in this session whose name contains the adapter's
+      fits, run the `add-tool` skill for this capability. In plugin mode
+      it binds the tool itself; continue with the next capability. In
+      source mode it adds the tool to this copy of the package; continue
+      at sub-step 2 with that new tool.
+   2. Find the tools in this session whose name contains the tool's
       `server_match` after `mcp__`, ignoring case. If there are none,
       explain how to connect that system in the host (a connector or
       an MCP server), and that the user enters any key or login there
       themselves; leave the capability unbound and go on.
-   3. Run the adapter's `## Probe` calls. They only read. On failure,
+   3. Run the tool's `usage.md` `## Probe` calls. They only read. On failure,
       say what failed and leave the capability unbound. Write what the
       probe found to `bindings/<capability>.md` in the instance,
       including any `field_<name>: <id>` lines the probe records. Write
       each as a plain line, `field_<name>: <ID>`, with nothing else on
       it: no bullet, no backticks or quotes, no trailing note. Anything
       else blocks the guarded call.
-   4. If the contract has a `no_send` invariant and the adapter's
+   4. If the contract has a `no_send` invariant and the tool's
       `guard.yaml` does not list it in `covers`, refuse to bind it and
       say why.
    5. Add `bind_<capability>: <provider>` (or `custom`) to
@@ -97,7 +92,7 @@ skill, if this agent has one.
       `"$CLAUDE_PROJECT_DIR/hooks/guard.sh"`, unless one is there
       already. Keep every existing key.
    7. Tell the user, for each capability, each contract invariant and
-      whether the adapter's guard policy covers it. A capability is
+      whether the tool's guard policy covers it. A capability is
       **unattended-safe** when every invariant is covered. Scheduled
       runs may use only unattended-safe capabilities.
    8. If the agent declares activities (`activity_*` in `agent.yaml`)

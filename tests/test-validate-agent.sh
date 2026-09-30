@@ -7,31 +7,32 @@ source tests/lib.sh
 FIX=$(mktemp -d)
 trap 'rm -rf "$FIX"' EXIT
 
-make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 2.1 agent
+make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 3.0 agent
   local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}"
-  mkdir -p "$d"/{adapters,skills/start,skills/setup,subagents,templates,samples,context,evals,hooks,migrations,.claude-plugin,.codex-plugin}
+  mkdir -p "$d"/{hosts,skills/start,skills/setup,skills/add-tool,subagents,templates,samples,context,evals,hooks,migrations,.claude-plugin,.codex-plugin}
   printf '%s\n' \
     '## Identity' '## Mission' '## Inputs' '## Outputs' \
     '## Operating rules' '## Workflow' '## Sub-agents' '## Skills' \
     '## Guardrails / never do' '## Escalate to human when' > "$d/AGENT.md"
-  for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/adapters/$a.md"; done
+  for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/hosts/$a.md"; done
   echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
   echo '# Cases' > "$d/evals/cases.md"
-  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "2.1"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "3.0"' 'capabilities: crm' > "$d/agent.yaml"
   printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
-  cp _template/hooks/session-start.sh _template/hooks/guard.sh _template/hooks/guard_policy.py _template/hooks/schedule_check.py _template/hooks/hooks.json "$d/hooks/"
-  chmod 755 "$d/hooks/session-start.sh" "$d/hooks/guard.sh" "$d/hooks/guard_policy.py" "$d/hooks/schedule_check.py"
+  cp _template/hooks/session-start.sh _template/hooks/guard.sh _template/hooks/guard_policy.py _template/hooks/schedule_check.py _template/hooks/tool_check.py _template/hooks/hooks.json "$d/hooks/"
+  chmod 755 "$d/hooks/session-start.sh" "$d/hooks/guard.sh" "$d/hooks/guard_policy.py" "$d/hooks/schedule_check.py" "$d/hooks/tool_check.py"
   printf '%s\n' '---' 'name: start' 'description: Use when starting' '---' 'x' > "$d/skills/start/SKILL.md"
   printf '%s\n' '---' 'name: setup' 'description: Use when setting up' '---' 'x' > "$d/skills/setup/SKILL.md"
-  local c="$d/capabilities/crm" a="$d/capabilities/crm/adapters/demo"
+  cp _template/skills/add-tool/SKILL.md "$d/skills/add-tool/SKILL.md"
+  local c="$d/capabilities/crm" a="$d/capabilities/crm/tools/demo"
   mkdir -p "$a"
   printf '%s\n' '# CRM contract' '' '## Operations' '' '| Operation | Arguments |' '|---|---|' \
     '| `create_lead` | `company` |' '| `get_lead` | `lead_id` |' '' '## Invariants' '' \
     '- `draft_only` — only drafts' '- `no_send` — never sends' > "$c/contract.md"
-  printf '%s\n' '# Demo adapter' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/adapter.md"
-  printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' > "$a/adapter.yaml"
+  printf '%s\n' '# Demo tool' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/usage.md"
+  printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' > "$a/identity.yaml"
   printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' > "$a/guard.yaml"
   sync_agents "$d" "$name" "$ver"
 }
@@ -83,12 +84,12 @@ printf '%s\n' '## Purpose' '## Trigger' > "$FIX/bad-sub/subagents/role.md"
 sync_agents "$FIX/bad-sub"
 fails_with "$FIX/bad-sub" "$FIX/bad-sub/subagents/role.md: headings missing or out of order"
 
-# An adapter containing behavior rules fails.
-make_valid_agent "$FIX/fat-adapter"
+# A host file containing behavior rules fails.
+make_valid_agent "$FIX/fat-host"
 { echo 'Read `AGENT.md` in this directory.'
   for i in $(seq 1 40); do echo "Extra rule line $i"; done
-} > "$FIX/fat-adapter/adapters/GEMINI.md"
-fails_with "$FIX/fat-adapter" "adapters/GEMINI.md has 41 lines (max 25) — adapters carry no behavior"
+} > "$FIX/fat-host/hosts/GEMINI.md"
+fails_with "$FIX/fat-host" "hosts/GEMINI.md has 41 lines (max 25) — host files carry no behavior"
 
 # A sub-agent contract with all headings present but two swapped fails.
 make_valid_agent "$FIX/sub-shuffled"
@@ -127,7 +128,7 @@ assert_pass $V "$FIX/mf-sub"
 # agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
 make_valid_agent "$FIX/mf-loose"
 printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
-  "version: '0.1.0'" 'description: A demo agent' 'standard: "2.1"' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "3.0"' \
   'capabilities: crm   # the only one' 'extra:' '  - nested' > "$FIX/mf-loose/agent.yaml"
 assert_pass $V "$FIX/mf-loose"
 
@@ -138,8 +139,8 @@ make_valid_agent "$FIX/mf-badname" "Demo_Agent"
 fails_with "$FIX/mf-badname" "agent.yaml: name 'Demo_Agent' is not kebab-case"
 make_valid_agent "$FIX/mf-badver" demo-agent "1.0"
 fails_with "$FIX/mf-badver" "agent.yaml: version '1.0' is not MAJOR.MINOR.PATCH"
-make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "2.0"/' "$FIX/mf-std20/agent.yaml"
-fails_with "$FIX/mf-std20" "agent.yaml: standard '2.0' is not 2.1; update the agent to the current Agent Standard"
+make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "2.1"/' "$FIX/mf-std20/agent.yaml"
+fails_with "$FIX/mf-std20" "agent.yaml: standard '2.1' is not 3.0; update the agent to the current Agent Standard"
 
 # Host manifest problems.
 make_valid_agent "$FIX/mf-nogem"; rm "$FIX/mf-nogem/gemini-extension.json"
@@ -407,7 +408,7 @@ for ph in '<interview-skill>' '<context-files>'; do
 done
 
 echo "-- capabilities"
-AD=capabilities/crm/adapters/demo
+AD=capabilities/crm/tools/demo
 make_valid_agent "$FIX/cap"; assert_pass $V "$FIX/cap"
 make_valid_agent "$FIX/cap-notools"; sed -i.bak '/^capabilities:/d' "$FIX/cap-notools/agent.yaml"; rm -rf "$FIX/cap-notools/capabilities" "$FIX/cap-notools/agent.yaml.bak"; assert_pass $V "$FIX/cap-notools"
 
@@ -429,28 +430,28 @@ make_valid_agent "$FIX/cap-noinv"; sed -i.bak '/^## Invariants/,$d' "$FIX/cap-no
 fails_with "$FIX/cap-noinv" 'capabilities/crm/contract.md: needs a ## Invariants list with at least one `invariant_id`'
 make_valid_agent "$FIX/cap-badinv"; echo '- `Draft-Only` — bad id' >> "$FIX/cap-badinv/capabilities/crm/contract.md"
 fails_with "$FIX/cap-badinv" "capabilities/crm/contract.md: invariant 'Draft-Only' is not snake_case"
-make_valid_agent "$FIX/cap-noadapter"; rm -r "$FIX/cap-noadapter/capabilities/crm/adapters"
-fails_with "$FIX/cap-noadapter" "capabilities/crm: needs at least one adapter in adapters/"
-make_valid_agent "$FIX/cap-noyaml"; rm "$FIX/cap-noyaml/$AD/adapter.yaml"
-fails_with "$FIX/cap-noyaml" "missing $AD/adapter.yaml"
+make_valid_agent "$FIX/cap-notool"; rm -r "$FIX/cap-notool/capabilities/crm/tools"
+fails_with "$FIX/cap-notool" "capabilities/crm: needs at least one tool in tools/"
+make_valid_agent "$FIX/cap-noyaml"; rm "$FIX/cap-noyaml/$AD/identity.yaml"
+fails_with "$FIX/cap-noyaml" "missing $AD/identity.yaml"
 
-make_valid_agent "$FIX/cap-wrongcap"; sed -i.bak 's/^capability: .*/capability: crmx/' "$FIX/cap-wrongcap/$AD/adapter.yaml"
-fails_with "$FIX/cap-wrongcap" "$AD/adapter.yaml: capability 'crmx' must be 'crm'"
-make_valid_agent "$FIX/cap-wrongprov"; sed -i.bak 's/^provider: .*/provider: other/' "$FIX/cap-wrongprov/$AD/adapter.yaml"
-fails_with "$FIX/cap-wrongprov" "$AD/adapter.yaml: provider 'other' must be 'demo'"
-make_valid_agent "$FIX/cap-nomatch"; sed -i.bak '/^server_match/d' "$FIX/cap-nomatch/$AD/adapter.yaml"
-fails_with "$FIX/cap-nomatch" "$AD/adapter.yaml: missing server_match"
-make_valid_agent "$FIX/cap-unmapped"; sed -i.bak '/get_lead/d' "$FIX/cap-unmapped/$AD/adapter.md"
-fails_with "$FIX/cap-unmapped" "$AD/adapter.md: does not map operation \`get_lead\`"
-make_valid_agent "$FIX/cap-noprobe"; sed -i.bak '/^## Probe/d' "$FIX/cap-noprobe/$AD/adapter.md"
-fails_with "$FIX/cap-noprobe" "$AD/adapter.md: needs a ## Probe section"
+make_valid_agent "$FIX/cap-wrongcap"; sed -i.bak 's/^capability: .*/capability: crmx/' "$FIX/cap-wrongcap/$AD/identity.yaml"
+fails_with "$FIX/cap-wrongcap" "$AD/identity.yaml: capability 'crmx' must be 'crm'"
+make_valid_agent "$FIX/cap-wrongprov"; sed -i.bak 's/^provider: .*/provider: other/' "$FIX/cap-wrongprov/$AD/identity.yaml"
+fails_with "$FIX/cap-wrongprov" "$AD/identity.yaml: provider 'other' must be 'demo'"
+make_valid_agent "$FIX/cap-nomatch"; sed -i.bak '/^server_match/d' "$FIX/cap-nomatch/$AD/identity.yaml"
+fails_with "$FIX/cap-nomatch" "$AD/identity.yaml: missing server_match"
+make_valid_agent "$FIX/cap-unmapped"; sed -i.bak '/get_lead/d' "$FIX/cap-unmapped/$AD/usage.md"
+fails_with "$FIX/cap-unmapped" "$AD/usage.md: does not map operation \`get_lead\`"
+make_valid_agent "$FIX/cap-noprobe"; sed -i.bak '/^## Probe/d' "$FIX/cap-noprobe/$AD/usage.md"
+fails_with "$FIX/cap-noprobe" "$AD/usage.md: needs a ## Probe section"
 make_valid_agent "$FIX/cap-unlisted"; mkdir -p "$FIX/cap-unlisted/capabilities/email"
 fails_with "$FIX/cap-unlisted" "capabilities/email is not listed in agent.yaml capabilities"
 make_valid_agent "$FIX/cap-badcap"; sed -i.bak 's/^capabilities: .*/capabilities: crm, Email-Drafts/' "$FIX/cap-badcap/agent.yaml"
 fails_with "$FIX/cap-badcap" "agent.yaml: capability 'Email-Drafts' is not snake_case"
-make_valid_agent "$FIX/cap-badprov"; mv "$FIX/cap-badprov/$AD" "$FIX/cap-badprov/capabilities/crm/adapters/Demo_X"
-sed -i.bak 's/^provider: .*/provider: Demo_X/' "$FIX/cap-badprov/capabilities/crm/adapters/Demo_X/adapter.yaml"
-fails_with "$FIX/cap-badprov" "capabilities/crm/adapters/Demo_X: adapter folder name is not kebab-case"
+make_valid_agent "$FIX/cap-badprov"; mv "$FIX/cap-badprov/$AD" "$FIX/cap-badprov/capabilities/crm/tools/Demo_X"
+sed -i.bak 's/^provider: .*/provider: Demo_X/' "$FIX/cap-badprov/capabilities/crm/tools/Demo_X/identity.yaml"
+fails_with "$FIX/cap-badprov" "capabilities/crm/tools/Demo_X: tool folder name is not kebab-case"
 make_valid_agent "$FIX/cap-unread"; chmod 000 "$FIX/cap-unread/capabilities/crm/contract.md"
 out=$($V "$FIX/cap-unread" 2>&1); rc=$?
 if [ "$rc" -eq 1 ] && ! printf '%s\n' "$out" | grep -qE 'Traceback|checker error'; then _report ok "unreadable contract fails cleanly"; else _report no "unreadable contract (rc=$rc): $out"; fi
@@ -463,8 +464,8 @@ cp -R _capability-template/. "$FIX/cap-skel/capabilities/example_capability/"
 sed -i.bak 's/^capabilities: .*/capabilities: crm, example_capability/' "$FIX/cap-skel/agent.yaml"
 assert_pass $V "$FIX/cap-skel"
 
-echo "-- Agent Standard 2.1"
-A=capabilities/crm/adapters/demo
+echo "-- Agent Standard 3.0"
+A=capabilities/crm/tools/demo
 make_valid_agent "$FIX/cur"; assert_pass $V "$FIX/cur"
 make_valid_agent "$FIX/noyaml"; rm "$FIX/noyaml/agent.yaml"
 fails_with "$FIX/noyaml" "missing agent.yaml"
@@ -472,14 +473,14 @@ make_valid_agent "$FIX/noengine"; rm "$FIX/noengine/hooks/guard_policy.py"
 fails_with "$FIX/noengine" "missing hooks/guard_policy.py"
 make_valid_agent "$FIX/editengine"; echo "# x" >> "$FIX/editengine/hooks/guard_policy.py"
 fails_with "$FIX/editengine" "hooks/guard_policy.py differs from the Agent Standard reference copy (_template/hooks/guard_policy.py in agent-builder)"
-make_valid_agent "$FIX/extrakey"; echo 'block: send' >> "$FIX/extrakey/$A/adapter.yaml"
-fails_with "$FIX/extrakey" "$A/adapter.yaml: unknown key 'block' (adapter.yaml holds capability, provider, server_match)"
-make_valid_agent "$FIX/enforce"; echo 'enforce_draft_only: adapter' >> "$FIX/enforce/$A/adapter.yaml"
-fails_with "$FIX/enforce" "$A/adapter.yaml: unknown key 'enforce_draft_only' (adapter.yaml holds capability, provider, server_match)"
-make_valid_agent "$FIX/matchlist"; sed -i.bak 's/^server_match: .*/server_match: [demo]/' "$FIX/matchlist/$A/adapter.yaml"
-fails_with "$FIX/matchlist" "$A/adapter.yaml: server_match must be a plain value, not a YAML list"
-make_valid_agent "$FIX/matchbare"; sed -i.bak 's/^server_match: .*/server_match:/' "$FIX/matchbare/$A/adapter.yaml"; printf '  - demo\n' >> "$FIX/matchbare/$A/adapter.yaml"
-fails_with "$FIX/matchbare" "$A/adapter.yaml: server_match must be a plain value, not a YAML list"
+make_valid_agent "$FIX/extrakey"; echo 'block: send' >> "$FIX/extrakey/$A/identity.yaml"
+fails_with "$FIX/extrakey" "$A/identity.yaml: unknown key 'block' (identity.yaml holds capability, provider, server_match)"
+make_valid_agent "$FIX/enforce"; echo 'enforce_draft_only: adapter' >> "$FIX/enforce/$A/identity.yaml"
+fails_with "$FIX/enforce" "$A/identity.yaml: unknown key 'enforce_draft_only' (identity.yaml holds capability, provider, server_match)"
+make_valid_agent "$FIX/matchlist"; sed -i.bak 's/^server_match: .*/server_match: [demo]/' "$FIX/matchlist/$A/identity.yaml"
+fails_with "$FIX/matchlist" "$A/identity.yaml: server_match must be a plain value, not a YAML list or map"
+make_valid_agent "$FIX/matchbare"; sed -i.bak 's/^server_match: .*/server_match:/' "$FIX/matchbare/$A/identity.yaml"; printf '  - demo\n' >> "$FIX/matchbare/$A/identity.yaml"
+fails_with "$FIX/matchbare" "$A/identity.yaml line 4: identity.yaml holds flat 'key: value' lines only (no lists or nesting)"
 make_valid_agent "$FIX/badpol"; printf '%s\n' 'covers: [draft_only' > "$FIX/badpol/$A/guard.yaml"
 fails_with "$FIX/badpol" "$A/guard.yaml: line 1: unclosed '['"
 make_valid_agent "$FIX/strange"; printf '%s\n' 'covers: [draft_only, no_send, other]' 'deny: ["*send*"]' > "$FIX/strange/$A/guard.yaml"
@@ -489,7 +490,7 @@ fails_with "$FIX/nopolicy" "$A: the contract has no_send, so guard.yaml must cov
 make_valid_agent "$FIX/nosendcov"; printf '%s\n' 'covers: [draft_only]' > "$FIX/nosendcov/$A/guard.yaml"
 fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_send"
 make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
-assert_pass $V "$FIX/instronly"   # an adapter without a policy is allowed: instruction-only
+assert_pass $V "$FIX/instronly"   # a tool without a policy is allowed: instruction-only
 
 echo "-- Agent Standard 2.1: activities"
 make_valid_agent "$FIX/act"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"
@@ -518,10 +519,24 @@ fails_with "$FIX/act-noscript" "missing hooks/schedule_check.py"
 make_valid_agent "$FIX/act-editscript"; echo "# x" >> "$FIX/act-editscript/hooks/schedule_check.py"
 fails_with "$FIX/act-editscript" "hooks/schedule_check.py differs from the Agent Standard reference copy (_template/hooks/schedule_check.py in agent-builder)"
 
-echo "-- adapter server_match charset"
-make_valid_agent "$FIX/match-space"; sed -i.bak 's/^server_match: .*/server_match: good crm/' "$FIX/match-space/$A/adapter.yaml"
-fails_with "$FIX/match-space" "$A/adapter.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
-make_valid_agent "$FIX/match-upper"; sed -i.bak 's/^server_match: .*/server_match: GoodCRM/' "$FIX/match-upper/$A/adapter.yaml"
-fails_with "$FIX/match-upper" "$A/adapter.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
+echo "-- tool server_match charset"
+make_valid_agent "$FIX/match-space"; sed -i.bak 's/^server_match: .*/server_match: good crm/' "$FIX/match-space/$A/identity.yaml"
+fails_with "$FIX/match-space" "$A/identity.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
+make_valid_agent "$FIX/match-upper"; sed -i.bak 's/^server_match: .*/server_match: GoodCRM/' "$FIX/match-upper/$A/identity.yaml"
+fails_with "$FIX/match-upper" "$A/identity.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
+
+echo "-- Agent Standard 3.0 layout"
+make_valid_agent "$FIX/old-hosts"; mv "$FIX/old-hosts/hosts" "$FIX/old-hosts/adapters"
+fails_with "$FIX/old-hosts" "adapters/ is the Agent Standard 2 name; 3.0 uses hosts/"
+make_valid_agent "$FIX/old-tools"; mv "$FIX/old-tools/capabilities/crm/tools" "$FIX/old-tools/capabilities/crm/adapters"
+fails_with "$FIX/old-tools" "capabilities/crm/adapters/ is the Agent Standard 2 layout; 3.0 uses capabilities/crm/tools/<tool>/ with identity.yaml and usage.md"
+make_valid_agent "$FIX/leftover"; cp "$FIX/leftover/capabilities/crm/tools/demo/identity.yaml" "$FIX/leftover/capabilities/crm/tools/demo/adapter.yaml"
+fails_with "$FIX/leftover" "capabilities/crm/tools/demo/adapter.yaml is the Agent Standard 2 name; 3.0 uses identity.yaml"
+make_valid_agent "$FIX/no-toolcheck"; rm "$FIX/no-toolcheck/hooks/tool_check.py"
+fails_with "$FIX/no-toolcheck" "missing hooks/tool_check.py"
+make_valid_agent "$FIX/no-addtool"; rm -r "$FIX/no-addtool/skills/add-tool"
+fails_with "$FIX/no-addtool" "missing skills/add-tool/SKILL.md (agent.yaml lists capabilities)"
+make_valid_agent "$FIX/edit-addtool"; echo x >> "$FIX/edit-addtool/skills/add-tool/SKILL.md"
+fails_with "$FIX/edit-addtool" "skills/add-tool/SKILL.md differs from the Agent Standard reference copy (_template/skills/add-tool/SKILL.md in agent-builder)"
 
 finish

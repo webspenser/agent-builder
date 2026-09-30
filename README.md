@@ -61,7 +61,7 @@ In CI, from any agent repo:
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
-- uses: webspenser/agent-builder/validate@v2
+- uses: webspenser/agent-builder/validate@v3
   with:
     path: .
     require-bump-against: origin/main   # optional: enforce version bumps
@@ -71,7 +71,7 @@ In CI, from any agent repo:
 
 | Path | What it is |
 |---|---|
-| `STANDARD.md` | The Agent Standard 2.1 |
+| `STANDARD.md` | The Agent Standard 3.0 |
 | `_template/` | The skeleton every agent starts from |
 | `skills/` | `new-agent` (the wizard) and `validate-agent` |
 | `bin/validate-agent.sh` | The validator |

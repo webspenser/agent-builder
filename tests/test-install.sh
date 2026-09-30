@@ -6,7 +6,7 @@ source tests/lib.sh
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# Symlink mode: adapters appear at the agent root as links.
+# Symlink mode: hosts appear at the agent root as links.
 cp -R _template "$WORK/link-agent"
 ( cd "$WORK/link-agent" && ./install.sh >/dev/null 2>&1 )
 for f in CLAUDE.md GEMINI.md AGENTS.md; do
@@ -20,8 +20,8 @@ else _report no ".claude/ missing"; fi
 # Root link targets are exact, relative paths — not just "a link exists".
 for f in CLAUDE GEMINI AGENTS; do
   target=$(readlink "$WORK/link-agent/$f.md" 2>/dev/null || true)
-  if [ "$target" = "adapters/$f.md" ]; then _report ok "$f.md symlink target is adapters/$f.md"
-  else _report no "$f.md symlink target is '$target', expected adapters/$f.md"; fi
+  if [ "$target" = "hosts/$f.md" ]; then _report ok "$f.md symlink target is hosts/$f.md"
+  else _report no "$f.md symlink target is '$target', expected hosts/$f.md"; fi
 done
 
 # .claude/skills and .claude/agents: symlinks with exact relative targets
@@ -51,14 +51,14 @@ if diff -q <(ls -A "$WORK/link-agent/subagents") <(ls -A "$WORK/link-agent/.clau
 else _report no ".claude/agents contents do not match subagents/"; fi
 
 # Idempotence: a second run must not fail or nest links, and the link
-# targets must be unchanged — not e.g. adapters/adapters/CLAUDE.md, which
+# targets must be unchanged — not e.g. hosts/hosts/CLAUDE.md, which
 # `-L` alone would not catch.
 ( cd "$WORK/link-agent" && ./install.sh >/dev/null 2>&1 )
 assert_pass test -L "$WORK/link-agent/CLAUDE.md"
 for f in CLAUDE GEMINI AGENTS; do
   target=$(readlink "$WORK/link-agent/$f.md" 2>/dev/null || true)
-  if [ "$target" = "adapters/$f.md" ]; then _report ok "$f.md target unchanged after rerun"
-  else _report no "$f.md target is '$target' after rerun, expected adapters/$f.md"; fi
+  if [ "$target" = "hosts/$f.md" ]; then _report ok "$f.md target unchanged after rerun"
+  else _report no "$f.md target is '$target' after rerun, expected hosts/$f.md"; fi
 done
 skills_target2=$(readlink "$WORK/link-agent/.claude/skills" 2>/dev/null || true)
 if [ "$skills_target2" = "../skills" ]; then _report ok ".claude/skills target unchanged after rerun"
@@ -83,10 +83,10 @@ if [ -d "$WORK/copy-agent/.claude/agents" ] && [ ! -L "$WORK/copy-agent/.claude/
   _report ok ".claude/agents is a real directory (copy mode)"
 else _report no ".claude/agents is not a real directory (copy mode)"; fi
 
-rm -rf "$WORK/copy-agent/adapters" "$WORK/copy-agent/skills" "$WORK/copy-agent/subagents"
+rm -rf "$WORK/copy-agent/hosts" "$WORK/copy-agent/skills" "$WORK/copy-agent/subagents"
 assert_contains "$WORK/copy-agent/CLAUDE.md" "AGENT.md"
 if [ -d "$WORK/copy-agent/.claude/skills" ] && [ -n "$(ls -A "$WORK/copy-agent/.claude/skills" 2>/dev/null)" ]; then
-  _report ok ".claude/skills survives deleting adapters/, skills/ and subagents/"
+  _report ok ".claude/skills survives deleting hosts/, skills/ and subagents/"
 else _report no ".claude/skills did not survive source deletion"; fi
 
 # Dry run writes nothing — the full tree, not just CLAUDE.md.

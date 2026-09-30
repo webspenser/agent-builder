@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Agent Standard guard hook — identical in every agent.
 # PreToolUse hook for MCP tools. Inside an instance of this agent, every bound
-# adapter whose server_match appears in the tool name gets its guard policy
+# tool whose server_match appears in the tool name gets its guard policy
 # (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the call and
 # shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -54,7 +54,7 @@ while IFS= read -r line || [ -n "$line" ]; do
   [ -z "$first" ] || { line=${line#"$BOM"}; first=""; }
   case "$line" in bind_*) ;; *) continue ;; esac
   # Each line supplies its own key and value, so a repeated bind_ key still
-  # applies every adapter.
+  # applies every tool.
   key=$(printf '%s' "${line%%:*}" | sed 's/[[:space:]]*$//')
   case "$line" in *:*) raw=${line#*:} ;; *) raw="" ;; esac
   provider=$(lower "$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' \
@@ -68,25 +68,33 @@ while IFS= read -r line || [ -n "$line" ]; do
     block "instance.yaml has a binding line it cannot read ($shown); fix it or re-run setup's tools step"
   fi
   if [ "$provider" = custom ]; then
-    adir="$instance/custom-adapters/$cap"
+    tdir="$instance/custom-tools/$cap"
   else
-    adir="$root/capabilities/$cap/adapters/$provider"
+    tdir="$root/capabilities/$cap/tools/$provider"
   fi
-  if [ ! -f "$adir/adapter.yaml" ]; then
-    printf '%s guard: no adapter.yaml for %s (%s)\n' "$name" "$cap" "$provider" >&2
-    continue
+  if [ ! -f "$tdir/identity.yaml" ]; then # binding state unknown: fail closed
+    if [ "$provider" = custom ] && [ -d "$instance/custom-adapters/$cap" ]; then
+      block "instance.yaml binds $cap to custom, but custom-tools/$cap/identity.yaml is missing and custom-adapters/$cap/ is the Agent Standard 2 layout; apply the 3.0 migration (move it to custom-tools/$cap/, rename adapter.yaml to identity.yaml and adapter.md to usage.md)"
+    elif [ "$provider" = custom ]; then
+      block "instance.yaml binds $cap to custom, but custom-tools/$cap/ has no identity.yaml; run the add-tool skill"
+    fi
+    block "instance.yaml binds $cap to $provider, which has no identity.yaml in $name; fix the binding (setup's tools step)"
   fi
-  match=$(lower "$(yaml_get "$adir/adapter.yaml" server_match)")
-  [ -n "$match" ] || continue
-  case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
+  match=$(lower "$(yaml_get "$tdir/identity.yaml" server_match)")
   # A dangling symlink or a directory still counts as a policy: the engine fails closed on it.
-  { [ -e "$adir/guard.yaml" ] || [ -L "$adir/guard.yaml" ]; } || continue  # no policy: this adapter's invariants are instruction-only
+  policy=""; { [ -e "$tdir/guard.yaml" ] || [ -L "$tdir/guard.yaml" ]; } && policy=1
+  if [ -z "$match" ]; then
+    [ -z "$policy" ] && continue  # no match and no policy: instruction-only
+    block "instance.yaml binds $cap to $provider, whose identity.yaml has no server_match, so its guard policy could never apply; fix identity.yaml (tool_check.py)"
+  fi
+  case "$rest_lc" in *"$match"*) ;; *) continue ;; esac
+  [ -n "$policy" ] || continue  # no policy: this tool's invariants are instruction-only
   engine="$root/hooks/guard_policy.py"
   [ -f "$engine" ] || pblock "the guard policy engine is missing from $name"
   command -v python3 >/dev/null 2>&1 || pblock "python3 is required to run the guard policy"
   bfile="$instance/bindings/$cap.md"
   [ -f "$bfile" ] || bfile=-
-  printf '%s' "$input" | python3 "$engine" "$adir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
+  printf '%s' "$input" | python3 "$engine" "$tdir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
   [ "$rc" -eq 0 ] && continue
   [ "$rc" -eq 2 ] && exit 2
   pblock "the guard policy engine failed (exit $rc)"

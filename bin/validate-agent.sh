@@ -32,7 +32,7 @@ SUBAGENT_HEADINGS=(
   "Purpose" "Trigger" "Inputs" "Outputs" "Tools allowed"
   "Stop conditions" "Handoff" "Inline fallback"
 )
-ADAPTER_MAX_LINES=25
+HOST_MAX_LINES=25
 # Resolve symlinks to this script (portable: no GNU `readlink -f`).
 SELF="$0"
 while [ -L "$SELF" ]; do
@@ -49,7 +49,7 @@ PY_MISSING="python3 is required for Agent Standard checks (set AGENT_VALIDATOR_P
 have_python() { command -v "$PYTHON" >/dev/null 2>&1; }
 
 # Required directories
-for d in adapters skills subagents templates samples context evals; do
+for d in hosts skills subagents templates samples context evals; do
   [ -d "$DIR/$d" ] || fail "missing directory: $d/"
 done
 
@@ -59,7 +59,7 @@ done
 [ -x "$DIR/install.sh" ]     || fail "install.sh is not executable"
 [ -f "$DIR/evals/cases.md" ] || fail "missing evals/cases.md"
 for a in CLAUDE GEMINI AGENTS; do
-  [ -f "$DIR/adapters/$a.md" ] || fail "missing adapters/$a.md"
+  [ -f "$DIR/hosts/$a.md" ] || fail "missing hosts/$a.md"
 done
 
 # AGENT.md headings present and in order
@@ -70,16 +70,17 @@ if [ -f "$DIR/AGENT.md" ]; then
   [ "$filtered" = "$expected" ] || fail "AGENT.md headings missing or out of order"
 fi
 
-# Adapters are pointers, not behavior
+# Host files are pointers, not behavior
+[ -d "$DIR/adapters" ] && fail "adapters/ is the Agent Standard 2 name; 3.0 uses hosts/"
 for a in CLAUDE GEMINI AGENTS; do
-  f="$DIR/adapters/$a.md"
+  f="$DIR/hosts/$a.md"
   [ -f "$f" ] || continue
   # awk counts every line regardless of a missing trailing newline;
   # `wc -l` undercounts by one in that case.
   lines=$(awk 'END { print NR }' "$f")
-  [ "$lines" -le "$ADAPTER_MAX_LINES" ] \
-    || fail "adapters/$a.md has $lines lines (max $ADAPTER_MAX_LINES) — adapters carry no behavior"
-  grep -qF 'AGENT.md' "$f" || fail "adapters/$a.md does not point at AGENT.md"
+  [ "$lines" -le "$HOST_MAX_LINES" ] \
+    || fail "hosts/$a.md has $lines lines (max $HOST_MAX_LINES) — host files carry no behavior"
+  grep -qF 'AGENT.md' "$f" || fail "hosts/$a.md does not point at AGENT.md"
 done
 
 # Skills: frontmatter shape — opening and closing fence, only name/description keys

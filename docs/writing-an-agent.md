@@ -42,13 +42,17 @@ describe it as a capability in two layers.
 - The **contract** (`capabilities/<name>/contract.md`) lists the
   operations the agent thinks in and the invariants any system must
   uphold, such as `no_send`.
-- An **adapter** (one folder per system) maps each operation to that
-  system's tools. Its `guard.yaml` is a guard policy: it names the
+- A **tool** (one folder per system, `capabilities/<name>/tools/<tool>/`)
+  maps each operation to that system's MCP tools. Its `usage.md` is
+  the mapping the model reads, its `identity.yaml` is what the hooks
+  read, and its `guard.yaml` is a guard policy: it names the
   tools the agent may call, the values it may write, and which
   invariants that enforces.
 
-Skills name operations, not tools, so they work on any system that has
-an adapter.
+Skills name operations, not a system's own calls, so they work on any
+system that has a tool folder. The `add-tool` skill (shipped in every
+agent) writes and checks a tool folder, for a client's own system or
+for a new one in the package.
 
 A guard policy is a short file:
 
@@ -64,7 +68,7 @@ unattended-safe when every invariant is covered, and a `no_send`
 invariant must always be covered. With `allow` present, every other tool
 of that system is blocked, so a new tool stays blocked until you allow
 it. Field rules can also limit the values a write may set. Check a
-policy with `python3 hooks/guard_policy.py --check guard.yaml`.
+tool folder with `python3 hooks/tool_check.py <tool folder> <contract.md>`.
 
 The user binds each capability to their own system in `instance.yaml`
 (`bind_crm: attio`) during setup. `STANDARD.md` has the details.

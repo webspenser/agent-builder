@@ -3,14 +3,14 @@
 .env.*
 !.env.example
 
-# Host adapter links created by install.sh at each agent's root.
-# The real adapter sources live in <agent>/adapters/ and stay tracked.
+# Host instruction links created by install.sh at each agent's root.
+# The real sources live in <agent>/hosts/ and stay tracked.
 CLAUDE.md
 GEMINI.md
 AGENTS.md
-!**/adapters/CLAUDE.md
-!**/adapters/GEMINI.md
-!**/adapters/AGENTS.md
+!**/hosts/CLAUDE.md
+!**/hosts/GEMINI.md
+!**/hosts/AGENTS.md
 .claude/
 .gemini/
 

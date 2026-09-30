@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "2.1"
+CURRENT_STANDARD = "3.0"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -32,9 +32,9 @@ REFERENCE_HOOK = TEMPLATE_HOOKS / "session-start.sh"
 REFERENCE_GUARD = TEMPLATE_HOOKS / "guard.sh"
 REFERENCE_POLICY = TEMPLATE_HOOKS / "guard_policy.py"
 REFERENCE_SCHEDULE = TEMPLATE_HOOKS / "schedule_check.py"
+REFERENCE_TOOLCHECK = TEMPLATE_HOOKS / "tool_check.py"
+REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-SERVER_MATCH = re.compile(r"^[a-z0-9_-]+$")
-ADAPTER_KEYS = ("capability", "provider", "server_match")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -48,6 +48,17 @@ def load_policy_engine():
     """The reference guard_policy module, or None when it cannot be loaded."""
     try:
         spec = importlib.util.spec_from_file_location("guard_policy_reference", REFERENCE_POLICY)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+def load_tool_checker():
+    """The reference tool_check module, or None when it cannot be loaded."""
+    try:
+        spec = importlib.util.spec_from_file_location("tool_check_reference", REFERENCE_TOOLCHECK)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -209,73 +220,30 @@ def check_runtime(root, meta, name):
     return fails
 
 
-def check_adapter(adir, cap, ops, invariants):
-    """One adapter folder against its capability's contract."""
-    fails = []
-    prefix = f"capabilities/{cap}/adapters/{adir.name}"
-    if not KEBAB.match(adir.name):
-        fails.append(f"{prefix}: adapter folder name is not kebab-case")
-    texts = {}
-    for fname in ("adapter.md", "adapter.yaml"):
-        path = adir / fname
-        if not path.is_file():
-            fails.append(f"missing {prefix}/{fname}")
-            continue
-        try:
-            texts[fname] = read_text(path)
-        except ReadError as err:
-            fails.append(f"{prefix}/{fname}: {err}")
-    if "adapter.yaml" in texts:
-        rel = f"{prefix}/adapter.yaml"
-        ay = parse_agent_yaml(texts["adapter.yaml"])
-        for key in ay:
-            if key not in ADAPTER_KEYS:
-                fails.append(f"{rel}: unknown key '{key}' (adapter.yaml holds capability, provider, server_match)")
-        if ay.get("capability") != cap:
-            fails.append(f"{rel}: capability {ay.get('capability')!r} must be {cap!r}")
-        if ay.get("provider") != adir.name:
-            fails.append(f"{rel}: provider {ay.get('provider')!r} must be {adir.name!r}")
-        match = ay.get("server_match", "")
-        bare = re.search(r"(?m)^server_match:\s*(#.*)?$", texts["adapter.yaml"])
-        if "[" in match or "]" in match or bare:
-            fails.append(f"{rel}: server_match must be a plain value, not a YAML list")
-        elif not match:
-            fails.append(f"{rel}: missing server_match")
-        elif not SERVER_MATCH.fullmatch(match):
-            fails.append(f"{rel}: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)")
-    if "adapter.md" in texts:
-        rel = f"{prefix}/adapter.md"
-        for op in ops:
-            if f"`{op}`" not in texts["adapter.md"]:
-                fails.append(f"{rel}: does not map operation `{op}`")
-        if section(texts["adapter.md"], "Probe") is None:
-            fails.append(f"{rel}: needs a ## Probe section")
-    policy = adir / "guard.yaml"
-    covers = None
-    if policy.is_file():
-        engine = load_policy_engine()
-        if engine is None:
-            fails.append("validator cannot load its guard-policy engine (_template/hooks/guard_policy.py)")
-        else:
-            try:
-                covers = engine.parse(read_text(policy))["covers"]
-            except ReadError as err:
-                fails.append(f"{prefix}/guard.yaml: {err}")
-            except engine.PolicyError as err:
-                fails.append(f"{prefix}/guard.yaml: {err}")
-    for inv in covers or []:
-        if inv not in invariants:
-            fails.append(f"{prefix}/guard.yaml: covers names {inv}, which is not an invariant of the contract")
-    if "no_send" in invariants:
-        if not policy.is_file():
-            fails.append(f"{prefix}: the contract has no_send, so guard.yaml must cover it")
-        elif covers is not None and "no_send" not in covers:
-            fails.append(f"{prefix}/guard.yaml: covers must include no_send")
+def check_tool_folder(tdir, cap, ops, invariants):
+    """One shipped tool folder, checked by the reference tool_check.py."""
+    checker = load_tool_checker()
+    if checker is None:
+        return ["validator cannot load its tool checker (_template/hooks/tool_check.py)"]
+    fails, _ = checker.check_tool(tdir, cap, ops, invariants, custom=False,
+                                  label=f"capabilities/{cap}/tools/{tdir.name}")
     return fails
 
 
+def check_reference_file(root, rel, reference):
+    """`rel` exists and is byte-identical to the builder's reference copy."""
+    path = root / rel
+    if not path.is_file():
+        return [f"missing {rel}"]
+    try:
+        same = reference.is_file() and path.read_bytes() == reference.read_bytes()
+    except OSError:
+        return [f"{rel} cannot be read"]
+    return [] if same else [f"{rel} differs from the Agent Standard reference copy (_template/{rel} in agent-builder)"]
+
+
 def check_capability(root, cap):
-    """capabilities/<cap>/contract.md and every adapter under it."""
+    """capabilities/<cap>/contract.md and every tool under it."""
     base = root / "capabilities" / cap
     rel = f"capabilities/{cap}/contract.md"
     if not (base / "contract.md").is_file():
@@ -294,12 +262,14 @@ def check_capability(root, cap):
     for inv in invariants:
         if not SNAKE.match(inv):
             fails.append(f"{rel}: invariant '{inv}' is not snake_case")
-    folder = base / "adapters"
-    adapters = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
-    if not adapters:
-        fails.append(f"capabilities/{cap}: needs at least one adapter in adapters/")
-    for adir in adapters:
-        fails.extend(check_adapter(adir, cap, ops, set(invariants)))
+    if (base / "adapters").exists():
+        fails.append(f"capabilities/{cap}/adapters/ is the Agent Standard 2 layout; 3.0 uses capabilities/{cap}/tools/<tool>/ with identity.yaml and usage.md")
+    folder = base / "tools"
+    tools = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+    if not tools:
+        fails.append(f"capabilities/{cap}: needs at least one tool in tools/")
+    for tdir in tools:
+        fails.extend(check_tool_folder(tdir, cap, ops, set(invariants)))
     return fails
 
 
@@ -340,7 +310,7 @@ def check_activities(root, meta, caps):
 
 
 def check_tools(root, meta):
-    """Guard hook and engine, capability contracts, adapters, guard policies."""
+    """Guard hook and engine, capability contracts, tools, guard policies."""
     fails = []
     try:
         hooks = json.loads(read_text(root / "hooks" / "hooks.json"))
@@ -351,7 +321,13 @@ def check_tools(root, meta):
     fails.extend(check_reference_script(root, "hooks/guard.sh", REFERENCE_GUARD))
     fails.extend(check_reference_script(root, "hooks/guard_policy.py", REFERENCE_POLICY))
     fails.extend(check_reference_script(root, "hooks/schedule_check.py", REFERENCE_SCHEDULE))
+    fails.extend(check_reference_script(root, "hooks/tool_check.py", REFERENCE_TOOLCHECK))
     caps = [c.strip() for c in meta.get("capabilities", "").split(",") if c.strip()]
+    if caps:
+        if not (root / "skills" / "add-tool" / "SKILL.md").is_file():
+            fails.append("missing skills/add-tool/SKILL.md (agent.yaml lists capabilities)")
+        else:
+            fails.extend(check_reference_file(root, "skills/add-tool/SKILL.md", REFERENCE_ADD_TOOL))
     fails.extend(check_activities(root, meta, caps))
     for cap in caps:
         if not SNAKE.match(cap):
