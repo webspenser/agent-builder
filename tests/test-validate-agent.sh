@@ -7,7 +7,7 @@ source tests/lib.sh
 FIX=$(mktemp -d)
 trap 'rm -rf "$FIX"' EXIT
 
-make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 2.0 agent
+make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 2.1 agent
   local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}"
   mkdir -p "$d"/{adapters,skills/start,skills/setup,subagents,templates,samples,context,evals,hooks,migrations,.claude-plugin,.codex-plugin}
   printf '%s\n' \
@@ -17,12 +17,12 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Ag
   for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/adapters/$a.md"; done
   echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
   echo '# Cases' > "$d/evals/cases.md"
-  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "2.0"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "2.1"' 'capabilities: crm' > "$d/agent.yaml"
   printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
-  cp _template/hooks/session-start.sh _template/hooks/guard.sh _template/hooks/guard_policy.py _template/hooks/hooks.json "$d/hooks/"
-  chmod 755 "$d/hooks/session-start.sh" "$d/hooks/guard.sh" "$d/hooks/guard_policy.py"
+  cp _template/hooks/session-start.sh _template/hooks/guard.sh _template/hooks/guard_policy.py _template/hooks/schedule_check.py _template/hooks/hooks.json "$d/hooks/"
+  chmod 755 "$d/hooks/session-start.sh" "$d/hooks/guard.sh" "$d/hooks/guard_policy.py" "$d/hooks/schedule_check.py"
   printf '%s\n' '---' 'name: start' 'description: Use when starting' '---' 'x' > "$d/skills/start/SKILL.md"
   printf '%s\n' '---' 'name: setup' 'description: Use when setting up' '---' 'x' > "$d/skills/setup/SKILL.md"
   local c="$d/capabilities/crm" a="$d/capabilities/crm/adapters/demo"
@@ -127,7 +127,7 @@ assert_pass $V "$FIX/mf-sub"
 # agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
 make_valid_agent "$FIX/mf-loose"
 printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
-  "version: '0.1.0'" 'description: A demo agent' 'standard: "2.0"' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "2.1"' \
   'capabilities: crm   # the only one' 'extra:' '  - nested' > "$FIX/mf-loose/agent.yaml"
 assert_pass $V "$FIX/mf-loose"
 
@@ -138,8 +138,8 @@ make_valid_agent "$FIX/mf-badname" "Demo_Agent"
 fails_with "$FIX/mf-badname" "agent.yaml: name 'Demo_Agent' is not kebab-case"
 make_valid_agent "$FIX/mf-badver" demo-agent "1.0"
 fails_with "$FIX/mf-badver" "agent.yaml: version '1.0' is not MAJOR.MINOR.PATCH"
-make_valid_agent "$FIX/mf-std2"; sed -i.bak 's/^standard:.*/standard: "1.2"/' "$FIX/mf-std2/agent.yaml"
-fails_with "$FIX/mf-std2" "agent.yaml: standard '1.2' is not 2.0; update the agent to the current Agent Standard"
+make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "2.0"/' "$FIX/mf-std20/agent.yaml"
+fails_with "$FIX/mf-std20" "agent.yaml: standard '2.0' is not 2.1; update the agent to the current Agent Standard"
 
 # Host manifest problems.
 make_valid_agent "$FIX/mf-nogem"; rm "$FIX/mf-nogem/gemini-extension.json"
@@ -463,7 +463,7 @@ cp -R _capability-template/. "$FIX/cap-skel/capabilities/example_capability/"
 sed -i.bak 's/^capabilities: .*/capabilities: crm, example_capability/' "$FIX/cap-skel/agent.yaml"
 assert_pass $V "$FIX/cap-skel"
 
-echo "-- Agent Standard 2.0"
+echo "-- Agent Standard 2.1"
 A=capabilities/crm/adapters/demo
 make_valid_agent "$FIX/cur"; assert_pass $V "$FIX/cur"
 make_valid_agent "$FIX/noyaml"; rm "$FIX/noyaml/agent.yaml"
@@ -490,5 +490,30 @@ make_valid_agent "$FIX/nosendcov"; printf '%s\n' 'covers: [draft_only]' > "$FIX/
 fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_send"
 make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
 assert_pass $V "$FIX/instronly"   # an adapter without a policy is allowed: instruction-only
+
+echo "-- Agent Standard 2.1: activities"
+make_valid_agent "$FIX/act"; printf '%s\n' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"
+mkdir -p "$FIX/act/skills/schedule"; printf '%s\n' '---' 'name: schedule' 'description: Use when scheduling' '---' 'x' > "$FIX/act/skills/schedule/SKILL.md"
+assert_pass $V "$FIX/act"
+make_valid_agent "$FIX/act-noskill"; echo 'activity_prospect: crm' >> "$FIX/act-noskill/agent.yaml"
+fails_with "$FIX/act-noskill" "missing skills/schedule/SKILL.md (agent.yaml declares activities)"
+make_valid_agent "$FIX/act-badcap"; echo 'activity_prospect: crm, calendar' >> "$FIX/act-badcap/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-badcap/skills/"
+fails_with "$FIX/act-badcap" "agent.yaml: activity_prospect uses calendar, which is not in capabilities"
+make_valid_agent "$FIX/act-badname"; echo 'activity_Prospect_Now: crm' >> "$FIX/act-badname/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-badname/skills/"
+fails_with "$FIX/act-badname" "agent.yaml: activity 'Prospect_Now' is not kebab-case"
+make_valid_agent "$FIX/act-empty"; echo 'activity_prospect:' >> "$FIX/act-empty/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-empty/skills/"
+fails_with "$FIX/act-empty" "agent.yaml: activity_prospect lists no capabilities (use none)"
+make_valid_agent "$FIX/act-mixed"; echo 'activity_prospect: none, crm' >> "$FIX/act-mixed/agent.yaml"; cp -R "$FIX/act/skills/schedule" "$FIX/act-mixed/skills/"
+fails_with "$FIX/act-mixed" "agent.yaml: activity_prospect mixes none with capabilities"
+make_valid_agent "$FIX/act-noscript"; rm "$FIX/act-noscript/hooks/schedule_check.py"
+fails_with "$FIX/act-noscript" "missing hooks/schedule_check.py"
+make_valid_agent "$FIX/act-editscript"; echo "# x" >> "$FIX/act-editscript/hooks/schedule_check.py"
+fails_with "$FIX/act-editscript" "hooks/schedule_check.py differs from the Agent Standard reference copy (_template/hooks/schedule_check.py in agent-builder)"
+
+echo "-- adapter server_match charset"
+make_valid_agent "$FIX/match-space"; sed -i.bak 's/^server_match: .*/server_match: good crm/' "$FIX/match-space/$A/adapter.yaml"
+fails_with "$FIX/match-space" "$A/adapter.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
+make_valid_agent "$FIX/match-upper"; sed -i.bak 's/^server_match: .*/server_match: GoodCRM/' "$FIX/match-upper/$A/adapter.yaml"
+fails_with "$FIX/match-upper" "$A/adapter.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
 
 finish
