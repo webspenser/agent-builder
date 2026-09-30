@@ -186,6 +186,28 @@ echo "-- guard_policy import"
 mkdir -p "$W/nopolicy/hooks"; cp _template/hooks/schedule_check.py "$W/nopolicy/hooks/"
 run_np() { OUT=$(python3 -B "$W/nopolicy/hooks/schedule_check.py" check "$I" 2>&1); RC=$?; }
 run_np;                                            expect 2 "missing guard_policy.py is an error" "ERROR: cannot load guard_policy.py beside this script"
+echo "-- round 2: guard parity"
+CR="$W/lonecr"; instance "$CR" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf '# note\rbind_crm: good\n' >> "$CR/instance.yaml"
+run check "$CR";                                   expect 1 "lone CR does not create a binding line" "crm is not bound"
+CL="$W/crlf"; instance "$CL" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; sed -i.bak 's/$/\r/' "$CL/instance.yaml"
+run check "$CL";                                   expect 0 "CRLF instance.yaml still works" "PASS  demo-agent: prospect"
+RA="$W/repagent"; instance "$RA" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; sed -i.bak 's/^agent: demo-agent/agent: other/' "$RA/instance.yaml"; echo 'agent: demo-agent' >> "$RA/instance.yaml"
+run check "$RA";                                   expect 2 "first agent: line wins (like the guard)" "is not 'demo-agent'"
+RM="$W/repmatch"; instance "$RM" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+mkdir -p "$RM/custom-adapters/crm"
+printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: first' 'server_match: second' > "$RM/custom-adapters/crm/adapter.yaml"
+printf '%s\n' 'covers: [draft_only, no_delete]' > "$RM/custom-adapters/crm/guard.yaml"
+run check "$RM";                                   expect 0 "first server_match wins" 'custom (matches "first")'
+RS="$W/repsched"; instance "$RS" good mail 'timezone: UTC' 'timezone: Asia/Tokyo' 'schedule_prospect: "Monday 07:00"'
+run check "$RS";                                   expect 0 "schedules.yaml: first timezone wins" "timezone UTC"
+NB="$W/nbsp"; instance "$NB" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf 'bind_crm: good\xc2\xa0\n' >> "$NB/instance.yaml"
+run check "$NB";                                   expect 1 "NBSP is not whitespace to the guard" "cannot read"
+FS="$W/fs"; instance "$FS" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf 'bind_crm: good\x1f\n' >> "$FS/instance.yaml"
+run check "$FS";                                   expect 1 "0x1f is not whitespace to the guard" "cannot read"
+rj "$W/r.json" 'r["next_run_at"] = "9999-12-31T23:59:00-12:00"'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "overflowing next_run_at is a mismatch" "no readable next_run_at"
+rj "$W/r.json" 'r["enabled"] = "false"'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "string enabled is not enabled" "the routine is not enabled"
 [ -x _template/hooks/schedule_check.py ] && _report ok "script executable" || _report no "script not executable"
 
 finish

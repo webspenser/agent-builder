@@ -51,6 +51,10 @@ class CheckError(Exception):
     """The instance or package cannot be read."""
 
 
+WS = " \t\n\v\f\r"  # sed's [[:space:]], which Python's \s and str.strip() are wider than
+WSRE = "[ \t\n\v\f\r]"
+
+
 def _value(raw):
     raw = raw.strip()
     if raw[:1] in ("'", '"'):
@@ -60,44 +64,57 @@ def _value(raw):
     return re.sub(r"(^|\s)#.*$", "", raw).strip()
 
 
-def flat_yaml(path, dups=None):
-    """Top-level `key: value` pairs of a flat YAML file (a leading BOM is ignored).
+def _guard_value(raw):
+    """A scalar normalized the way guard.sh does: trim, drop ` #` comment, trim, strip surrounding quotes."""
+    raw = re.sub(f"^{WSRE}+", "", raw)
+    raw = re.sub(f"{WSRE}+#.*$", "", raw)
+    raw = re.sub(f"{WSRE}+$", "", raw)
+    raw = re.sub(r'^"(.*)"$', r"\1", raw)
+    return re.sub(r"^'(.*)'$", r"\1", raw)
 
-    Keys seen more than once are appended to dups when a list is given."""
+
+def _lines(path):
+    """Lines of a file as guard.sh reads them: split on \\n only, one trailing \\r removed, BOM ignored."""
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        text = path.read_bytes().decode("utf-8-sig")
     except (OSError, UnicodeDecodeError) as err:
         raise CheckError(f"cannot read {path.name}: {err}")
+    return [ln[:-1] if ln.endswith("\r") else ln for ln in text.split("\n")]
+
+
+def flat_yaml(path, dups=None, guard=True):
+    """Top-level `key: value` pairs of a flat YAML file; the first occurrence of a key wins.
+
+    guard=True reads the way guard.sh's yaml_get does (exact `key:` at line start, sed whitespace).
+    guard=False (schedules.yaml) is lenient about spacing; keys seen more than once are appended to dups."""
     data = {}
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
+    for line in _lines(path):
+        if guard:
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            value = _guard_value(value)
+        else:
+            if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key, value = key.strip(), _value(value)
+        if key in data:
+            if dups is not None and key not in dups:
+                dups.append(key)
             continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        if dups is not None and key in data and key not in dups:
-            dups.append(key)
-        data[key] = _value(value)
+        data[key] = value
     return data
 
 
 def bindings(instance):
     """({cap: [provider, ...]}, unreadable line or None), read the way hooks/guard.sh reads bind_ lines."""
-    path = instance / "instance.yaml"
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError) as err:
-        raise CheckError(f"cannot read instance.yaml: {err}")
     bound, bad = {}, None
-    for line in text.split("\n"):
+    for line in _lines(instance / "instance.yaml"):
         if not line.startswith("bind_"):
             continue
         head, _, raw = line.partition(":")
-        raw = re.sub(r"^\s+", "", raw)
-        raw = re.sub(r"\s+#.*$", "", raw)
-        raw = re.sub(r"\s+$", "", raw)
-        raw = re.sub(r'^"(.*)"$', r"\1", raw)
-        raw = re.sub(r"^'(.*)'$", r"\1", raw)
-        provider, cap = raw.lower(), head.rstrip()[len("bind_"):]
+        provider, cap = _guard_value(raw).lower(), head.rstrip(WS)[len("bind_"):]
         if not CAP.fullmatch(cap) or not PROVIDER.fullmatch(provider):
             bad = bad or re.sub(r"[\x00-\x1f]", "", line)[:80]
             continue
@@ -171,7 +188,7 @@ def expected(instance, repo=None):
         raise CheckError(f"instance.yaml agent {inst.get('agent')!r} is not {meta.get('name')!r}")
     bound, bad_line = bindings(instance)
     dups = []
-    sched = flat_yaml(instance / "schedules.yaml", dups)
+    sched = flat_yaml(instance / "schedules.yaml", dups, guard=False)
     activities = {k[len("activity_"):]: listed(v) for k, v in meta.items() if k.startswith("activity_")}
     tzname = sched.get("timezone", "")
     try:
@@ -316,7 +333,7 @@ def verify(instance, activity, routine, repo=None):
     ctx = obj(ccr, "session_context", "session_context")
     if not exp["ok"]:
         problems.append(f"{activity} does not pass the unattended gate: " + "; ".join(exp["problems"]))
-    if not r.get("enabled"):
+    if r.get("enabled") is not True:
         problems.append("the routine is not enabled")
     urls = []
     for s in items(ctx, "sources", "session_context.sources"):
@@ -355,7 +372,7 @@ def verify(instance, activity, routine, repo=None):
             if when.tzinfo is None:
                 when = when.replace(tzinfo=datetime.timezone.utc)
             when = when.astimezone(zoneinfo.ZoneInfo(full["timezone"]))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             problems.append(f"the routine has no readable next_run_at ({nxt!r})")
         else:
             day, hh, mm = m.group(1).lower(), int(m.group(2)), int(m.group(3))
