@@ -1,4 +1,4 @@
-# Guard policy for this adapter. The agent's guard_policy.py enforces it
+# Guard policy for this tool. The agent's guard_policy.py enforces it
 # before every call to this provider. covers lists the contract
 # invariants it enforces; invariants it does not list are enforced only
 # by the agent's instructions. Example: read tools allowed, deletes

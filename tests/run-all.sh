@@ -22,12 +22,16 @@ for d in */; do  # _template/ is matched here
   bin/validate-agent.sh "$d" || STATUS=1
 done
 
-echo "== template is Agent Standard 2.1"
-if ! grep -q '^standard: "2.1"' _template/agent.yaml; then echo "FAIL: _template is not 2.1"; STATUS=1; fi
+echo "== template is Agent Standard 3.0"
+if ! grep -q '^standard: "3.0"' _template/agent.yaml; then echo "FAIL: _template is not 3.0"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
-if ! python3 _template/hooks/guard_policy.py --check _capability-template/adapters/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
+if ! python3 _template/hooks/guard_policy.py --check _capability-template/tools/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
 if [ -d _template/hooks/__pycache__ ]; then echo "FAIL: bytecode in _template/hooks"; STATUS=1; fi
+if [ ! -f _template/skills/add-tool/SKILL.md ]; then echo "FAIL: template has no add-tool skill"; STATUS=1; fi
+SKEL=$(mktemp -d); mkdir -p "$SKEL/capabilities"; cp -R _capability-template "$SKEL/capabilities/example_capability"  # tool_check reads the capability name from the path
+python3 -B _template/hooks/tool_check.py "$SKEL/capabilities/example_capability/tools/example-provider" "$SKEL/capabilities/example_capability/contract.md" >/dev/null || { echo "FAIL: skeleton tool fails tool_check"; STATUS=1; }
+rm -r "$SKEL"
 if [ ! -f _template/skills/schedule/SKILL.md ]; then echo "FAIL: template has no schedule skill"; STATUS=1; fi
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"

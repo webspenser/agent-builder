@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Links this agent's adapters into the filenames each host looks for.
+# Links this agent's host files into the filenames each host looks for.
 #   ./install.sh            symlink (default) — one copy of every fact on disk
 #   ./install.sh --copy     independent copies, for handoff or link-averse hosts
 #   ./install.sh --dry-run  print what would happen, write nothing
@@ -27,7 +27,7 @@ else
   MODE=link
 fi
 
-[ -d adapters ] || { echo "no adapters/ directory here" >&2; exit 1; }
+[ -d hosts ] || { echo "no hosts/ directory here" >&2; exit 1; }
 
 place() { # place <source> <destination>
   local src="$1" dest="$2"
@@ -38,9 +38,9 @@ place() { # place <source> <destination>
   esac
 }
 
-place adapters/CLAUDE.md CLAUDE.md
-place adapters/GEMINI.md GEMINI.md
-place adapters/AGENTS.md AGENTS.md
+place hosts/CLAUDE.md CLAUDE.md
+place hosts/GEMINI.md GEMINI.md
+place hosts/AGENTS.md AGENTS.md
 
 # Claude Code additionally discovers skills and agents by directory.
 if [ "$MODE" != dry ]; then
