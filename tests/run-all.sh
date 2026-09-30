@@ -10,6 +10,7 @@ echo "== hook";  tests/test-hook.sh || STATUS=1
 echo "== guard"; tests/test-guard.sh || STATUS=1
 echo "== guard policy"; tests/test-guard-policy.sh || STATUS=1
 echo "== schedule check"; tests/test-schedule-check.sh || STATUS=1
+echo "== tool check"; tests/test-tool-check.sh || STATUS=1
 echo "== builder manifests"; tests/test-builder-manifests.sh || STATUS=1
 echo "== action";  tests/test-action.sh || STATUS=1
 
