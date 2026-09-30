@@ -86,4 +86,7 @@ printf '%s\n' '# empty' > "$W/empty.md"; run "$T" "$W/empty.md"; expect 2 "contr
 echo "-- importable"
 if python3 -B -c "import sys; sys.path.insert(0, '_template/hooks'); import tool_check as t; print(t.read_contract.__name__, t.check_tool.__name__)" >/dev/null 2>&1; then
   _report ok "module imports"; else _report no "module does not import"; fi
+
+echo "-- executable"
+if [ -x "$TC" ]; then _report ok "tool_check.py is executable"; else _report no "tool_check.py is not executable"; fi
 finish
