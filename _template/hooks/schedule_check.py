@@ -10,11 +10,15 @@ check  — for every schedule_<activity> in the instance's schedules.yaml:
          bound, and every contract invariant is in the bound adapter's
          guard.yaml covers) and prints what the user needs to create the
          routine: name, schedule and UTC cron, connectors, prompt, and the
-         cloud-environment setup script. Exit 0 when every entry passes,
-         1 when any entry fails, 2 on usage or read errors.
+         cloud-environment setup script. A routine_<activity> line with no
+         schedule_<activity> also fails. Exit 0 when every entry passes,
+         1 when any entry (or orphan routine_ line) fails, 2 on usage or
+         read errors.
 verify — compares a routine (the JSON the routines API returns for it,
          with or without a top-level "trigger" wrapper) against what check
-         expects for <activity>. Exit 0 on a match, 1 with one line per
+         expects for <activity>: repository (exactly one source), cloud
+         environment, enabled, prompt, connectors (one per binding and no
+         others), next run. Exit 0 on a match, 1 with one line per
          mismatch, 2 on usage or read errors.
 
 The package root is the parent of this script's folder.
@@ -43,6 +47,7 @@ CAP = re.compile(r"[a-z0-9_]+")
 PROVIDER = re.compile(r"[a-z0-9-]+")
 SERVER_MATCH = re.compile(r"[a-z0-9_-]+")  # MCP tool names hold only [A-Za-z0-9_-]; the builder requires lowercase
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL other than tab, LF, CR
+ENVIRONMENT = re.compile(r"env_[A-Za-z0-9]+")  # a cloud environment id, used with fullmatch
 GITHUB = re.compile(r"^(?:https?://(?:[^/@\s]+@)?|ssh://git@|git@)github\.com[/:]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", re.I)
 PROMPT_TAIL = ("(unattended). Follow this agent's instructions for each activity, in order. "
                "Do not ask questions and do not edit or commit files in this repository. "
@@ -236,13 +241,20 @@ def expected(instance, repo=None):
     except (ValueError, zoneinfo.ZoneInfoNotFoundError):
         raise CheckError(f"schedules.yaml: timezone {tzname!r} is not an IANA time zone")
     name = meta.get("name", "")
+    env = sched.get("environment")
+    env_problem = None
+    if env is not None and not ENVIRONMENT.fullmatch(env):
+        env_problem = f"schedules.yaml environment {env!r} is not env_<letters and digits>"
+    orphans = [{"activity": k[len("routine_"):], "routine_id": v} for k, v in sched.items()
+               if k.startswith("routine_") and f"schedule_{k[len('routine_'):]}" not in sched]
     repo_name = default_repo(instance, repo).split("/")[-1]
     result = {
         "agent": name, "version": meta.get("version", ""), "timezone": tzname,
         "env_setup": [f"# {name} {meta.get('version', '')}",
                       f"claude plugin marketplace add {meta.get('catalog_repo', '')}",
                       f"claude plugin install {name}@{meta.get('catalog', '')}"],
-        "entries": [],
+        "environment": env,  # None when schedules.yaml records none
+        "entries": [], "orphans": orphans,
     }
     for key in sched:
         if not key.startswith("schedule_"):
@@ -251,8 +263,11 @@ def expected(instance, repo=None):
         entry = {"activity": act, "then": listed(sched.get(f"then_{act}", "")),
                  "schedule": sched[key], "routine_id": sched.get(f"routine_{act}", ""),
                  "problems": []}
-        if key in dups:
-            entry["problems"].append(f"{key} appears more than once")
+        for k in (key, f"then_{act}"):
+            if k in dups:
+                entry["problems"].append(f"{k} appears more than once")
+        if env_problem:
+            entry["problems"].append(env_problem)
         if bad_line is not None:
             entry["problems"].append(f"instance.yaml has a binding line the guard cannot read ({bad_line})")
         if not meta.get("catalog") or not meta.get("catalog_repo"):
@@ -312,8 +327,15 @@ def expected(instance, repo=None):
         entry["utc_cron"] = utc_cron(entry["schedule"], tz) if WHEN.match(entry["schedule"].strip()) else ""
         result["entries"].append(entry)
     if not result["entries"]:
-        raise CheckError("schedules.yaml has no schedule_<activity> entries")
+        raise CheckError("schedules.yaml has no schedule_<activity> entries"
+                         + "".join(f"; {_orphan(o)}" for o in orphans))
     return result
+
+
+def _orphan(o):
+    return (f"routine_{o['activity']}: {o['routine_id']} has no schedule_{o['activity']} entry, but the routine "
+            f"still runs without this gate — disable or delete routine {o['routine_id']} in the web UI, "
+            "then remove this line")
 
 
 def repo_parts(text):
@@ -383,6 +405,20 @@ def verify(instance, activity, routine, repo=None):
         problems.append(f"{activity} does not pass the unattended gate: " + "; ".join(exp["problems"]))
     if r.get("enabled") is not True:
         problems.append("the routine is not enabled")
+    raw_sources = ctx.get("sources")
+    count = len(raw_sources) if isinstance(raw_sources, list) else 0 if raw_sources is None else None
+    if count is not None and count != 1:
+        problems.append(f"the routine has {count} repository sources; it must clone exactly one, "
+                        "this instance's repository")
+    raw_env = ccr.get("environment_id")
+    good_env = isinstance(raw_env, str) and ENVIRONMENT.fullmatch(raw_env)
+    env = raw_env if good_env else json.dumps(raw_env) if isinstance(raw_env, str) and raw_env else "unknown"
+    if full["environment"] is None:
+        problems.append(f"schedules.yaml records no environment; this routine uses {env} — confirm it is the "
+                        f"environment whose setup script installs this agent, then add environment: {env}")
+    elif not good_env or raw_env != full["environment"]:
+        problems.append(f"the routine uses environment {env}, not {full['environment']} from schedules.yaml; "
+                        "any other environment runs the agent with no guard")
     urls = []
     for s in items(ctx, "sources", "session_context.sources"):
         url = obj(s, "git_repository", "a source's git_repository").get("url")
@@ -405,11 +441,21 @@ def verify(instance, activity, routine, repo=None):
         prompts.append(_content(obj(obj(e, "data", "an event's data"), "message", "an event's message").get("content")).strip())
     if exp["prompt"] not in prompts:
         problems.append("the routine's prompt is not the scheduled prompt for this entry")
-    names = [c["name"].lower() for c in items(r, "mcp_connections", "mcp_connections") if isinstance(c.get("name"), str)]
+    conns = items(r, "mcp_connections", "mcp_connections")
+    names = [c["name"].lower() for c in conns if isinstance(c.get("name"), str)]
     for b in exp["bindings"]:
         if b["server_match"] and not any(b["server_match"] in n for n in names):
             problems.append(f"no connector whose name contains \"{b['server_match']}\" is attached "
                             f"({b['capability']}: {b['provider']})")
+    bound = [b["server_match"] for b in exp["bindings"] if b["server_match"]]
+    for c in conns:
+        name = c.get("name")
+        if not isinstance(name, str) or not name:
+            problems.append("a connector with no readable name is attached; it would run with no guard "
+                            "— remove it from the routine")
+        elif not any(m in name.lower() for m in bound):
+            problems.append(f"connector {json.dumps(name)} matches no bound server_match "
+                            f"({', '.join(bound) or 'none'}), so it would run with no guard — remove it from the routine")
     nxt = r.get("next_run_at")
     m = WHEN.match(exp["schedule"].strip())
     if not isinstance(nxt, str):
@@ -433,6 +479,9 @@ def _text(result):
     out = [f"{result['agent']} {result['version']} — timezone {result['timezone']}", "",
            "Cloud environment setup script (merge with other agents' lines; keep the version comment current):"]
     out += ["    " + line for line in result["env_setup"]]
+    out.append(f"environment: {'(none recorded in schedules.yaml)' if result['environment'] is None else result['environment']}")
+    for o in result["orphans"]:
+        out += ["", f"FAIL  {_orphan(o)}"]
     for e in result["entries"]:
         out += ["", f"{'PASS' if e['ok'] else 'FAIL'}  {e['routine_name']}"]
         for p in e["problems"]:
@@ -461,7 +510,7 @@ def main(argv):
         if len(args) == 2 and args[0] == "check":
             result = expected(pathlib.Path(args[1]), repo)
             print(json.dumps(result, indent=2) if as_json else _text(result))
-            return 0 if all(e["ok"] for e in result["entries"]) else 1
+            return 0 if all(e["ok"] for e in result["entries"]) and not result["orphans"] else 1
         if len(args) == 4 and args[0] == "verify":
             with open(args[3], encoding="utf-8") as fh:
                 routine = json.load(fh)

@@ -36,7 +36,7 @@ expect() { # expect <rc> <label> [text]
 }
 
 echo "-- gate"
-I="$W/ok"; instance "$I" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'schedule_digest: "Monday 08:00"'
+I="$W/ok"; instance "$I" good mail 'timezone: UTC' 'environment: env_01Abc' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'schedule_digest: "Monday 08:00"'
 run check "$I" --repo acme/sales;                  expect 0 "all entries pass" "PASS  demo-agent: prospect (sales)"
 expect 0 "digest passes" "PASS  demo-agent: digest (sales)"
 expect 0 "env setup script" "claude plugin install demo-agent@webspenser"
@@ -89,7 +89,7 @@ routine() { # routine <file> <enabled> <repo url> <prompt> <connector name> <nex
 import json, sys
 f, enabled, url, prompt, conn, nxt = sys.argv[1:7]
 r = {"enabled": enabled == "true", "next_run_at": nxt,
-     "job_config": {"ccr": {"session_context": {"sources": [{"git_repository": {"url": url}}]},
+     "job_config": {"ccr": {"environment_id": "env_01Abc", "session_context": {"sources": [{"git_repository": {"url": url}}]},
                             "events": [{"data": {"message": {"role": "user", "content": prompt}}}]}},
      "mcp_connections": [{"name": conn}] if conn else []}
 if len(sys.argv) > 7:
@@ -147,7 +147,7 @@ import json, sys
 prompt = ("Scheduled run of `prospect`, then `research` (unattended). Follow this agent's instructions for each activity, in order. "
           "Do not ask questions and do not edit or commit files in this repository. If something needs the operator, stop and say exactly what.")
 r = {"enabled": True, "next_run_at": "2026-10-05T07:00:00Z",
-     "job_config": {"ccr": {"session_context": {"sources": [{"git_repository": {"url": "https://github.com/acme/sales"}}]},
+     "job_config": {"ccr": {"environment_id": "env_01Abc", "session_context": {"sources": [{"git_repository": {"url": "https://github.com/acme/sales"}}]},
                             "events": [{"data": {"message": {"role": "user", "content": prompt}}}]}},
      "mcp_connections": [{"name": "GoodCRM Mail"}]}
 exec(sys.argv[2])
@@ -242,7 +242,7 @@ run check "$NU";                                   expect 2 "NUL in the instance
 DL="$W/delinst"; instance "$DL" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf '# note\177\n' >> "$DL/instance.yaml"
 run check "$DL";                                   expect 2 "DEL anywhere in instance.yaml is an error" "instance.yaml line 6 has a control character (0x7f)"
 sm() { # sm <dir> <printf format for the server_match line>: a custom crm adapter with a full policy
-  instance "$1" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'schedule_digest: "Monday 08:00"'
+  instance "$1" custom mail 'timezone: UTC' 'environment: env_01Abc' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'schedule_digest: "Monday 08:00"'
   mkdir -p "$1/custom-adapters/crm"
   { printf '%s\n' 'capability: crm' 'provider: custom'; printf "$2"'\n'; } > "$1/custom-adapters/crm/adapter.yaml"
   printf '%s\n' 'covers: [draft_only, no_delete]' 'deny: ["*delete*"]' > "$1/custom-adapters/crm/guard.yaml"
@@ -269,6 +269,57 @@ run3 check "$TB";                                  expect 0 "tabs inside values 
 { cat "$A3"; echo 'name: other-agent'; } > "$W/pkg3/agent.yaml"
 run3 check "$I";                                   expect 2 "disagreeing name: lines are reported as ambiguous" "agent.yaml name: is ambiguous (the guard reads 'demo-agent', the validator reads 'other-agent')"
 cp "$A3" "$W/pkg3/agent.yaml"
+echo "-- final review: environment, extra connectors, sources, then_, orphan routine_"
+run check "$I";                                    expect 0 "check shows the recorded environment" "environment: env_01Abc"
+ENV="$W/badenv"; instance "$ENV" good mail 'timezone: UTC' 'environment: env-01!' 'schedule_prospect: "Monday 07:00"' 'schedule_research: "daily 06:30"'
+run check "$ENV";                                  expect 1 "bad environment charset fails every entry" "schedules.yaml environment 'env-01!' is not env_<letters and digits>"
+expect 1 "bad environment: research fails too" "FAIL  demo-agent: research (badenv)"
+EE="$W/emptyenv"; instance "$EE" good mail 'timezone: UTC' 'environment:' 'schedule_prospect: "Monday 07:00"'
+run check "$EE";                                   expect 1 "empty environment fails" "schedules.yaml environment '' is not env_<letters and digits>"
+NE="$W/noenv"; instance "$NE" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research'
+run check "$NE";                                   expect 0 "environment is optional for check" "PASS  demo-agent: prospect (noenv)"
+rj "$W/r.json" 'pass'
+run verify "$NE" prospect "$W/r.json" --repo acme/sales; expect 1 "no recorded environment: verify names the routine's" "MISMATCH: schedules.yaml records no environment; this routine uses env_01Abc — confirm it is the environment whose setup script installs this agent, then add environment: env_01Abc"
+rj "$W/r.json" 'del r["job_config"]["ccr"]["environment_id"]'
+run verify "$NE" prospect "$W/r.json" --repo acme/sales; expect 1 "no recorded environment, none in the routine" "this routine uses unknown — confirm"
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "routine without environment_id" "the routine uses environment unknown, not env_01Abc from schedules.yaml; any other environment runs the agent with no guard"
+rj "$W/r.json" 'r["job_config"]["ccr"]["environment_id"] = "env_02Other"'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "differing environment" "the routine uses environment env_02Other, not env_01Abc from schedules.yaml"
+rj "$W/r.json" 'r["job_config"]["ccr"]["environment_id"] = 7'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "non-string environment_id" "the routine uses environment unknown"
+rj "$W/r.json" 'r["job_config"]["ccr"]["environment_id"] = "env_01Abc\nOK: fake"'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "environment_id with a newline is escaped" 'the routine uses environment "env_01Abc\nOK: fake", not env_01Abc'
+rj "$W/r.json" 'pass'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 0 "matching environment" "OK:"
+rj "$W/r.json" 'r["mcp_connections"].append({"name": "Apify Scraper"})'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "extra connector" 'MISMATCH: connector "Apify Scraper" matches no bound server_match (goodcrm), so it would run with no guard — remove it from the routine'
+rj "$W/r.json" 'r["mcp_connections"].append({"name": "Line\nOK: fake"})'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "extra connector name is escaped" 'connector "Line\nOK: fake" matches no bound'
+rj "$W/r.json" 'r["mcp_connections"].append({"url": "https://x"})'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "extra connector with no name" "a connector with no readable name is attached"
+rj "$W/r.json" 'r["job_config"]["ccr"]["events"][0]["data"]["message"]["content"] = prompt.replace("`prospect`, then `research`", "`research`"); r["next_run_at"] = "2026-10-05T06:30:00Z"'
+RE="$W/resonly"; instance "$RE" - - 'timezone: UTC' 'environment: env_01Abc' 'schedule_research: "daily 06:30"'
+run verify "$RE" research "$W/r.json" --repo acme/sales; expect 1 "any connector on a no-capability activity is extra" 'connector "GoodCRM Mail" matches no bound server_match (none)'
+printf '%s\n' "$OUT" | grep -q "MISMATCH" && [ "$(printf '%s\n' "$OUT" | grep -c MISMATCH)" -eq 1 ] \
+  && _report ok "no-capability activity: the connector is the only mismatch" || _report no "no-capability activity: $OUT"
+rj "$W/r.json" 'r["job_config"]["ccr"]["session_context"]["sources"] = []'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "zero sources" "MISMATCH: the routine has 0 repository sources; it must clone exactly one, this instance's repository"
+rj "$W/r.json" 'del r["job_config"]["ccr"]["session_context"]["sources"]'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "missing sources" "the routine has 0 repository sources"
+rj "$W/r.json" 's = r["job_config"]["ccr"]["session_context"]["sources"]; s.append({"git_repository": {"url": "https://github.com/acme/other"}})'
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "two sources" "the routine has 2 repository sources; it must clone exactly one"
+TT="$W/dupthen"; instance "$TT" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'then_prospect: digest' 'schedule_research: "daily 06:30"'
+run check "$TT";                                   expect 1 "repeated then_ fails its entry" "then_prospect appears more than once"
+expect 1 "repeated then_: other entry still passes" "PASS  demo-agent: research (dupthen)"
+OR="$W/orphan"; instance "$OR" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'routine_prospect: trig_01A' 'routine_digest: trig_02B'
+run check "$OR";                                   expect 1 "orphan routine_ line fails" "FAIL  routine_digest: trig_02B has no schedule_digest entry"
+expect 1 "orphan routine_: tells the user what to do" "disable or delete routine trig_02B in the web UI, then remove this line"
+expect 1 "orphan routine_: the entry still passes" "PASS  demo-agent: prospect (orphan)"
+run check "$OR" --json
+printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["orphans"]==[{"activity":"digest","routine_id":"trig_02B"}] and d["environment"] is None' \
+  && _report ok "json lists orphans" || _report no "json lists orphans: $OUT"
+OO="$W/onlyorphan"; instance "$OO" good mail 'timezone: UTC' 'routine_digest: trig_02B'
+run check "$OO";                                   expect 2 "only orphans: still an error, naming the routine" "routine_digest: trig_02B has no schedule_digest entry"
 [ -x _template/hooks/schedule_check.py ] && _report ok "script executable" || _report no "script not executable"
 
 finish

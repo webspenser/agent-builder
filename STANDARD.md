@@ -594,6 +594,7 @@ The instance holds `schedules.yaml` at its root, as flat keys:
 
 ```yaml
 timezone: America/New_York
+environment: env_01...
 schedule_prospect: "Monday 07:00"
 then_prospect: prepare
 schedule_digest: "Monday 08:00"
@@ -601,6 +602,9 @@ routine_digest: trig_01...
 ```
 
 - `timezone`: an IANA name.
+- `environment` (optional): the id of the cloud environment the
+  agent's routines use, `env_` then letters and digits. The schedule
+  skill writes it after the user confirms the id `verify` reports.
 - `schedule_<activity>`: a weekday or `daily`, then a 24-hour time, in
   that timezone.
 - `then_<activity>` (optional): activities to run after it in the same
@@ -610,8 +614,8 @@ routine_digest: trig_01...
 
 Every activity named must be an `activity_*` in `agent.yaml`. The
 interview writes `timezone`, `schedule_*`, and `then_*`; nothing else in
-the instance declares schedules. A repeated `schedule_` or `activity_`
-key is an error.
+the instance declares schedules. A repeated `schedule_`, `then_`, or
+`activity_` key is an error.
 
 ### Scheduled runs
 
@@ -641,8 +645,14 @@ claude plugin install sales-partner@webspenser
 
 Changing the version comment when the agent is updated makes the
 environment reinstall it. Every routine for the agent uses that
-environment. The guard does nothing outside an instance, so sharing the
+environment; any other environment does not load the agent or its
+guard. The guard does nothing outside an instance, so sharing the
 environment between agents is safe.
+
+A source-mode instance already carries the agent and its guard as a
+repository-level hook (setup's tools step), so its routine runs load
+both from the cloned repository and the setup script needs no install
+lines for it.
 
 ### The unattended gate
 
@@ -656,11 +666,17 @@ bound adapter's `guard.yaml` `covers`. The gate also fails an entry when:
 - a capability has more than one `bind_` line, or a `bind_` line the
   guard cannot read;
 - an `adapter.yaml` it uses holds control characters;
-- an `activity_` or `schedule_` key is repeated;
+- an `activity_`, `schedule_`, or `then_` key is repeated;
+- `schedules.yaml` has an `environment` that is not `env_` then letters
+  and digits;
 - the time is not `<weekday|daily> HH:MM`.
 
+A `routine_<activity>` line with no `schedule_<activity>` also fails
+the check: that routine still runs without the gate, so the checker
+names it for the user to disable or delete.
+
 Some problems stop the whole check with an error (exit 2) instead of
-failing one entry: a timezone that is not an IANA name, a missing or
+failing one entry, for example: a timezone that is not an IANA name, a missing or
 empty `schedules.yaml`, an `agent` in `instance.yaml` that is not the
 `name` in `agent.yaml`, and control characters in `agent.yaml` or
 `instance.yaml`.
@@ -670,9 +686,10 @@ empty `schedules.yaml`, an `agent` in `instance.yaml` that is not the
 `skills/schedule/SKILL.md` is generic and shipped in `_template`. It:
 
 1. checks that `schedules.yaml` has entries;
-2. checks that the instance is a pushed, clean GitHub repository with
-   `instance.yaml`, `schedules.yaml`, `context/`, and `bindings/`
-   committed;
+2. checks that the instance folder is the root of a clean GitHub
+   repository, on its default branch (routines clone that branch), in
+   step with `origin`, with `instance.yaml`, `schedules.yaml`,
+   `context/`, and `bindings/` committed;
 3. runs the gate and refuses failing entries;
 4. tells the user what to put in the environment's setup script;
 5. prints the routine's name, repository, environment, connectors,
@@ -684,7 +701,9 @@ empty `schedules.yaml`, an `agent` in `instance.yaml` that is not the
 8. on later runs, re-checks everything and names routines the user must
    disable or delete.
 
-It never creates or deletes routines.
+It never creates or deletes routines. The gate runs only when the
+schedule skill runs: after changing bindings, `schedules.yaml`, the
+agent version, or the environment, re-run the skill.
 
 ### hooks/schedule_check.py
 
@@ -699,10 +718,14 @@ every agent and executable. It needs only `python3`.
   0 when every entry passes.
 - `schedule_check.py verify <instance> <activity> <routine.json>
   [--repo owner/name]` compares the routines API's JSON for a routine
-  with what `check` expects (repository, enabled, exact prompt, a
-  connector per bound capability, next run time) and prints one
-  `MISMATCH` line per difference, or `OK`. Without `--repo` only the
-  repository name is compared.
+  with what `check` expects (exactly one repository source, and it is
+  this repository; enabled; exact prompt; a connector per bound
+  capability and no connector that matches no bound `server_match`;
+  next run time; the cloud environment) and prints one `MISMATCH` line
+  per difference, or `OK`. Without `--repo` only the repository name is
+  compared. The routine's `environment_id` must equal `environment` in
+  `schedules.yaml`; when `schedules.yaml` has none, `verify` names the
+  routine's environment and asks the user to confirm it and record it.
 
 ## Validation
 
