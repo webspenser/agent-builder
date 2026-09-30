@@ -188,7 +188,7 @@ def tool(instance, cap, provider):
     if not (folder / "identity.yaml").is_file():
         if provider == "custom" and (instance / "custom-adapters" / cap).is_dir():
             raise CheckError(f"custom-adapters/{cap}/ is the Agent Standard 2 layout; apply the 3.0 migration "
-                             f"(move it to custom-tools/{cap}/, rename adapter.yaml to identity.yaml and adapter.md to usage.md)")
+                             f"(move it to custom-tools/{cap}/, rename adapter.yaml to identity.yaml and adapter.md to usage.md)")  # old names: Agent Standard 2
         if provider == "custom":
             raise CheckError(f"custom-tools/{cap}/ has no identity.yaml; run the add-tool skill")
         raise CheckError(f"no identity.yaml for {provider}")

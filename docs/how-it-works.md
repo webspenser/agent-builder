@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: **Agent Standard 2.1**. Agent Builder 2.1.0, sales-partner 2.1.0.
+Current: **Agent Standard 3.0**. Agent Builder 3.0.0, sales-partner 3.0.0.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
@@ -16,7 +16,7 @@ Current: **Agent Standard 2.1**. Agent Builder 2.1.0, sales-partner 2.1.0.
   - [2. At run time: session start and the guard](#2-at-run-time-session-start-and-the-guard)
   - [3. At scheduling time: the schedule skill](#3-at-scheduling-time-the-schedule-skill)
   - [4. Inside a scheduled run](#4-inside-a-scheduled-run)
-- [Custom adapters: bringing your own tool](#custom-adapters-bringing-your-own-tool)
+- [Custom tools: bringing your own tool](#custom-tools-bringing-your-own-tool)
 - [Activities, in detail](#activities-in-detail)
 - [Field IDs (Airtable), in detail](#field-ids-airtable-in-detail)
 - [Known limits and open questions](#known-limits-and-open-questions)
@@ -25,12 +25,12 @@ Current: **Agent Standard 2.1**. Agent Builder 2.1.0, sales-partner 2.1.0.
 
 | Repository | Role |
 |---|---|
-| [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@v2`, and the `new-agent` wizard. |
+| [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@v3`, and the `new-agent` wizard. |
 | [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: a five-stage sales pipeline over a CRM. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
-The builder's version and the standard's version move together. The `v2` tag
-of the validate action points at the latest 2.x builder. Moving the tag is how
+The builder's version and the standard's version move together. The `v3` tag
+of the validate action points at the latest 3.x builder. Moving the tag is how
 a new standard reaches every agent's CI.
 
 ## Vocabulary
@@ -41,18 +41,13 @@ a new standard reaches every agent's CI.
 | **Instance** | One client's copy of the agent's state: their bindings, business context and schedules. It never holds agent code. | The client's own private repository |
 | **Capability** | A kind of tool the agent needs, e.g. `crm`, `email_drafts`. | `capabilities/<cap>/` |
 | **Contract** | The capability's operations plus its **invariants**, the rules that must always hold (e.g. `no_send`: never send email). | `capabilities/<cap>/contract.md` |
-| **Adapter** | How the contract maps onto one specific tool (Attio, Airtable, Gmail). | `capabilities/<cap>/adapters/<tool>/` |
-| **Guard policy** | The adapter's enforcement rules: which tool calls are allowed, which are denied, and which field values may be written. Its `covers` list names the invariants it enforces. | `…/adapters/<tool>/guard.yaml` |
-| **Binding** | The instance's choice of adapter for a capability. | `bind_<cap>: <tool>` in `instance.yaml` |
-| **Unattended-safe** | Every invariant of the contract is in the bound adapter's `covers`: enforced by code, not only by instructions. | Computed by setup and the schedule checker |
+| **Tool** | How the contract maps onto one specific system (Attio, Airtable, Gmail). | `capabilities/<cap>/tools/<tool>/` |
+| **Guard policy** | The tool's enforcement rules: which tool calls are allowed, which are denied, and which field values may be written. Its `covers` list names the invariants it enforces. | `…/tools/<tool>/guard.yaml` |
+| **Binding** | The instance's choice of tool for a capability. | `bind_<cap>: <tool>` in `instance.yaml` |
+| **Unattended-safe** | Every invariant of the contract is in the bound tool's `covers`: enforced by code, not only by instructions. | Computed by setup and the schedule checker |
 | **Activity** | A workflow step that may run on a schedule, with no one watching. | `activity_<name>: <caps>` in `agent.yaml` |
 | **Routine** | A Claude cloud job that runs one or more activities on a schedule. | claude.ai/code/routines |
 | **Cloud environment** | Where a routine runs. Its setup script installs the agent (and with it, the guard). | claude.ai/code |
-
-"Adapter" also has a second, older meaning. The top-level `adapters/`
-folder holds the **host adapters** `CLAUDE.md`, `GEMINI.md` and
-`AGENTS.md`: one-line pointers that make each host load `AGENT.md`. See
-[open questions](#known-limits-and-open-questions).
 
 ## What an agent package holds
 
@@ -60,12 +55,12 @@ folder holds the **host adapters** `CLAUDE.md`, `GEMINI.md` and
 agent.yaml                  name, version, standard, capabilities, catalog, activity_* lines
 AGENT.md                    the agent's instructions (loaded at session start)
 skills/  subagents/  templates/  samples/  evals/  migrations/
-adapters/                   host adapters (CLAUDE.md, GEMINI.md, AGENTS.md)
+hosts/                      host pointer files (CLAUDE.md, GEMINI.md, AGENTS.md)
 capabilities/<cap>/
   contract.md               operations + invariants
-  adapters/<tool>/
-    adapter.md              how the agent uses this tool, for the model to read
-    adapter.yaml            capability, provider, server_match, for the hooks to read
+  tools/<tool>/
+    usage.md                how the agent uses this tool, for the model to read
+    identity.yaml           capability, provider, server_match, for the hooks to read
     guard.yaml              enforcement rules (optional, but required for no_send)
     bootstrap.py            optional one-time schema setup in the tool
 hooks/                      identical in every agent (copied from the builder)
@@ -74,15 +69,17 @@ hooks/                      identical in every agent (copied from the builder)
   guard.sh                  runs before every connector (MCP) call
   guard_policy.py           the rules engine guard.sh calls
   schedule_check.py         the gate and verifier for scheduled runs
+  tool_check.py             checks one tool folder against its contract
+skills/add-tool/            adds a tool for a capability (an instance's own, or a new shipped one)
 .claude-plugin/ .codex-plugin/ gemini-extension.json   host manifests
 ```
 
-`adapter.md` and `adapter.yaml` serve different readers:
+`usage.md` and `identity.yaml` serve different readers:
 
-- **`adapter.yaml`** is three keys that the hooks read:
+- **`identity.yaml`** is three keys that the hooks read:
   - `capability` and `provider` say which contract and which tool.
   - `server_match` is the text that identifies the tool's connector in a tool name (`mcp__Attio__update-record` contains `attio`).
-- **`adapter.md`** is prose that the model reads. For every contract operation, it gives the exact tool calls, field slugs, filters and views. It also has a `## Probe` section that setup runs when binding.
+- **`usage.md`** is prose that the model reads. For every contract operation, it gives the exact tool calls, field slugs, filters and views. It also has a `## Probe` section that setup runs when binding.
 
 ## What a client's instance holds
 
@@ -91,7 +88,7 @@ instance.yaml               agent, agent_version, mode (plugin|source), bind_<ca
 bindings/<cap>.md           what setup's probe found: workspace, object IDs, field IDs
 context/                    business-profile.md, icp.md, operating-config.md, samples/
 schedules.yaml              timezone, schedule_*, then_*, environment, routine_*
-custom-adapters/<cap>/      only when the client brought their own tool (see below)
+custom-tools/<cap>/         only when the client brought their own tool (see below)
 CLAUDE.md GEMINI.md AGENTS.md .claude/settings.json .gitignore
 ```
 
@@ -104,7 +101,7 @@ MCP settings, environment variables.
 flowchart LR
   A["Install from catalog<br/>claude plugin install sales-partner@webspenser"] --> B["/sales-partner:setup<br/>in an empty folder"]
   B --> C["Interview<br/>writes context/ and schedules.yaml"]
-  C --> D["Tools step<br/>pick adapter, probe, write bindings/, bind_ lines"]
+  C --> D["Tools step<br/>pick a tool or add one, probe, write bindings/, bind_ lines"]
   D --> E["Everyday use<br/>guard checks every connector call"]
   D --> F["/sales-partner:schedule<br/>gate, environment, routines, verify"]
   F --> G["Cloud routine runs<br/>unattended, guarded"]
@@ -117,7 +114,7 @@ different moment.
 
 | When | What runs it | What it protects | On failure |
 |---|---|---|---|
-| Publish (PR / push) | `validate@v2` in the agent's CI | The package follows the standard; the hooks are the exact reference copies; every adapter maps its contract; guard policies parse | CI fails; the PR can't merge |
+| Publish (PR / push) | `validate@v3` in the agent's CI | The package follows the standard; the hooks are the exact reference copies; every tool passes tool_check.py; guard policies parse | CI fails; the PR can't merge |
 | Session start | `session-start.sh` | The right agent loads for this instance; a version upgrade triggers a migration | It prints nothing (wrong folder) or a migration note |
 | Every connector call | `guard.sh` + `guard_policy.py` | The contract's invariants hold on real tool calls | The call is blocked with `Blocked by …` |
 | Scheduling | `/…:schedule` skill + `schedule_check.py` | Only unattended-safe activities get scheduled; the routine is set up exactly as intended | The activity FAILs or the routine shows a MISMATCH; nothing is recorded |
@@ -126,9 +123,10 @@ different moment.
 
 ```mermaid
 flowchart TD
-  S["Push or pull request<br/>in an agent repo"] --> V["validate@v2<br/>bin/validate-agent.sh"]
-  V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>host adapters, skill and subagent format"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 2.1<br/>four host manifests agree"]
+  S["Push or pull request<br/>in an agent repo"] --> V["validate@v3<br/>bin/validate-agent.sh"]
+  V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/, skill and subagent format"]
+  V --> HO["hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>the Agent Standard 2 folder fails"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 3.0<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>migrations/, catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
@@ -136,8 +134,9 @@ flowchart TD
   TL --> T1["PreToolUse guard hook wired"]
   TL --> T2["hooks are byte-identical<br/>to the builder's _template/hooks"]
   TL --> T3["each capability: contract has<br/>Operations and Invariants"]
-  TL --> T4["each adapter: adapter.md maps every operation<br/>and has a Probe; adapter.yaml keys valid;<br/>server_match is a-z 0-9 _ -"]
+  TL --> T4["each tool passes tool_check.py:<br/>usage.md maps every operation and has a Probe;<br/>identity.yaml keys valid;<br/>server_match is a-z 0-9 _ -"]
   TL --> T5["guard.yaml parses; covers only names<br/>real invariants; no_send must be covered"]
+  TL --> T6["add-tool skill present and<br/>byte-identical to the builder's"]
   AC --> A1["activity names kebab-case, not repeated"]
   AC --> A2["capabilities exist; none not mixed"]
   AC --> A3["skills/schedule present;<br/>catalog and catalog_repo set"]
@@ -180,10 +179,12 @@ flowchart TD
   I -- yes --> B["for each bind_ line in instance.yaml"]
   B --> R{"line readable?<br/>cap a-z0-9_, provider a-z0-9-"}
   R -- no --> BL["BLOCK: fail closed"]
-  R -- yes --> AD["find adapter: package's, or<br/>custom-adapters/cap for custom"]
-  AD --> SM{"tool name contains<br/>its server_match?"}
+  R -- yes --> AD["find tool: package's, or<br/>custom-tools/cap for custom"]
+  AD --> ID{"identity.yaml missing?"}
+  ID -- yes --> BL3["BLOCK: fail closed, with the migration<br/>or add-tool message"]
+  ID -- no --> SM{"tool name contains<br/>its server_match?"}
   SM -- no --> B
-  SM -- yes --> GY{"adapter has guard.yaml?"}
+  SM -- yes --> GY{"tool has guard.yaml?"}
   GY -- no --> B
   GY -- yes --> E["guard_policy.py with guard.yaml<br/>and bindings/cap.md"]
   E --> E1["tool in allow list,<br/>and not in deny list"]
@@ -216,9 +217,9 @@ flowchart TD
   G2 --> G3["Step 3: gate, schedule_check.py check"]
   G3 --> C1{"per activity, and each then_ activity:<br/>every capability bound?"}
   C1 -- no --> FAIL["FAIL: cannot schedule"]
-  C1 -- yes --> C2{"bound adapter's guard.yaml<br/>covers every invariant?"}
+  C1 -- yes --> C2{"bound tool's guard.yaml<br/>covers every invariant?"}
   C2 -- no --> FAIL
-  C2 -- yes --> C3{"files clean? no control chars,<br/>no duplicate keys, server_match valid,<br/>environment id valid, no orphan routine_"}
+  C2 -- yes --> C3{"files clean? no control chars,<br/>no duplicate keys, server_match valid,<br/>bound tool passes tool_check.py,<br/>environment id valid, no orphan routine_"}
   C3 -- no --> FAIL
   C3 -- yes --> PASS["PASS: print setup script,<br/>UTC cron, connectors, exact prompt"]
   PASS --> G4["Step 4: user pastes setup script<br/>into a cloud environment"]
@@ -271,40 +272,50 @@ Behavior verified in acceptance on 2026-09-29:
 - The agent loads only through the environment's setup script. Routines
   ignore plugins that the repository's `.claude/settings.json` enables.
 
-## Custom adapters: bringing your own tool
+## Custom tools: bringing your own tool
 
-A client whose tool has no shipped adapter doesn't write a new contract.
-The contract is part of the agent. The client writes a new adapter for the
+A client whose system has no shipped tool doesn't write a new contract.
+The contract is part of the agent. The client adds a new tool for the
 same capability, and the capability slug stays the same.
 
-**How:** there is no separate skill. The setup skill's **tools step**
-(step 9) does it. When the client says none of the shipped adapters fits,
-setup offers a custom adapter:
+**How:** the `add-tool` skill, which every agent ships. Setup's **tools
+step** (step 9) runs it when the client says none of the shipped tools
+fits, and the client can run it later on its own. In an instance
+(the **instance** target), it:
 
-1. It interviews the client about their tool.
-2. It writes the instance's `custom-adapters/<cap>/`:
-   - `adapter.md`, mapping every contract operation;
-   - `adapter.yaml` with `provider: custom`;
+1. Asks which capability and which system, finds that system's MCP tools
+   in the session, and proposes a `server_match`.
+2. Writes the instance's `custom-tools/<cap>/`:
+   - `identity.yaml` with `provider: custom`;
+   - `usage.md`, mapping every contract operation, with a `## Probe`;
    - a `guard.yaml` for each invariant the client wants enforced by code.
-3. It checks the policy with `guard_policy.py --check`.
-4. It runs the probe, writes `bindings/<cap>.md`, and sets `bind_<cap>: custom`.
+3. Checks the folder with `tool_check.py --custom` until it prints `OK`.
+4. Runs the probe, writes `bindings/<cap>.md`, and sets `bind_<cap>: custom`.
+5. Reports each invariant as covered or instruction-only, and offers the
+   `schedule` skill again if there are schedules.
 
-To add or change a custom adapter later, re-run setup: it offers the tools
-step again for an existing instance.
+It never writes credentials: logins stay in the host's connectors. To
+change a custom tool later, run `add-tool` again for that capability.
 
 From then on, the guard and the schedule checker treat `custom` exactly
-like a shipped adapter. They read its `adapter.yaml` and `guard.yaml` from
-`custom-adapters/<cap>/`. If its `guard.yaml` doesn't cover every invariant,
+like a shipped tool. They read its `identity.yaml` and `guard.yaml` from
+`custom-tools/<cap>/`. If its `guard.yaml` doesn't cover every invariant,
 the capability isn't unattended-safe, so its activities can't be scheduled.
-For email, it can't be bound at all unless `no_send` is covered.
+For email, it can't be bound at all unless `no_send` is covered. If a
+bound tool has no `identity.yaml`, the guard blocks every connector call
+until it is fixed.
+
+The **package** target of the same skill adds a new shipped tool in
+`capabilities/<cap>/tools/<tool>/` in the agent's own repository, for a
+pull request.
 
 Current limits:
 
-- An instance can have only one custom adapter per capability.
-- The validator never sees custom adapters. Only `--check` (the policy
-  parses), the guard and the schedule gate do.
-- A custom adapter that proves useful to others should become a shipped
-  adapter in the agent's package, through a pull request.
+- An instance can have only one custom tool per capability.
+- The validator never sees custom tools. Only `tool_check.py`, the guard
+  and the schedule gate do.
+- A custom tool that proves useful to others should become a shipped
+  tool in the agent's package, through a pull request.
 
 ## Activities, in detail
 
@@ -384,17 +395,5 @@ Engineering follow-ups:
 
 Design questions:
 
-- **Adapter file naming.** `adapter.md` (prose for the model) and
-  `adapter.yaml` (three keys for the hooks) serve different readers, but
-  sharing a name hides that. One option: rename by purpose, e.g.
-  `tool.yaml` (identity: capability, provider, server_match), `guard.yaml`
-  (enforcement) and `usage.md` (how the model calls the tool), plus the
-  optional `bootstrap.py`. Another option: fold the three identity keys
-  into `guard.yaml`, but that doesn't work for adapters that ship no policy.
-  The operation-by-operation prose can't become YAML without losing what
-  the model needs. The top-level `adapters/` (host adapters) collides with
-  the same word. Any rename is a breaking change to the standard.
-- **A dedicated skill for custom adapters,** instead of only the setup tools
-  step.
 - **Compliance** (CAN-SPAM, GDPR, TCPA) as a first-class track, and which
-  adapters to build next (HubSpot is the likeliest).
+  tools to build next (HubSpot is the likeliest).

@@ -1,17 +1,17 @@
-# Agent Standard 2.1
+# Agent Standard 3.0
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
 sub-agent contracts. Provider differences — how Claude Code, Gemini CLI,
 Codex, Cursor, or any other host discovers and wires up the agent — live
-only in `adapters/`, which carry no behavior of their own. This document
+only in `hosts/`, which carry no behavior of their own. This document
 is the standard `bin/validate-agent.sh` enforces; if this file and the
 script ever disagree, the script is the ground truth and this file is a
 bug.
 
 ## Development phase
 
-The standard is 2.1. The validator checks only the current version: an
+The standard is 3.0. The validator checks only the current version: an
 agent that declares another version fails with a message to update it.
 Breaking changes are allowed, and every Webspenser agent is updated in
 the same release as the builder. Compatibility rules will return when
@@ -27,26 +27,28 @@ agent-builder/
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
     agent.yaml              # identity + standard version
-    hooks/                  # hooks.json and four scripts, from _template
+    hooks/                  # hooks.json and five scripts, from _template
       session-start.sh      # entry hook
       guard.sh              # PreToolUse guard
       guard_policy.py       # guard policy engine
       schedule_check.py     # schedule gate and routine verifier
+      tool_check.py         # tool folder checker
     migrations/             # <from>-<to>.md upgrade notes
     capabilities/           # optional, one folder per capability
       <capability>/
         contract.md         # operations + invariants
-        adapters/
-          <provider>/
-            adapter.md      # operation -> tool map, ## Probe
-            adapter.yaml    # capability, provider, server_match
+        tools/
+          <tool>/
+            identity.yaml   # capability, provider, server_match
+            usage.md        # operation -> tool map, ## Probe
             guard.yaml      # optional guard policy
+            bootstrap.py    # optional
     .claude-plugin/         # plugin.json, marketplace.json
     .codex-plugin/          # plugin.json
     gemini-extension.json
     AGENT.md                # single source of truth
-    install.sh              # links adapters into host-expected locations
-    adapters/
+    install.sh              # links hosts/ files into host-expected locations
+    hosts/
       CLAUDE.md             # pointer file, no behavior
       GEMINI.md             # pointer file, no behavior
       AGENTS.md             # pointer file, no behavior (Codex, Cursor, Amp, Copilot)
@@ -55,6 +57,7 @@ agent-builder/
         SKILL.md            # frontmatter + procedure
         references/         # optional deep-dive files, loaded on demand
       schedule/             # required when agent.yaml declares activities
+      add-tool/             # required when the agent has capabilities
     subagents/
       <role-name>.md        # role contract
     templates/              # blank fill-in artifacts the agent PRODUCES
@@ -64,13 +67,13 @@ agent-builder/
       cases.md              # given-X-expect-Y checks
 ```
 
-`adapters/`, `skills/`, `subagents/`, `templates/`, `samples/`,
+`hosts/`, `skills/`, `subagents/`, `templates/`, `samples/`,
 `context/`, and `evals/` are all required directories inside every
 `<agent-name>/`, even if some start empty — the validator fails an agent
 missing any of them. `AGENT.md`, `install.sh`, and `evals/cases.md` are
 required files; `install.sh` must additionally be executable
-(`chmod +x`). `adapters/CLAUDE.md`, `adapters/GEMINI.md`, and
-`adapters/AGENTS.md` are all required, not optional per-host extras.
+(`chmod +x`). `hosts/CLAUDE.md`, `hosts/GEMINI.md`, and
+`hosts/AGENTS.md` are all required, not optional per-host extras.
 
 ## AGENT.md
 
@@ -188,16 +191,16 @@ tell "the blank to fill" from "an example already filled." Merging
 context in with either causes reference material to get emitted as if
 it were a deliverable.
 
-## Adapters
+## Host files
 
-`adapters/CLAUDE.md`, `adapters/GEMINI.md`, and `adapters/AGENTS.md` are
+`hosts/CLAUDE.md`, `hosts/GEMINI.md`, and `hosts/AGENTS.md` are
 pointer files only — 25 lines maximum, and each must reference
 `AGENT.md` by name so the host lands on the real specification. Any rule
-placed in an adapter is a defect: it creates a second source of truth
+placed in a host file is a defect: it creates a second source of truth
 for that provider, and the two will drift.
 
 ```markdown
-<!-- adapters/GEMINI.md -->
+<!-- hosts/GEMINI.md -->
 # <Agent Name>
 
 Read `AGENT.md` in this directory. It is the full specification —
@@ -231,7 +234,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "2.1"                # the Agent Standard version followed
+standard: "3.0"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -329,46 +332,110 @@ keys (not a nested map), set both or neither.
 release that changes the shape of a context file: what changed and how
 to convert. It may be empty (keep a `.gitkeep` so git tracks it).
 
-## Capabilities and adapters
+## Capabilities
 
 A capability is an outside system the agent works through — a CRM, a
 mailbox. The package describes it in two layers:
 
 - `capabilities/<capability>/contract.md` — the neutral operations the
   agent thinks in (a `## Operations` table whose first column is each
-  operation name in backticks) and the rules every adapter must uphold
+  operation name in backticks) and the rules every tool must uphold
   (a `## Invariants` list, each item starting with a `snake_case` id in
   backticks). Skills and sub-agent contracts call operations, never a
   provider's tools.
-- `capabilities/<capability>/adapters/<provider>/` — one folder per
-  system, called an adapter pack:
-  - `adapter.md` maps every operation to that provider's tools and has a
-    `## Probe` section (read-only calls setup makes when binding).
-  - `adapter.yaml` holds exactly three flat keys, as plain values:
+- `capabilities/<capability>/tools/<tool>/` — one folder per system
+  (see Tools).
 
-        capability: crm
-        provider: attio
-        server_match: attio          # substring of the MCP server name, any case
+## Tools
 
-    Any other key is an error.
-  - `guard.yaml` is the optional guard policy (next section).
+A tool connects one capability's contract to one system. Its folder,
+`capabilities/<capability>/tools/<tool>/` (kebab-case name), holds four
+files, each with one reader and one purpose:
 
-An adapter's `guard.yaml` `covers` lists the invariants it enforces by
-mechanism. The rest are held only by the agent's instructions. An
-adapter without `guard.yaml` works, but every invariant is
-instruction-only. An invariant named `no_send` must be covered.
+- `identity.yaml` is read by the hooks. It holds exactly three flat
+  keys, as plain values:
+
+      capability: crm
+      provider: attio
+      server_match: attio          # part of the MCP server name, lowercase
+
+  `capability` is the capability's folder name. `provider` is the tool's
+  folder name (`custom` in an instance's `custom-tools/`). `server_match`
+  matches `[a-z0-9_-]+`; the guard compares it to the lowercased text
+  after `mcp__` in a tool name. Any other key is an error.
+- `usage.md` is read by the model. It maps every operation of the
+  contract, each named in backticks, to that system's exact tool calls,
+  fields, filters and views. It has a `## Probe` section: the read-only
+  calls setup (or the `add-tool` skill) makes when binding, and what
+  they record in `bindings/<capability>.md`.
+- `guard.yaml` is the optional guard policy (next section). Its
+  `covers` lists the invariants it enforces by mechanism. The rest are
+  held only by the agent's instructions. A tool without `guard.yaml`
+  works, but every invariant is instruction-only. An invariant named
+  `no_send` must be covered.
+- `bootstrap.py` is optional, for tools that need a setup script.
+
+An instance may bring one tool of its own per capability, in
+`custom-tools/<capability>/`, with the same three files
+(`identity.yaml` with `provider: custom`, `usage.md`, and optionally
+`guard.yaml`).
+
+### hooks/tool_check.py
+
+`hooks/tool_check.py` checks one tool folder against its capability's
+contract. It is byte-identical in every agent and executable, needs
+only `python3`, and never prints a traceback. The validator, the
+schedule checker and the `add-tool` skill all use it, so the package
+and instance rules cannot drift.
+
+    tool_check.py <tool-folder> <contract.md> [--custom]
+
+`--custom` treats the folder as an instance's `custom-tools/<capability>/`.
+It prints one `FAIL: <message>` line per problem, or one `OK:` line, and
+exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
+
+- `identity.yaml` exists, has exactly the three keys, `capability` and
+  `provider` match the folder (or `custom`), and `server_match` is
+  lowercase letters, digits, `_` or `-`;
+- `usage.md` exists, mentions every contract operation in backticks, and
+  has a `## Probe` section;
+- `guard.yaml`, when present, parses with the engine's parser and its
+  `covers` names only contract invariants;
+- when the contract has `no_send`, `guard.yaml` exists and covers it;
+- a leftover Agent Standard 2 file, `adapter.yaml` or `adapter.md`, is a FAIL.
+
+### The add-tool skill
+
+`skills/add-tool/SKILL.md` is generic and shipped in `_template`. Every
+agent with capabilities carries it byte-identical. It has two targets:
+
+- **instance**: a set-up instance of the agent gets a custom tool in
+  `custom-tools/<capability>/`, which the skill checks, probes and binds
+  (`bind_<capability>: custom`);
+- **package**: the agent's own repository gets a new shipped tool in
+  `capabilities/<capability>/tools/<tool>/`, checked and left for a pull
+  request.
+
+The steps: choose the capability; find the system's MCP tools and
+propose a `server_match`; write `identity.yaml`, `usage.md` (from the
+system's real tool list, read-only) and `guard.yaml`; run
+`tool_check.py` until it prints `OK`; for an instance, run the probe,
+write `bindings/<capability>.md`, bind, and report each invariant as
+covered or instruction-only. It never writes credentials: logins stay in
+the host's connectors. It refuses to continue on a `no_send` contract
+until `guard.yaml` covers it.
 
 ## Guard policy
 
-A guard policy is a small file, `guard.yaml`, beside an adapter. It says
+A guard policy is a small file, `guard.yaml`, beside a tool's other files. It says
 which tools may be called, which values may be written, and which
 contract invariants that covers. One reference engine,
 `hooks/guard_policy.py`, enforces it before every call. Because the
-policy is data, an instance's custom adapter can ship one too, so a tool
+policy is data, an instance's custom tool can ship one too, so a tool
 the user brings can qualify for unattended runs.
 
 ```yaml
-# capabilities/crm/adapters/attio/guard.yaml
+# capabilities/crm/tools/attio/guard.yaml
 covers: [draft_only, dnc_one_way, no_delete]
 
 allow: [whoami, list-*, get-*, search-*, semantic-search-*, run-basic-report,
@@ -446,7 +513,7 @@ validation error and, at runtime, a block.
    candidate blocks. With `allow` present, some candidate must match an
    `allow` pattern; `allow` only counts suffixes whose server segment
    (the text between the previous `__` and that suffix's `__`) contains
-   the adapter's `server_match` (`guard.sh` passes it), so
+   the tool's `server_match` (`guard.sh` passes it), so
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
@@ -500,8 +567,8 @@ with `field_` are not checked.
 
 `instance.yaml` binds each capability with one flat line,
 `bind_<capability>: <provider>`. `custom` means the instance's own
-adapter pack in `custom-adapters/<capability>/`; it may ship a
-`guard.yaml` like any other. What the probe discovers — workspace IDs,
+tool in `custom-tools/<capability>/`; it may ship a `guard.yaml` like
+any other. What the probe discovers — workspace IDs,
 optional attributes, `field_<name>` IDs — goes in the instance's
 `bindings/<capability>.md`. A capability with no binding is not set up:
 the agent offers setup's tools step instead of calling anything.
@@ -521,10 +588,10 @@ policy. It never prints a traceback.
 
 Inside an instance of the agent (source mode included), `guard.sh`
 reads each `bind_<capability>: <provider>` line in `instance.yaml`. It
-finds the adapter (the package's, or for `custom` the instance's
-`custom-adapters/<capability>/`). When the tool name after `mcp__`
-contains the adapter's `server_match` (case-insensitive substring), and
-the adapter has a `guard.yaml`, it runs the engine with that policy, the
+finds the tool (the package's `capabilities/<capability>/tools/<provider>/`,
+or for `custom` the instance's `custom-tools/<capability>/`). When the
+tool name after `mcp__` contains the tool's `server_match`
+(case-insensitive substring), and the tool has a `guard.yaml`, it runs the engine with that policy, the
 instance's `bindings/<capability>.md` (or `-`), and the `server_match`.
 A `guard.yaml` that exists but cannot be read (a directory, a dangling
 symlink) still reaches the engine, which blocks.
@@ -534,11 +601,21 @@ any other nonzero exit from the engine, or hook input naming two
 different tools blocks the call. Outside an instance it allows
 everything.
 
-Every `bind_<capability>` line applies its own adapter, so a repeated
+Every `bind_<capability>` line applies its own tool, so a repeated
 key cannot hide one. The key may have spaces before the colon, and the
 provider is lowercased and stripped of quotes and a trailing comment. A
 `bind_` line that cannot be read (a bad capability or provider name)
 blocks the call, since the binding state is unknown.
+
+A bound tool with no `identity.yaml` blocks every MCP call, whatever
+the tool name: the binding state is unknown, so the guard fails closed.
+When the instance has `custom-adapters/<capability>/` (the Agent
+Standard 2 layout), the message says to apply the 3.0 migration: move
+it to `custom-tools/<capability>/`, then rename its
+Agent Standard 2 files: `adapter.yaml` to `identity.yaml`, and `adapter.md` to `usage.md`.
+For any other custom binding, the message
+says to run the `add-tool` skill. For a shipped tool, it says to fix
+the binding (setup's tools step).
 
 Matching over-covers on purpose, so a name containing `__` cannot hide
 a match: `server_match` is tested against everything after `mcp__` in
@@ -552,13 +629,13 @@ prompt.
 
 Setup's tools step binds each capability:
 
-- Pick an adapter, or write a custom one: `adapter.md`, `adapter.yaml`,
-  and optionally `guard.yaml`, checked with
-  `guard_policy.py --check`.
-- Find the matching connected server and run the probe.
+- Pick a shipped tool, or run the `add-tool` skill to write a custom
+  one (checked with `tool_check.py`).
+- Find the matching connected server and run the tool's `usage.md`
+  `## Probe`.
 - Write `bindings/<capability>.md`, including any `field_<name>` IDs the
   probe records.
-- Refuse to bind when the contract has `no_send` and the adapter's
+- Refuse to bind when the contract has `no_send` and the tool's
   `covers` lacks it.
 - Write `bind_<capability>: <provider>` to `instance.yaml`.
 - In source mode, add the `PreToolUse` guard hook to
@@ -638,7 +715,7 @@ from a cloud environment. The user keeps one environment per account
 agent, a version comment and two install lines:
 
 ```bash
-# sales-partner 2.1.0
+# sales-partner 3.0.0
 claude plugin marketplace add webspenser/agent-library
 claude plugin install sales-partner@webspenser
 ```
@@ -659,13 +736,14 @@ lines for it.
 An entry may be scheduled only if it passes the gate. For the entry's
 activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
-bound adapter's `guard.yaml` `covers`. The gate also fails an entry when:
+bound tool's `guard.yaml` `covers`. The gate also fails an entry when:
 
 - `agent.yaml` has no `catalog` or `catalog_repo`;
-- a bound adapter has no `server_match`, or one outside `[a-z0-9_-]+`;
+- a bound tool has no `server_match`, or one outside `[a-z0-9_-]+`;
 - a capability has more than one `bind_` line, or a `bind_` line the
   guard cannot read;
-- an `adapter.yaml` it uses holds control characters;
+- an `identity.yaml` it uses holds control characters;
+- a bound tool fails `tool_check.py`;
 - an `activity_`, `schedule_`, or `then_` key is repeated;
 - `schedules.yaml` has an `environment` that is not `env_` then letters
   and digits;
@@ -737,38 +815,76 @@ Exits `0` and prints `OK: <agent-dir> conforms` when the directory
 matches every rule above; otherwise prints one `FAIL:` line per problem
 and exits non-zero. Run it before committing any change to an agent
 directory — a change that breaks heading order, frontmatter shape, or
-adapter size is a change that breaks portability, and this script is the
+host-file size is a change that breaks portability, and this script is the
 only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"2.1"`.
+- `agent.yaml` exists, and its `standard` is `"3.0"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
   `"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"` (quoted).
 - `hooks/session-start.sh`, `hooks/guard.sh`, `hooks/guard_policy.py`,
-  and `hooks/schedule_check.py` exist, are executable, and are
-  byte-identical to the builder's `_template/hooks/` copies.
+  `hooks/schedule_check.py`, and `hooks/tool_check.py` exist, are
+  executable, and are byte-identical to the builder's `_template/hooks/`
+  copies.
 - Each name in `capabilities` is `snake_case`, and
   `capabilities/<name>/contract.md` exists with a `## Operations` table
   holding at least one backticked operation and a `## Invariants` list
   holding at least one backticked id; invariant ids are `snake_case`.
-- Each capability has at least one adapter folder.
-- Each adapter folder name is kebab-case and has `adapter.md` and
-  `adapter.yaml`; `adapter.yaml` has exactly `capability`, `provider`,
-  and `server_match` as plain values (no lists); `capability` and
-  `provider` equal the folder names; `server_match` uses only lowercase
-  letters, digits, `_`, and `-`.
-- `guard.yaml`, when present, parses with the engine's parser (the
-  validator imports the template's `guard_policy.py`), and every
-  `covers` id is a contract invariant.
-- If the contract has `no_send`, every adapter has a `guard.yaml` whose
-  `covers` includes it.
-- `adapter.md` mentions every operation in backticks and has a
-  `## Probe` section.
+- Each capability has at least one tool folder, and each tool folder
+  passes `tool_check.py` (the validator loads the template's copy): the
+  identity, `usage.md` and `guard.yaml` rules in Tools above, and
+  `guard.yaml` covering `no_send` when the contract has it.
+- The Agent Standard 2 names FAIL, each with a message naming the 3.0
+  layout:
+  - a top-level `adapters/` folder (Agent Standard 2; 3.0 uses `hosts/`);
+  - a `capabilities/<name>/adapters/` folder (Agent Standard 2; 3.0 uses
+    `tools/<tool>/`);
+  - `adapter.yaml` or `adapter.md` in a tool folder (Agent Standard 2).
+- `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
+  most 25 lines and pointing at `AGENT.md`.
+- An agent with capabilities ships `skills/add-tool/SKILL.md`,
+  byte-identical to the builder's `_template/skills/add-tool/SKILL.md`.
 - A `capabilities/` folder not listed in `capabilities` fails.
 - Each `activity_<name>` key in `agent.yaml` has a kebab-case name and
   is declared once; its value is `none` or names only listed
   capabilities, and does not mix `none` with capabilities.
 - An agent with any `activity_*` key ships `skills/schedule/SKILL.md`.
+
+### CI
+
+An agent's repository runs the validator on every pull request and push
+with the Agent Builder's action. `v3` is the tag for this standard:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: webspenser/agent-builder/validate@v3
+```
+
+## Changes from 2.1
+
+Agent Standard 3.0 replaces the Agent Standard 2 word for a tool
+folder with "tool". There is no compatibility mode: the old names fail
+validation.
+
+| Agent Standard 2 | Agent Standard 3.0 |
+|---|---|
+| `adapters/` (Agent Standard 2 host pointer files) | `hosts/` |
+| `capabilities/<cap>/adapters/<tool>/` (Agent Standard 2) | `capabilities/<cap>/tools/<tool>/` |
+| `adapter.yaml` (Agent Standard 2) | `identity.yaml` |
+| `adapter.md` (Agent Standard 2) | `usage.md` |
+| instance `custom-adapters/<cap>/` | instance `custom-tools/<cap>/` |
+| `validate@v2` | `validate@v3` |
+
+New in 3.0:
+
+- `hooks/tool_check.py`, the single checker for a tool folder, used by
+  the validator, the schedule checker and `add-tool`;
+- the `add-tool` skill, required in every agent with capabilities;
+- the missing-identity rule: a bound tool with no `identity.yaml`
+  blocks every MCP call.
+
+The schedule gate now also fails an entry whose bound tool fails
+`tool_check.py`.

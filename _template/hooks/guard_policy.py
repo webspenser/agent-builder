@@ -5,7 +5,7 @@ Usage:
   guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]   hook input JSON on stdin
   guard_policy.py --check <guard.yaml>                                      parse only
 
-Decides one PreToolUse call against one adapter's guard policy: exit 2 blocks
+Decides one PreToolUse call against one tool's guard policy: exit 2 blocks
 (stderr says why), exit 0 allows. Any error blocks — a bug fails closed.
 With server_match, `allow` only counts a tool-name suffix whose server segment
 (the text between the previous "__" and that suffix's "__") contains it, so

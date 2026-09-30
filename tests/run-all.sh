@@ -34,5 +34,16 @@ python3 -B _template/hooks/tool_check.py "$SKEL/capabilities/example_capability/
 rm -r "$SKEL"
 if [ ! -f _template/skills/schedule/SKILL.md ]; then echo "FAIL: template has no schedule skill"; STATUS=1; fi
 
+echo "== Agent Standard 3.0 text"
+if grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template \
+     | grep -v 'Agent Standard 2' | grep -v 'custom-adapters' | grep -q .; then
+  echo "FAIL: 'adapter' still used outside 2.x migration notes:"; grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -v 'Agent Standard 2' | grep -v 'custom-adapters' | head; STATUS=1
+fi
+for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'server_match' 'lowercase' 'no_send' 'tool_check.py'; do
+  grep -qF -- "$want" _template/skills/add-tool/SKILL.md || { echo "FAIL: add-tool skill does not mention $want"; STATUS=1; }
+done
+grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }
+grep -qF 'validate@v3' README.md || { echo "FAIL: README does not use validate@v3"; STATUS=1; }
+
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"
 exit "$STATUS"

@@ -46,7 +46,7 @@ instance's GitHub repository as `owner/name`.
    control characters). Otherwise each entry prints `PASS` or `FAIL`.
    Report every `- ` problem line under a `FAIL` and fix what it names.
    For an unbound capability or an uncovered invariant, the fix is to
-   bind an adapter whose `guard.yaml` covers it (setup's tools step).
+   bind a tool whose `guard.yaml` covers it (setup's tools step).
    Continue only with `PASS` entries. Never offer to schedule a failing
    entry.
 4. **Environment.** Show the "Cloud environment setup script" lines the
