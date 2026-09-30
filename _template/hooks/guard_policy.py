@@ -361,6 +361,18 @@ def problems(policy, event, bindings, server_match=None):
         if policy.get("unknown_writes", "update") == "block":
             return [f"{shown} writes values but is not a known create or update tool"]
         tagged = [("update", m) for m in loose]
+    else:
+        own = {path for w in matched for path in w["at"]}
+        for w in writes:
+            for path in w["at"]:
+                if path in own:
+                    continue
+                stray = _maps_at(args, path)
+                if not stray:
+                    continue
+                if policy.get("unknown_writes", "update") == "block":
+                    return [f"{shown} writes values at {path}, which no writes entry for this tool lists"]
+                tagged += [("update", m) for m in stray]
     found = []
     ids = {}
     for rule in rules:

@@ -53,8 +53,8 @@ writes:
 1. The **matching entries** are those whose `tools` match the call's tool name. Matching uses the same suffix matching as `allow`/`deny`.
 2. For each matching entry, collect the value maps found at each of its `at` paths, and tag each map with that entry's `kind`. A listed path that is absent from the call is skipped.
 3. Check every collected map against `rules`, using the rule's `create:` or `update:` values for the map's kind, or `any:` as today.
-4. **Unknown writes.** If no entry matches the tool, but a value map sits at any path listed in any entry:
-   - `unknown_writes: block` blocks the call;
+4. **Unknown writes.** A value map sits at a path listed in some entry, and either no entry matches the tool, or the tool matches entries but none of them lists that path (a matched tool writing at a path listed only by other entries):
+   - `unknown_writes: block` blocks the call ("<tool> writes values at <path>, which no writes entry for this tool lists" when the tool matched some entry);
    - `unknown_writes: update` (the default) checks those maps as `update`. This is unchanged from today.
 5. A tool matched by entries of both kinds is allowed, e.g. HubSpot's `manage_crm_objects` with a create entry at `createRequest.objects[].properties` and an update entry at `updateRequest.objects[].properties`. Each map gets the kind of the entry whose path found it.
 
@@ -222,7 +222,7 @@ The build confirms the allow list against the connector's real read-tool names.
 ## Review focus
 
 1. **Both kinds on one tool.** `manage_crm_objects` carrying both `createRequest` and `updateRequest` in one call: each map must be checked with its own kind. A create at `approved` hidden next to a harmless update must still block.
-2. **Values at an unlisted path.** A write whose values sit at a path no entry lists, e.g. a future `upsertRequest`. `unknown_writes: block` must block it when it matches no entry. When the tool matches an entry but uses an unlisted sibling path, the values are unchecked, the same as `values_at` today. That is a stated limit, and the allow list plus deny rules are the backstop.
+2. **Values at an unlisted path.** A write whose values sit at a path no entry lists, e.g. a future `upsertRequest`. `unknown_writes: block` must block it when it matches no entry. When the tool matches an entry but writes at a path that no entry lists anywhere, the values are unchecked. A path listed only by other entries is an unknown write (semantics step 4), so the guard never checks less than 3.0 did. That is a stated limit, and the allow list plus deny rules are the backstop.
 3. **Case and type of values.** HubSpot sends booleans and enums as strings (`"true"`, `"draft"`). Rules compare case-insensitively. `true` versus `"true"` must behave the same.
 4. **Old keys left in a custom tool's `guard.yaml` after the upgrade.** The guard must fail closed, blocking calls to that tool, with the migration message. The schedule gate must FAIL.
 5. **The API key.** No skill text ever asks for the key in chat or writes it to a file. `bootstrap.py` never echoes it.

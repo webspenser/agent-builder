@@ -179,4 +179,17 @@ run 2 "unmatched tool at a listed path, unknown_writes: update checks as update"
 H
 run 0 "stated limit: matched tool, unlisted sibling path is not checked" $T '{"upsertRequest":{"objects":[{"properties":{"sp_status":"sent"}}]}}'
 
+echo "-- writes: coverage gaps (fix round 1)"
+G() { policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [m]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [w]' \
+  "unknown_writes: ${1:-block}" 'rules:' '  - field: s' '    any: [a]'; }
+G;        run 2 "matched tool writing at a path listed only by another entry: block" mcp__a__m '{"w":{"s":"approved"}}' "which no writes entry for this tool lists"
+G update; run 2 "same, unknown_writes: update checks as update" mcp__a__m '{"w":{"s":"approved"}}' "s may only be written as a on update"
+G update; run 0 "same, allowed value passes" mcp__a__m '{"w":{"s":"a"}}'
+G;        run 0 "matched tool at its own path is fine" mcp__a__m '{"v":{"s":"a"}}'
+G;        run 0 "matched tool at a path no entry lists is unchecked" mcp__a__m '{"z":{"s":"approved"}}'
+G;        run 2 "matched tool with tool_input not an object" mcp__a__m '[1]' "cannot check this call"
+printf '%s\n' 'covers: [x]' 'update_tools: [u]' > "$W/old.yaml"
+out=$(python3 "$E" --check "$W/old.yaml" 2>&1)
+printf '%s' "$out" | grep -qF 'update_tools is the Agent Standard 3 form; 4.0 uses writes: (see STANDARD.md "Guard policy")' && _report ok "old-key message, full tail" || _report no "old-key tail: $out"
+
 finish
