@@ -6,14 +6,14 @@ source tests/lib.sh
 GUARD="$PWD/_template/hooks/guard.sh"
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-PKG="$W/pkg"; AD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$AD" "$PKG/hooks"
+PKG="$W/pkg"; TD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$TD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
 printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "3.0"' > "$PKG/agent.yaml"
-printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$AD/identity.yaml"
+printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
     'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
-    'rules:' '  - field: status' '    update: [voided]' > "$AD/guard.yaml"
+    'rules:' '  - field: status' '    update: [voided]' > "$TD/guard.yaml"
 }
 write_policy
 
@@ -69,11 +69,13 @@ echo "-- bindings"
 PL="$PKG/capabilities/email/tools/plain"; mkdir -p "$PL"
 printf '%s\n' 'capability: email' 'provider: plain' 'server_match: plainmail' > "$PL/identity.yaml"
 P2="$W/plain"; mkdir -p "$P2"; printf '%s\n' 'agent: demo-agent' 'bind_email: plain' > "$P2/instance.yaml"
-run_guard "$P2" "$(call mcp__plainmail__send_message)";          expect 0 "adapter without guard.yaml: instruction-only, allowed"
+run_guard "$P2" "$(call mcp__plainmail__send_message)";          expect 0 "tool without guard.yaml: instruction-only, allowed"
 G2="$W/ghost"; mkdir -p "$G2"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' > "$G2/instance.yaml"
 run_guard "$G2" "$(call mcp__democrm__delete-record)";           expect 2 "bound tool without identity.yaml: blocked" "has no identity.yaml"
-R="$W/repeat"; mkdir -p "$R"; printf '%s\n' 'agent: demo-agent' 'bind_crm: ghost' 'bind_crm: demo' > "$R/instance.yaml"
-run_guard "$R" "$(call mcp__democrm__delete-record)";            expect 2 "repeated bind_ key applies every adapter"
+NP="$PKG/capabilities/crm/tools/nopolicy"; mkdir -p "$NP"
+printf '%s\n' 'capability: crm' 'provider: nopolicy' 'server_match: nopolicycrm' > "$NP/identity.yaml"
+R="$W/repeat"; mkdir -p "$R"; printf '%s\n' 'agent: demo-agent' 'bind_crm: nopolicy' 'bind_crm: demo' > "$R/instance.yaml"
+run_guard "$R" "$(call mcp__democrm__delete-record)";            expect 2 "repeated bind_ key applies every tool" "guard policy (crm/demo)"
 SP="$W/spaced"; mkdir -p "$SP"; printf '%s\n' 'agent: demo-agent' 'bind_crm : "Demo"  # note' > "$SP/instance.yaml"
 run_guard "$SP" "$(call mcp__democrm__delete-record)";           expect 2 "spaced colon, quoted uppercase provider"
 H="$W/hostile"; mkdir -p "$H"
@@ -84,7 +86,7 @@ run_guard "$H" "$(call mcp__democrm__list-records)"
 
 echo "-- field IDs from bindings"
 printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
-  'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$AD/guard.yaml"
+  'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
 mkdir -p "$I/bindings"; printf '%s\n' 'field_status: fldS' > "$I/bindings/crm.md"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"voided"}}')"; expect 0 "binding ID recognized"
@@ -112,13 +114,13 @@ OUT=$(printf '%s' "$(call mcp__democrm__list-records)" | PATH="$BIN" CLAUDE_PLUG
 expect 2 "no python3 blocks" "Blocked by demo-agent guard policy (crm/demo): python3 is required"
 OUT=$(printf '%s' "$(call mcp__other__list-records)" | PATH="$BIN" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$I" "$BIN/bash" "$GUARD" 2>&1); RC=$?
 expect 0 "no python3: other servers allowed"
-printf '%s\n' 'covers: [draft_only]' 'allow: [list-*' > "$AD/guard.yaml"
+printf '%s\n' 'covers: [draft_only]' 'allow: [list-*' > "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "invalid policy blocks" "cannot check this call"
-rm "$AD/guard.yaml"; mkdir "$AD/guard.yaml"
+rm "$TD/guard.yaml"; mkdir "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "guard.yaml as a directory blocks" "cannot check this call"
-rmdir "$AD/guard.yaml"; ln -s "$W/nowhere.yaml" "$AD/guard.yaml"
+rmdir "$TD/guard.yaml"; ln -s "$W/nowhere.yaml" "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "dangling guard.yaml symlink blocks" "cannot check this call"
-rm "$AD/guard.yaml"
+rm "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__list-records)";             expect 0 "no guard.yaml: instruction-only, allowed"
 write_policy
 printf '%s\n' '#!/usr/bin/env python3' 'import sys' 'sys.exit(1)' > "$PKG/hooks/guard_policy.py"
