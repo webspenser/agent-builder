@@ -69,11 +69,7 @@ CE="$W/inst/custom-tools/email"; mkdir -p "$CE"
 printf '%s\n' 'capability: email' 'provider: custom' 'server_match: mail' > "$CE/identity.yaml"; cp "$E/tools/mail/usage.md" "$CE/"
 run "$CE" "$E/contract.md" --custom;                     expect 1 "custom no_send without guard refused" "must cover it"
 
-echo "-- 2.x names"
-fresh; cp "$T/identity.yaml" "$T/adapter.yaml"; run "$T" "$C/contract.md"
-expect 1 "adapter.yaml beside identity.yaml refused" "adapter.yaml is the Agent Standard 2 name; 3.0 uses identity.yaml"
-fresh; cp "$T/usage.md" "$T/adapter.md"; run "$T" "$C/contract.md"
-expect 1 "adapter.md refused" "adapter.md is the Agent Standard 2 name; 3.0 uses usage.md"
+echo "-- tool folder name"
 fresh; mv "$T" "$C/tools/Demo_X"; sed -i.bak 's/^provider: .*/provider: Demo_X/' "$C/tools/Demo_X/identity.yaml"
 run "$C/tools/Demo_X" "$C/contract.md";                  expect 1 "tool folder kebab-case" "tool folder name is not kebab-case"; rm -rf "$C/tools/Demo_X"
 
@@ -102,4 +98,9 @@ if python3 -B -c "import sys; sys.path.insert(0, '_template/hooks'); import tool
 
 echo "-- executable"
 if [ -x "$TC" ]; then _report ok "tool_check.py is executable"; else _report no "tool_check.py is not executable"; fi
+echo "-- Setup section"
+fresh; printf '%s\n' '# bootstrap' > "$T/bootstrap.py"; run "$T" "$C/contract.md"
+expect 1 "bootstrap.py without ## Setup" "needs a ## Setup section (bootstrap.py is optional; people must be able to create the fields by hand)"
+printf '%s\n' '## Setup' '' 'Create field status.' >> "$T/usage.md"; run "$T" "$C/contract.md"; expect 0 "bootstrap.py with ## Setup"
+rm "$T/bootstrap.py"; fresh; run "$T" "$C/contract.md";      expect 0 "no bootstrap.py: Setup not required"
 finish

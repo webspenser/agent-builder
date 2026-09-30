@@ -8,17 +8,17 @@ GUARD="$PWD/_template/hooks/guard.sh"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; TD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$TD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "3.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "4.0"' > "$PKG/agent.yaml"
 printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
-    'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+    'writes:' '  - kind: create' '    tools: [add-entry]' '    at: [values]' '  - kind: update' '    tools: [update-entry]' '    at: [values]' \
     'rules:' '  - field: status' '    update: [voided]' > "$TD/guard.yaml"
 }
 write_policy
 
 I="$W/inst"; mkdir -p "$I/sub"
-printf '%s\n' 'agent: demo-agent' 'agent_version: 1.0.0' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' > "$I/instance.yaml"
 
 call() { # call <tool_name> [tool_input JSON] — hook input on one line
   local args=${2:-}; [ -n "$args" ] || args='{}'
@@ -98,7 +98,7 @@ run_guard "$H" "$(call mcp__democrm__list-records)"
   && _report ok "unreadable binding blocks, nothing executed" || _report no "hostile bindings (rc=$RC): $OUT"
 
 echo "-- field IDs from bindings"
-printf '%s\n' 'covers: [draft_only]' 'create_tools: [add-entry]' 'update_tools: [update-entry]' 'values_at: [values]' \
+printf '%s\n' 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [add-entry]' '    at: [values]' '  - kind: update' '    tools: [update-entry]' '    at: [values]' \
   'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$TD/guard.yaml"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
 mkdir -p "$I/bindings"; printf '%s\n' 'field_status: fldS' > "$I/bindings/crm.md"
@@ -153,12 +153,9 @@ assert_contains _template/hooks/hooks.json '"\"${CLAUDE_PLUGIN_ROOT}/hooks/guard
 assert_contains _template/hooks/hooks.json '"matcher": "mcp__.*"'
 [ -x "$GUARD" ] && _report ok "guard is executable" || _report no "guard not executable"
 
-echo "-- 3.0 migration"
-M="$W/migrate"; mkdir -p "$M/custom-adapters/crm"
+echo "-- custom binding without a tool"
+M="$W/nocustom"; mkdir -p "$M"
 printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$M/instance.yaml"
-printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: democrm' > "$M/custom-adapters/crm/adapter.yaml"
-run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom-adapters/ left after upgrade: blocked" "apply the 3.0 migration"
-rm -r "$M/custom-adapters"
 run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom binding with no custom tool: blocked" "run the add-tool skill"
 run_guard "$M" "$(call mcp__other__list-records)";              expect 2 "missing identity blocks every MCP call (fail closed)" "has no identity.yaml"
 

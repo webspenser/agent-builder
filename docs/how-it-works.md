@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: **Agent Standard 3.0**. Agent Builder 3.0.0, sales-partner 3.0.0.
+Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.0.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
@@ -25,13 +25,11 @@ Current: **Agent Standard 3.0**. Agent Builder 3.0.0, sales-partner 3.0.0.
 
 | Repository | Role |
 |---|---|
-| [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@v3`, and the `new-agent` wizard. |
+| [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@main`, and the `new-agent` wizard. |
 | [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: a five-stage sales pipeline over a CRM. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
-The builder's version and the standard's version move together. The `v3` tag
-of the validate action points at the latest 3.x builder. Moving the tag is how
-a new standard reaches every agent's CI.
+The builder's version and the standard's version move together. The standard is in active development: agents track agent-builder's main branch (`validate@main`), and version tags come with the first official release.
 
 ## Vocabulary
 
@@ -41,7 +39,7 @@ a new standard reaches every agent's CI.
 | **Instance** | One client's copy of the agent's state: their bindings, business context and schedules. It never holds agent code. | The client's own private repository |
 | **Capability** | A kind of tool the agent needs, e.g. `crm`, `email_drafts`. | `capabilities/<cap>/` |
 | **Contract** | The capability's operations plus its **invariants**, the rules that must always hold (e.g. `no_send`: never send email). | `capabilities/<cap>/contract.md` |
-| **Tool** | How the contract maps onto one specific system (Attio, Airtable, Gmail). | `capabilities/<cap>/tools/<tool>/` |
+| **Tool** | How the contract maps onto one specific system (Attio, Airtable, HubSpot, Gmail). | `capabilities/<cap>/tools/<tool>/` |
 | **Guard policy** | The tool's enforcement rules: which tool calls are allowed, which are denied, and which field values may be written. Its `covers` list names the invariants it enforces. | `…/tools/<tool>/guard.yaml` |
 | **Binding** | The instance's choice of tool for a capability. | `bind_<cap>: <tool>` in `instance.yaml` |
 | **Unattended-safe** | Every invariant of the contract is in the bound tool's `covers`: enforced by code, not only by instructions. | Computed by setup and the schedule checker |
@@ -54,7 +52,7 @@ a new standard reaches every agent's CI.
 ```
 agent.yaml                  name, version, standard, capabilities, catalog, activity_* lines
 AGENT.md                    the agent's instructions (loaded at session start)
-skills/  subagents/  templates/  samples/  evals/  migrations/
+skills/  subagents/  templates/  samples/  evals/
 hosts/                      host pointer files (CLAUDE.md, GEMINI.md, AGENTS.md)
 capabilities/<cap>/
   contract.md               operations + invariants
@@ -84,7 +82,7 @@ skills/add-tool/            adds a tool for a capability (an instance's own, or 
 ## What a client's instance holds
 
 ```
-instance.yaml               agent, agent_version, mode (plugin|source), bind_<cap>: <tool>
+instance.yaml               agent, mode (plugin|source), bind_<cap>: <tool>
 bindings/<cap>.md           what setup's probe found: workspace, object IDs, field IDs
 context/                    business-profile.md, icp.md, operating-config.md, samples/
 schedules.yaml              timezone, schedule_*, then_*, environment, routine_*
@@ -101,11 +99,17 @@ MCP settings, environment variables.
 flowchart LR
   A["Install from catalog<br/>claude plugin install sales-partner@webspenser"] --> B["/sales-partner:setup<br/>in an empty folder"]
   B --> C["Interview<br/>writes context/ and schedules.yaml"]
-  C --> D["Tools step<br/>pick a tool or add one, probe, write bindings/, bind_ lines"]
+  C --> D["Tools step<br/>pick a tool or add one, probe, create fields by hand or with an API key, write bindings/, bind_ lines"]
   D --> E["Everyday use<br/>guard checks every connector call"]
   D --> F["/sales-partner:schedule<br/>gate, environment, routines, verify"]
   F --> G["Cloud routine runs<br/>unattended, guarded"]
 ```
+
+The tools step can also create a tool's fields. If the probe finds them
+missing, setup offers two choices: create them yourself from the tool's
+`## Setup` list, or run the tool's `bootstrap.py` with an API key in
+your own terminal. The key never enters the chat or any file. The
+probe runs again and must pass before the tool is bound.
 
 ## The checks
 
@@ -114,8 +118,8 @@ different moment.
 
 | When | What runs it | What it protects | On failure |
 |---|---|---|---|
-| Publish (PR / push) | `validate@v3` in the agent's CI | The package follows the standard; the hooks are the exact reference copies; every tool passes tool_check.py; guard policies parse | CI fails; the PR can't merge |
-| Session start | `session-start.sh` | The right agent loads for this instance; a version upgrade triggers a migration | It prints nothing (wrong folder) or a migration note |
+| Publish (PR / push) | `validate@main` in the agent's CI | The package follows the standard; the hooks are the exact reference copies; every tool passes tool_check.py; guard policies parse | CI fails; the PR can't merge |
+| Session start | `session-start.sh` | The right agent loads for this instance | It prints nothing (wrong folder) |
 | Every connector call | `guard.sh` + `guard_policy.py` | The contract's invariants hold on real tool calls | The call is blocked with `Blocked by …` |
 | Scheduling | `/…:schedule` skill + `schedule_check.py` | Only unattended-safe activities get scheduled; the routine is set up exactly as intended | The activity FAILs or the routine shows a MISMATCH; nothing is recorded |
 
@@ -123,11 +127,11 @@ different moment.
 
 ```mermaid
 flowchart TD
-  S["Push or pull request<br/>in an agent repo"] --> V["validate@v3<br/>bin/validate-agent.sh"]
+  S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
   V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/, skill and subagent format"]
-  V --> HO["hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>the Agent Standard 2 folder fails"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 3.0<br/>four host manifests agree"]
-  V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>migrations/, catalog keys"]
+  V --> HO["hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 4.0<br/>four host manifests agree"]
+  V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
   V --> BU["Release rule, on PRs<br/>files changed means version bumped"]
@@ -159,14 +163,11 @@ flowchart TD
   A -- yes --> M{"mode: source?"}
   M -- yes --> Q2["print nothing<br/>(host files load AGENT.md)"]
   M -- no --> H["print header: # Agent: name version,<br/>instance and package folders"]
-  H --> VC{"instance agent_version<br/>older than the plugin?"}
-  VC -- yes --> MG["Migration note: read migrations/,<br/>show a diff, apply on confirm,<br/>bump agent_version"]
-  VC -- no --> L["load AGENT.md"]
-  MG --> L
+  H --> L["load AGENT.md"]
 ```
 
-This is the **only version check at run time**. The guard does not look at
-versions. It looks at bindings and policies.
+Nothing at run time compares versions. The guard looks at bindings and
+policies.
 
 The guard runs before every connector call:
 
@@ -181,14 +182,14 @@ flowchart TD
   R -- no --> BL["BLOCK: fail closed"]
   R -- yes --> AD["find tool: package's, or<br/>custom-tools/cap for custom"]
   AD --> ID{"identity.yaml missing?"}
-  ID -- yes --> BL3["BLOCK: fail closed, with the migration<br/>or add-tool message"]
+  ID -- yes --> BL3["BLOCK: fail closed, with the fix-the-binding<br/>or add-tool message"]
   ID -- no --> SM{"tool name contains<br/>its server_match?"}
   SM -- no --> B
   SM -- yes --> GY{"tool has guard.yaml?"}
   GY -- no --> B
   GY -- yes --> E["guard_policy.py with guard.yaml<br/>and bindings/cap.md"]
   E --> E1["tool in allow list,<br/>and not in deny list"]
-  E1 --> E2["for create and update tools:<br/>each written field value is allowed<br/>(status: draft on create, voided on update;<br/>do_not_contact only to true)"]
+  E1 --> E2["writes: kind by tool and path<br/>each written field value is allowed<br/>(status: draft on create, voided on update;<br/>do_not_contact only to true)"]
   E2 --> E3["Airtable: field IDs from bindings/cap.md;<br/>Attio: refuse uuid keys"]
   E3 --> D{"passes?"}
   D -- no --> BL2["BLOCK: Blocked by … guard policy"]
@@ -399,4 +400,4 @@ Engineering follow-ups:
 Design questions:
 
 - **Compliance** (CAN-SPAM, GDPR, TCPA) as a first-class track, and which
-  tools to build next (HubSpot is the likeliest).
+  tools to build next.

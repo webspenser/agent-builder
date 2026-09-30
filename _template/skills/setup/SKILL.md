@@ -9,6 +9,11 @@ written into the package. Read this agent's name, version, and
 optional `catalog` / `catalog_repo` from `agent.yaml` in the package
 folder.
 
+**Welcome.** Before step 1, tell the user: "You'll connect each system
+this agent uses to your host (Claude, Gemini, Codex …). Some systems need
+fields created: you can create them yourself from a list, or run a script
+with an API key in your own terminal."
+
 1. **Existing instance.** First, before anything else: if this folder
    or any folder above it holds an `instance.yaml` for this agent,
    stop — offer to re-run the interview, the tools step (step 9), or
@@ -38,7 +43,7 @@ skill, if this agent has one.
    Every later step writes into this folder (the instance folder),
    not the current folder.
 4. **Marker.** Write `instance.yaml`:
-   `agent: <name>`, `agent_version: <version>`, `mode: plugin`.
+   `agent: <name>`, `mode: plugin`.
 5. **Host files.** Write `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`, each:
    "This folder is an instance of <name>. Its instructions load from the
    <name> plugin; if they didn't, run the `start` skill." Do not
@@ -75,13 +80,28 @@ skill, if this agent has one.
       explain how to connect that system in the host (a connector or
       an MCP server), and that the user enters any key or login there
       themselves; leave the capability unbound and go on.
-   3. Run the tool's `usage.md` `## Probe` calls. They only read. On failure,
-      say what failed and leave the capability unbound. Write what the
-      probe found to `bindings/<capability>.md` in the instance,
-      including any `field_<name>: <id>` lines the probe records. Write
-      each as a plain line, `field_<name>: <ID>`, with nothing else on
-      it: no bullet, no backticks or quotes, no trailing note. Anything
-      else blocks the guarded call.
+   3. Run the tool's `usage.md` `## Probe` calls. They only read. If they
+      fail because fields or objects are missing and the tool's `usage.md`
+      has a `## Setup` section, offer two choices:
+      - **Create them yourself.** Show the `## Setup` list (each field with
+        its object, type, and options) as plain steps in that system. When
+        the user says it is done, run the probe again.
+      - **Use an API key.** Only when the tool has a `bootstrap.py`. Show the
+        exact command, `python3 <package>/capabilities/<capability>/tools/<tool>/bootstrap.py`,
+        and the environment variable and key scopes from `## Setup`. Tell the
+        user to run it in **their own terminal**, setting the key first with
+        `read -rs <VAR> && export <VAR>` (it prompts without echoing and
+        writes nothing to shell history), and never to paste the key into
+        this conversation or any file. When they say it is done, run the
+        probe again.
+
+      Any other probe failure: say what failed and leave the capability
+      unbound. Bind only after the probe passes. Write what the probe found
+      to `bindings/<capability>.md` in the instance, including any
+      `field_<name>: <id>` lines the probe records. Write each as a plain
+      line, `field_<name>: <ID>`, with nothing else on it: no bullet, no
+      backticks or quotes, no trailing note. Anything else blocks the
+      guarded call.
    4. If the contract has a `no_send` invariant and the tool's
       `guard.yaml` does not list it in `covers`, refuse to bind it and
       say why.

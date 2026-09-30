@@ -20,7 +20,7 @@ run() { # run <rc> <label> <tool_name> <tool_input JSON> [text] [bindings] [serv
 
 echo "-- grammar"
 policy 'covers: [draft_only]' 'allow: [list-*, "*read*",' '        get-*]  # continued' 'deny: ["*delete*"]'; parses 0 "flow lists, quotes, continuation, comments"
-policy 'covers: [draft_only]' 'rules:' '  - field: status' '    create: [draft]' '    update: [voided]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]'; parses 0 "rules block"
+policy 'covers: [draft_only]' 'rules:' '  - field: status' '    create: [draft]' '    update: [voided]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [v]'; parses 0 "rules block"
 policy 'allow: [a]';                                  parses 1 "covers is required"
 policy 'covers: [x]' 'bogus: 1';                      parses 1 "unknown key"
 policy 'covers: [x]' 'covers: [y]';                   parses 1 "duplicate key"
@@ -33,12 +33,12 @@ policy 'covers: [x]' 'allow: a';                      parses 1 "list key given a
 policy 'covers: [Bad-Id]';                            parses 1 "covers id not snake_case"
 policy 'covers: [x]' 'unknown_writes: maybe';         parses 1 "unknown_writes value"
 policy 'covers: [x]' 'refuse_keys: [nope]';           parses 1 "unknown refuse_keys preset"
-policy 'covers: [x]' 'rules:' '  - field: status' '    create: [draft]'; parses 1 "rules without create_tools/update_tools/values_at"
-policy 'covers: [x]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]' 'rules:' '  - field: status'; parses 1 "rule without a list"
-policy 'covers: [x]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: ["bad path!"]' 'rules:' '  - field: s' '    any: [a]'; parses 1 "bad values_at path"
+policy 'covers: [x]' 'rules:' '  - field: status' '    create: [draft]'; parses 1 "rules without writes"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [v]' 'rules:' '  - field: status'; parses 1 "rule without a list"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c]' '    at: ["bad path!"]' '  - kind: update' '    tools: [u]' '    at: ["bad path!"]' 'rules:' '  - field: s' '    any: [a]'; parses 1 "bad at path"
 policy 'covers: [x]' 'rules:';                        parses 1 "empty rules"
 policy 'covers:[a]';                                  parses 1 "top-level key without a space after the colon"
-policy 'covers: [a]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]' 'rules:' '  - field: s' '    any:[a]'; parses 1 "rule key without a space after the colon"
+policy 'covers: [a]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [v]' 'rules:' '  - field: s' '    any:[a]'; parses 1 "rule key without a space after the colon"
 policy 'covers: [a]#x';                               parses 1 "# right after a list"
 policy 'covers: [a]' 'unknown_writes: block#x';       parses 1 "# right after a scalar"
 policy 'covers: [a]  # fine' '# whole-line comment';  parses 0 "# after whitespace is a comment"
@@ -53,9 +53,20 @@ policy 'covers: [x]' 'allow: ["a" "b"]';              parses 1 "two adjacent sca
 policy 'covers: [x]' 'allow: [a "b"]';                parses 1 "plain scalar followed by a quoted one"
 policy 'covers: [x]' 'allow: [a] b';                  parses 1 "text after the closing ]"
 policy 'covers: [x]' "allow: ['a\\b']";               parses 0 "backslash in single quotes is literal"
-policy 'covers: [x]' 'refuse_keys: [uuid]';           parses 1 "refuse_keys without values_at"
-policy 'covers: [x]' 'refuse_keys: [uuid]' 'values_at: [v]'; parses 0 "refuse_keys with values_at"
+policy 'covers: [x]' 'refuse_keys: [uuid]';           parses 1 "refuse_keys without writes"
+policy 'covers: [x]' 'refuse_keys: [uuid]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; parses 0 "refuse_keys with writes"
 : > "$W/guard.yaml"; parses 1 "empty file"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [create-record,' '      add-record-to-list]  # continued' '    at: [values]'; parses 0 "writes entry whose tools spans two lines"
+policy 'covers: [x]' 'writes:' '  - kind: update' '    tools: [u]' '    at: [values]' 'rules:' '  - field: status' '    update: [voided,' '      lost]'; parses 0 "rules entry whose update spans two lines"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '      d' '    at: [values]'; parses 1 "unclosed list inside an item"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,'; parses 1 "unclosed list inside an item at end of file"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '  d]' '    at: [values]'; parses 1 "item list continuation indented under 4 spaces"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' $'    \td]' '    at: [values]'; parses 1 "tab in an item list continuation"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '      d]' '    at: [values]'
+policy 'covers: [x]' 'writes:' '  - tools: [c,' '      d]' '    kind: create' '    at: [values]'; parses 0 "'- key: [' item line continues too"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '      d]' '    at: [values]' 'rules:' '  - field: status' '    any: [draft]'
+run 2 "a tool named on a continuation line is a known write tool" mcp__crm__d '{"values":{"status":"x"}}' "may only be written"
+awk '/^## Guard policy/{f=1} f&&/^```yaml/{g=1;next} g&&/^```/{exit} g' STANDARD.md > "$W/guard.yaml"; parses 0 "STANDARD.md Guard policy example parses"
 
 echo "-- tool names"
 policy 'covers: [no_delete]' 'allow: [list-*, update-record]' 'deny: ["*delete*"]'
@@ -76,8 +87,7 @@ policy 'covers: [no_delete]' 'deny: ["*delete*"]'
 run 0 "no allow list: others allowed" mcp__attio__create-list '{}'
 
 echo "-- writes and rules"
-policy 'covers: [draft_only, dnc_one_way]' 'create_tools: [add-record-to-list]' 'update_tools: [update-entry]' \
-  'values_at: [entry_values, values, "records[].fields"]' 'unwrap: [option, value]' 'refuse_keys: [uuid]' \
+policy 'covers: [draft_only, dnc_one_way]' 'writes:' '  - kind: create' '    tools: [add-record-to-list]' '    at: [entry_values, values, "records[].fields"]' '  - kind: update' '    tools: [update-entry]' '    at: [entry_values, values, "records[].fields"]' 'unwrap: [option, value]' 'refuse_keys: [uuid]' \
   'rules:' '  - field: status' '    create: [draft]' '    update: [voided]' '  - field: do_not_contact' '    update: [true]'
 run 0 "create draft"                 mcp__a__add-record-to-list '{"entry_values":{"status":"draft"}}'
 run 2 "create approved"              mcp__a__add-record-to-list '{"entry_values":{"status":"approved"}}' "status may only be written as draft on create"
@@ -95,16 +105,16 @@ run 2 "unknown tool with values is an update" mcp__a__assert-entry '{"entry_valu
 run 0 "unknown tool without values"  mcp__a__create-note '{"title":"x"}'
 run 2 "list path"                    mcp__a__update-entry '{"records":[{"fields":{"status":"voided"}},{"fields":{"Status":"sent"}}]}'
 run 2 "field name normalization"     mcp__a__update-entry '{"records":[{"fields":{"Do Not Contact":false}}]}'
-run 2 "list inside a list at values_at" mcp__a__update-entry '{"records":[[{"fields":{"status":"approved"}}]]}' "cannot check this call"
-run 2 "non-object list item at values_at" mcp__a__update-entry '{"records":["x"]}' "cannot check this call"
-run 0 "missing values_at key is skipped" mcp__a__update-entry '{"other":1}'
+run 2 "list inside a list at a writes path" mcp__a__update-entry '{"records":[[{"fields":{"status":"approved"}}]]}' "cannot check this call"
+run 2 "non-object list item at a writes path" mcp__a__update-entry '{"records":["x"]}' "cannot check this call"
+run 0 "missing writes path is skipped" mcp__a__update-entry '{"other":1}'
 run 2 "zero-width space in a key"    mcp__a__update-entry $'{"values":{"status\u200b":"approved"}}' "invisible characters"
 run 2 "attribute map not an object"  mcp__a__update-entry '{"entry_values":[1]}' "cannot check this call"
-policy 'covers: [x]' 'create_tools: [c]' 'update_tools: [u]' 'values_at: [v]' 'unknown_writes: block' 'rules:' '  - field: s' '    any: [a]'
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [v]' 'unknown_writes: block' 'rules:' '  - field: s' '    any: [a]'
 run 2 "unknown_writes: block"        mcp__a__other '{"v":{"s":"a"}}' "not a known create or update tool"
 
 echo "-- field identity"
-policy 'covers: [draft_only]' 'create_tools: [create_records]' 'update_tools: [update_records]' 'values_at: ["records[].fields"]' \
+policy 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [create_records]' '    at: ["records[].fields"]' '  - kind: update' '    tools: [update_records]' '    at: ["records[].fields"]' \
   'rules:' '  - field: Status' '    binding_id: required' '    create: [draft]' '    update: [voided]'
 printf '%s\n' '# CRM binding — Airtable' 'base_id: appXXXXXXXXXXXXXX' 'field_status: fldAAAAAAAAAAAAAA' > "$W/bindings.md"
 run 2 "status by field ID"           mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}' "Status may only be written as voided" "$W/bindings.md"
@@ -143,5 +153,48 @@ printf '\xff\xfe' > "$W/bin.yaml"
 out=$(python3 "$E" --check "$W/bin.yaml" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ! printf '%s' "$out" | grep -q Traceback && _report ok "--check on binary junk: FAIL, no traceback" || _report no "--check junk (rc=$rc): $out"
 [ -x "$E" ] && _report ok "engine executable" || _report no "engine not executable"
+
+echo "-- writes"
+policy 'covers: [x]' 'create_tools: [c]';             parses 1 "create_tools is an unknown key"
+policy 'covers: [x]' 'writes:' '  - kind: delete' '    tools: [t]' '    at: [v]'; parses 1 "kind must be create or update"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    at: [v]';                    parses 1 "writes entry needs tools"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [t]' '    at: ["bad path!"]'; parses 1 "writes at must be a path"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [t]' '    at: [v]' '    extra: [y]'; parses 1 "unknown writes key"
+policy 'covers: [x]' 'rules:' '  - field: s' '    any: [a]';                          parses 1 "rules need writes"
+
+H() { policy 'covers: [draft_only, dnc_one_way]' 'allow: [manage_crm_objects, get_*]' 'deny: ["*delete*"]' \
+  'writes:' '  - kind: create' '    tools: [manage_crm_objects]' '    at: ["createRequest.objects[].properties"]' \
+  '  - kind: update' '    tools: [manage_crm_objects]' '    at: ["updateRequest.objects[].properties"]' \
+  "unknown_writes: ${1:-block}" 'rules:' '  - field: sp_status' '    create: [draft]' '    update: [voided]' \
+  '  - field: sp_do_not_contact' '    update: ["true"]'; }
+T=mcp__claude_ai_HubSpot__manage_crm_objects
+H; parses 0 "hubspot-shaped policy parses"
+run 0 "create at draft allowed" $T '{"createRequest":{"objects":[{"objectType":"tasks","properties":{"sp_status":"draft"}}]}}'
+run 2 "create at sent blocked" $T '{"createRequest":{"objects":[{"objectType":"tasks","properties":{"sp_status":"sent"}}]}}' "sp_status may only be written as draft on create"
+run 0 "update to voided allowed" $T '{"updateRequest":{"objects":[{"objectType":"tasks","objectId":1,"properties":{"sp_status":"voided"}}]}}'
+run 2 "update to approved blocked" $T '{"updateRequest":{"objects":[{"objectType":"tasks","objectId":1,"properties":{"sp_status":"approved"}}]}}' "on update"
+run 2 "create draft is not an allowed update" $T '{"updateRequest":{"objects":[{"objectType":"tasks","objectId":1,"properties":{"sp_status":"draft"}}]}}'
+run 2 "both kinds in one call: bad create next to harmless update blocks" $T '{"createRequest":{"objects":[{"objectType":"tasks","properties":{"sp_status":"approved"}}]},"updateRequest":{"objects":[{"objectType":"tasks","objectId":1,"properties":{"sp_status":"voided"}}]}}' "on create"
+run 0 "dnc set to string true" $T '{"updateRequest":{"objects":[{"objectType":"companies","objectId":1,"properties":{"sp_do_not_contact":"true"}}]}}'
+run 0 "dnc set to boolean true" $T '{"updateRequest":{"objects":[{"objectType":"companies","objectId":1,"properties":{"sp_do_not_contact":true}}]}}'
+run 2 "dnc cleared (string) blocked" $T '{"updateRequest":{"objects":[{"objectType":"companies","objectId":1,"properties":{"sp_do_not_contact":"false"}}]}}'
+run 2 "dnc cleared (boolean) blocked" $T '{"updateRequest":{"objects":[{"objectType":"companies","objectId":1,"properties":{"sp_do_not_contact":false}}]}}'
+run 0 "association-only update (no properties) allowed" $T '{"updateRequest":{"objects":[{"objectType":"tasks","objectId":1,"associations":[{"targetObjectId":2,"targetObjectType":"companies"}]}]}}'
+run 2 "delete denied" mcp__claude_ai_HubSpot__delete_records '{}' "denied"
+run 2 "unmatched tool writing at a listed path, unknown_writes: block" mcp__claude_ai_HubSpot__get_thing '{"createRequest":{"objects":[{"properties":{"sp_status":"draft"}}]}}' "not a known create or update tool"
+H update
+run 2 "unmatched tool at a listed path, unknown_writes: update checks as update" mcp__claude_ai_HubSpot__get_thing '{"createRequest":{"objects":[{"properties":{"sp_status":"draft"}}]}}' "on update"
+H
+run 0 "stated limit: matched tool, unlisted sibling path is not checked" $T '{"upsertRequest":{"objects":[{"properties":{"sp_status":"sent"}}]}}'
+
+echo "-- writes: coverage gaps (fix round 1)"
+G() { policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [m]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [w]' \
+  "unknown_writes: ${1:-block}" 'rules:' '  - field: s' '    any: [a]'; }
+G;        run 2 "matched tool writing at a path listed only by another entry: block" mcp__a__m '{"w":{"s":"approved"}}' "which no writes entry for this tool lists"
+G update; run 2 "same, unknown_writes: update checks as update" mcp__a__m '{"w":{"s":"approved"}}' "s may only be written as a on update"
+G update; run 0 "same, allowed value passes" mcp__a__m '{"w":{"s":"a"}}'
+G;        run 0 "matched tool at its own path is fine" mcp__a__m '{"v":{"s":"a"}}'
+G;        run 0 "matched tool at a path no entry lists is unchecked" mcp__a__m '{"z":{"s":"approved"}}'
+G;        run 2 "matched tool with tool_input not an object" mcp__a__m '[1]' "cannot check this call"
 
 finish

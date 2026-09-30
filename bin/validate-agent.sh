@@ -71,7 +71,6 @@ if [ -f "$DIR/AGENT.md" ]; then
 fi
 
 # Host files are pointers, not behavior
-[ -d "$DIR/adapters" ] && fail "adapters/ is the Agent Standard 2 name; 3.0 uses hosts/"
 for a in CLAUDE GEMINI AGENTS; do
   f="$DIR/hosts/$a.md"
   [ -f "$f" ] || continue

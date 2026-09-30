@@ -57,7 +57,8 @@ with `python3`.
    on this system's tool calls:
    - an `allow` list of the tools `usage.md` uses, and `deny` globs for
      anything destructive;
-   - `create_tools` and `update_tools`, and `values_at`;
+   - `writes` entries, each with a `kind` (`create` or `update`), the `tools`
+     it covers and the argument paths `at` where the value maps sit;
    - field `rules`, with `binding_id: required` when the system writes
      fields by ID rather than by name.
 

@@ -7,9 +7,9 @@ source tests/lib.sh
 FIX=$(mktemp -d)
 trap 'rm -rf "$FIX"' EXIT
 
-make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Agent Standard 3.0 agent
+make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete agent
   local d="$1" name="${2:-demo-agent}" ver="${3:-0.1.0}"
-  mkdir -p "$d"/{hosts,skills/start,skills/setup,skills/add-tool,subagents,templates,samples,context,evals,hooks,migrations,.claude-plugin,.codex-plugin}
+  mkdir -p "$d"/{hosts,skills/start,skills/setup,skills/add-tool,subagents,templates,samples,context,evals,hooks,.claude-plugin,.codex-plugin}
   printf '%s\n' \
     '## Identity' '## Mission' '## Inputs' '## Outputs' \
     '## Operating rules' '## Workflow' '## Sub-agents' '## Skills' \
@@ -17,7 +17,7 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Ag
   for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/hosts/$a.md"; done
   echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
   echo '# Cases' > "$d/evals/cases.md"
-  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "3.0"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "4.0"' 'capabilities: crm' > "$d/agent.yaml"
   printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
@@ -33,7 +33,7 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete Ag
     '- `draft_only` — only drafts' '- `no_send` — never sends' > "$c/contract.md"
   printf '%s\n' '# Demo tool' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/usage.md"
   printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' > "$a/identity.yaml"
-  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' > "$a/guard.yaml"
+  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [create-lead]' '    at: [values]' '  - kind: update' '    tools: [update-lead]' '    at: [values]' > "$a/guard.yaml"
   sync_agents "$d" "$name" "$ver"
 }
 sync_agents() { # sync_agents <dir> [name] [version] — rewrite plugin.json's agents list from subagents/
@@ -128,7 +128,7 @@ assert_pass $V "$FIX/mf-sub"
 # agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
 make_valid_agent "$FIX/mf-loose"
 printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
-  "version: '0.1.0'" 'description: A demo agent' 'standard: "3.0"' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "4.0"' \
   'capabilities: crm   # the only one' 'extra:' '  - nested' > "$FIX/mf-loose/agent.yaml"
 assert_pass $V "$FIX/mf-loose"
 
@@ -139,8 +139,8 @@ make_valid_agent "$FIX/mf-badname" "Demo_Agent"
 fails_with "$FIX/mf-badname" "agent.yaml: name 'Demo_Agent' is not kebab-case"
 make_valid_agent "$FIX/mf-badver" demo-agent "1.0"
 fails_with "$FIX/mf-badver" "agent.yaml: version '1.0' is not MAJOR.MINOR.PATCH"
-make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "2.1"/' "$FIX/mf-std20/agent.yaml"
-fails_with "$FIX/mf-std20" "agent.yaml: standard '2.1' is not 3.0; update the agent to the current Agent Standard"
+make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "3.0"/' "$FIX/mf-std20/agent.yaml"
+fails_with "$FIX/mf-std20" "agent.yaml: standard '3.0' must be \"4.0\""
 
 # Host manifest problems.
 make_valid_agent "$FIX/mf-nogem"; rm "$FIX/mf-nogem/gemini-extension.json"
@@ -359,11 +359,10 @@ make_valid_agent "$FIX/rt-badjson"; echo '{' > "$FIX/rt-badjson/hooks/hooks.json
 out=$($V "$FIX/rt-badjson" 2>&1); printf '%s\n' "$out" | grep -q Traceback && _report no "hooks.json traceback" || _report ok "hooks.json bad JSON reported cleanly"
 make_valid_agent "$FIX/rt-nostart"; rm -r "$FIX/rt-nostart/skills/start"; fails_with "$FIX/rt-nostart" "missing skills/start/SKILL.md"
 make_valid_agent "$FIX/rt-nosetup"; rm -r "$FIX/rt-nosetup/skills/setup"; fails_with "$FIX/rt-nosetup" "missing skills/setup/SKILL.md"
-make_valid_agent "$FIX/rt-nomig"; rmdir "$FIX/rt-nomig/migrations"; fails_with "$FIX/rt-nomig" "missing directory: migrations/"
 make_valid_agent "$FIX/rt-catalog"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' >> "$FIX/rt-catalog/agent.yaml"; assert_pass $V "$FIX/rt-catalog"
 make_valid_agent "$FIX/rt-halfcat"; printf '%s\n' 'catalog: webspenser' >> "$FIX/rt-halfcat/agent.yaml"; fails_with "$FIX/rt-halfcat" "agent.yaml: catalog and catalog_repo must be set together as flat keys"
 make_valid_agent "$FIX/rt-badrepo"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: not a repo' >> "$FIX/rt-badrepo/agent.yaml"; fails_with "$FIX/rt-badrepo" "agent.yaml: catalog_repo 'not a repo' is not owner/repo"
-make_valid_agent "$FIX/rt-srcinst"; printf '%s\n' 'agent: demo-agent' 'agent_version: 0.1.0' 'standard: "1.1"' 'mode: source' > "$FIX/rt-srcinst/instance.yaml"; assert_pass $V "$FIX/rt-srcinst"
+make_valid_agent "$FIX/rt-srcinst"; printf '%s\n' 'agent: demo-agent' 'standard: "1.1"' 'mode: source' > "$FIX/rt-srcinst/instance.yaml"; assert_pass $V "$FIX/rt-srcinst"
 make_valid_agent "$FIX/rt-pluginst"; printf '%s\n' 'agent: demo-agent' 'mode: plugin' > "$FIX/rt-pluginst/instance.yaml"; fails_with "$FIX/rt-pluginst" "instance.yaml in a package must have mode: source"
 make_valid_agent "$FIX/rt-wronginst"; printf '%s\n' 'agent: other' 'mode: source' > "$FIX/rt-wronginst/instance.yaml"; fails_with "$FIX/rt-wronginst" "instance.yaml: agent 'other' does not match agent.yaml 'demo-agent'"
 
@@ -464,7 +463,7 @@ cp -R _capability-template/. "$FIX/cap-skel/capabilities/example_capability/"
 sed -i.bak 's/^capabilities: .*/capabilities: crm, example_capability/' "$FIX/cap-skel/agent.yaml"
 assert_pass $V "$FIX/cap-skel"
 
-echo "-- Agent Standard 3.0"
+echo "-- tools and guard policies"
 A=capabilities/crm/tools/demo
 make_valid_agent "$FIX/cur"; assert_pass $V "$FIX/cur"
 make_valid_agent "$FIX/noyaml"; rm "$FIX/noyaml/agent.yaml"
@@ -492,7 +491,7 @@ fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_send"
 make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
 assert_pass $V "$FIX/instronly"   # a tool without a policy is allowed: instruction-only
 
-echo "-- Agent Standard 2.1: activities"
+echo "-- activities"
 make_valid_agent "$FIX/act"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"
 mkdir -p "$FIX/act/skills/schedule"; printf '%s\n' '---' 'name: schedule' 'description: Use when scheduling' '---' 'x' > "$FIX/act/skills/schedule/SKILL.md"
 assert_pass $V "$FIX/act"
@@ -525,13 +524,7 @@ fails_with "$FIX/match-space" "$A/identity.yaml: server_match must be lowercase 
 make_valid_agent "$FIX/match-upper"; sed -i.bak 's/^server_match: .*/server_match: GoodCRM/' "$FIX/match-upper/$A/identity.yaml"
 fails_with "$FIX/match-upper" "$A/identity.yaml: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)"
 
-echo "-- Agent Standard 3.0 layout"
-make_valid_agent "$FIX/old-hosts"; mv "$FIX/old-hosts/hosts" "$FIX/old-hosts/adapters"
-fails_with "$FIX/old-hosts" "adapters/ is the Agent Standard 2 name; 3.0 uses hosts/"
-make_valid_agent "$FIX/old-tools"; mv "$FIX/old-tools/capabilities/crm/tools" "$FIX/old-tools/capabilities/crm/adapters"
-fails_with "$FIX/old-tools" "capabilities/crm/adapters/ is the Agent Standard 2 layout; 3.0 uses capabilities/crm/tools/<tool>/ with identity.yaml and usage.md"
-make_valid_agent "$FIX/leftover"; cp "$FIX/leftover/capabilities/crm/tools/demo/identity.yaml" "$FIX/leftover/capabilities/crm/tools/demo/adapter.yaml"
-fails_with "$FIX/leftover" "capabilities/crm/tools/demo/adapter.yaml is the Agent Standard 2 name; 3.0 uses identity.yaml"
+echo "-- tool checker and add-tool skill"
 make_valid_agent "$FIX/no-toolcheck"; rm "$FIX/no-toolcheck/hooks/tool_check.py"
 fails_with "$FIX/no-toolcheck" "missing hooks/tool_check.py"
 make_valid_agent "$FIX/no-addtool"; rm -r "$FIX/no-addtool/skills/add-tool"

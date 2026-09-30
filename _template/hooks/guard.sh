@@ -73,9 +73,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     tdir="$root/capabilities/$cap/tools/$provider"
   fi
   if [ ! -f "$tdir/identity.yaml" ]; then # binding state unknown: fail closed
-    if [ "$provider" = custom ] && [ -d "$instance/custom-adapters/$cap" ]; then
-      block "instance.yaml binds $cap to custom, but custom-tools/$cap/identity.yaml is missing and custom-adapters/$cap/ is the Agent Standard 2 layout; apply the 3.0 migration (move it to custom-tools/$cap/, rename adapter.yaml to identity.yaml and adapter.md to usage.md)"
-    elif [ "$provider" = custom ]; then
+    if [ "$provider" = custom ]; then
       block "instance.yaml binds $cap to custom, but custom-tools/$cap/ has no identity.yaml; run the add-tool skill"
     fi
     block "instance.yaml binds $cap to $provider, which has no identity.yaml in $name; fix the binding (setup's tools step)"
