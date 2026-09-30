@@ -89,10 +89,11 @@ skill, if this agent has one.
       - **Use an API key.** Only when the tool has a `bootstrap.py`. Show the
         exact command, `python3 <package>/capabilities/<capability>/tools/<tool>/bootstrap.py`,
         and the environment variable and key scopes from `## Setup`. Tell the
-        user to run it in **their own terminal** with the key set only in
-        that terminal's environment, and never to paste the key into this
-        conversation or any file. When they say it is done, run the probe
-        again.
+        user to run it in **their own terminal**, setting the key first with
+        `read -rs <VAR> && export <VAR>` (it prompts without echoing and
+        writes nothing to shell history), and never to paste the key into
+        this conversation or any file. When they say it is done, run the
+        probe again.
 
       Any other probe failure: say what failed and leave the capability
       unbound. Bind only after the probe passes. Write what the probe found

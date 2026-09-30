@@ -502,8 +502,10 @@ validation error and, at runtime, a block.
 - The exceptions are `rules:` and `writes:`, whose values are block
   lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `binding_id:`,
-  `create:`, `update:`, `any:` — lists on one line. A `writes` item
-  holds `kind:`, `tools:` and `at:`, the last two as flow lists.
+  `create:`, `update:`, `any:`. A `writes` item holds `kind:`, `tools:`
+  and `at:`, the last two as flow lists. A flow list in an item may
+  continue over following lines indented at least four spaces until its
+  closing `]`.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
   duplicate keys, and unknown keys are errors.
 
@@ -514,7 +516,7 @@ validation error and, at runtime, a block.
 | `covers` | yes | Invariant ids this policy enforces (snake_case) |
 | `allow` | no | Tool-name glob patterns that may be called; if present, everything else on the matched server is blocked |
 | `deny` | no | Tool-name glob patterns that are always blocked |
-| `writes` | if `rules` or `refuse_keys` | A list of `{kind, tools, at}` entries. `kind` is `create` or `update`; `tools` are tool-name globs, matched as in `allow`/`deny`; `at` lists where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`) |
+| `writes` | if `rules` or `refuse_keys` | A list of `{kind, tools, at}` entries. `kind` is `create` or `update`; `tools` are tool-name globs, matched as in `allow`/`deny`; `at` lists where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`). A path containing `[]` must be quoted: `"records[].fields"` |
 | `unwrap` | no | Keys whose value stands for a wrapped value (`{"option": "draft"}`); without them any object value on a write is an error |
 | `unknown_writes` | no | `update` (default) or `block`: a call that holds an attribute map at a `writes` path that no `writes` entry for that tool lists |
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
@@ -709,7 +711,8 @@ Setup's tools step binds each capability:
   - **Use an API key.** Only when the tool has a `bootstrap.py`. Show the
     exact command and the environment variable and key scopes from
     `## Setup`. The user runs it in their own terminal, with the key set
-    only in that terminal's environment.
+    only in that terminal's environment by `read -rs <VAR> && export <VAR>`,
+    which keeps it out of shell history.
   The key never enters the chat or any file. The probe must pass before
   the tool is bound. Setup's opening message tells the user up front to
   connect each system to their host and that fields may need creating,

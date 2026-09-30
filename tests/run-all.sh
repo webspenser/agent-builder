@@ -48,12 +48,14 @@ done
 grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }
 
 echo "== Agent Standard 4.0 text"
-for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup'; do
+for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup' 'read -rs <VAR> && export <VAR>'; do
   grep -qF -- "$want" _template/skills/setup/SKILL.md || { echo "FAIL: setup does not say: $want"; STATUS=1; }
 done
 if grep -rniE 'paste (the|your) (api )?key|give us your (api )?key' _template/skills skills | grep -vi 'never' | grep -q .; then echo "FAIL: a skill asks for a key in chat"; STATUS=1; fi
 if grep -rnE 'create_tools|update_tools|values_at' STANDARD.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -v 'Agent Standard 3' | grep -q .; then
   echo "FAIL: old guard keys outside Agent Standard 3 notes"; STATUS=1; fi
+if grep -rnE 'export [A-Z_]*(TOKEN|KEY)=' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
+  echo "FAIL: a key is set with export VAR=..., which lands in shell history; use read -rs VAR && export VAR"; STATUS=1; fi
 grep -qF 'validate@v4' README.md || { echo "FAIL: README does not use validate@v4"; STATUS=1; }
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"

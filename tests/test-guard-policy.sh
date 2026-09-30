@@ -56,6 +56,17 @@ policy 'covers: [x]' "allow: ['a\\b']";               parses 0 "backslash in sin
 policy 'covers: [x]' 'refuse_keys: [uuid]';           parses 1 "refuse_keys without writes"
 policy 'covers: [x]' 'refuse_keys: [uuid]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; parses 0 "refuse_keys with writes"
 : > "$W/guard.yaml"; parses 1 "empty file"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [create-record,' '      add-record-to-list]  # continued' '    at: [values]'; parses 0 "writes entry whose tools spans two lines"
+policy 'covers: [x]' 'writes:' '  - kind: update' '    tools: [u]' '    at: [values]' 'rules:' '  - field: status' '    update: [voided,' '      lost]'; parses 0 "rules entry whose update spans two lines"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '      d' '    at: [values]'; parses 1 "unclosed list inside an item"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,'; parses 1 "unclosed list inside an item at end of file"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '  d]' '    at: [values]'; parses 1 "item list continuation indented under 4 spaces"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' $'    \td]' '    at: [values]'; parses 1 "tab in an item list continuation"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '      d]' '    at: [values]'
+policy 'covers: [x]' 'writes:' '  - tools: [c,' '      d]' '    kind: create' '    at: [values]'; parses 0 "'- key: [' item line continues too"
+policy 'covers: [x]' 'writes:' '  - kind: create' '    tools: [c,' '      d]' '    at: [values]' 'rules:' '  - field: status' '    any: [draft]'
+run 2 "a tool named on a continuation line is a known write tool" mcp__crm__d '{"values":{"status":"x"}}' "may only be written"
+awk '/^## Guard policy/{f=1} f&&/^```yaml/{g=1;next} g&&/^```/{exit} g' STANDARD.md > "$W/guard.yaml"; parses 0 "STANDARD.md Guard policy example parses"
 
 echo "-- tool names"
 policy 'covers: [no_delete]' 'allow: [list-*, update-record]' 'deny: ["*delete*"]'

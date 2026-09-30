@@ -29,9 +29,7 @@ Current: **Agent Standard 4.0**. Agent Builder 4.0.0, sales-partner 4.0.0.
 | [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: a five-stage sales pipeline over a CRM. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
-The builder's version and the standard's version move together. The `v3` tag
-of the validate action points at the latest 3.x builder. Moving the tag is how
-a new standard reaches every agent's CI.
+The builder's version and the standard's version move together. The `v4` tag of the validate action points at the latest 4.x builder. Each new major standard gets a new tag (`v4`, `v5`, …); older tags stay frozen, and an agent moves by changing its CI to the new tag.
 
 ## Vocabulary
 

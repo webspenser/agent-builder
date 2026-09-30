@@ -134,11 +134,23 @@ def _parse_items(lines, i, name, allowed):
             raise PolicyError(f"line {lineno}: unknown {name} key '{key}'")
         if key in items[-1]:
             raise PolicyError(f"line {lineno}: duplicate {name} key '{key}'")
+        i += 1
         if value.startswith("["):
+            while not value.endswith("]"):
+                if i >= len(lines):
+                    raise PolicyError(f"line {lineno}: unclosed '['")
+                if "\t" in lines[i]:
+                    raise PolicyError(f"line {i + 1}: tabs are not allowed")
+                more = _strip_comment(lines[i], i + 1)
+                if more.strip() and not more.startswith("    "):
+                    raise PolicyError(f"line {lineno}: unclosed '[' (line {i + 1} continues it indented less than 4 spaces)")
+                if KEY_LINE.match(more.strip()):
+                    raise PolicyError(f"line {lineno}: unclosed '[' (line {i + 1} starts a new key)")
+                value += " " + more.strip()
+                i += 1
             items[-1][key] = _flow_list(value, lineno)
         else:
             items[-1][key] = _scalar(value, lineno)
-        i += 1
     if not items:
         raise PolicyError(f"{name}: has no items")
     return items, i
