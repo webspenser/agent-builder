@@ -203,7 +203,7 @@ run check "$RS";                                   expect 0 "schedules.yaml: fir
 NB="$W/nbsp"; instance "$NB" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf 'bind_crm: good\xc2\xa0\n' >> "$NB/instance.yaml"
 run check "$NB";                                   expect 1 "NBSP is not whitespace to the guard" "cannot read"
 FS="$W/fs"; instance "$FS" - mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf 'bind_crm: good\x1f\n' >> "$FS/instance.yaml"
-run check "$FS";                                   expect 1 "0x1f is not whitespace to the guard" "cannot read"
+run check "$FS";                                   expect 2 "0x1f in instance.yaml is an error" "instance.yaml line 5 has a control character (0x1f)"
 rj "$W/r.json" 'r["next_run_at"] = "9999-12-31T23:59:00-12:00"'
 run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "overflowing next_run_at is a mismatch" "no readable next_run_at"
 rj "$W/r.json" 'r["enabled"] = "false"'
@@ -227,6 +227,43 @@ expect 1 "unaffected entry still passes" "PASS  demo-agent: digest"
 run3 check "$I";                                   expect 1 "repeated activity key, spaced spelling" "declares activity_prospect more than once"
 sed 's/^catalog_repo:/catalog_repo :/' "$A3" > "$W/pkg3/agent.yaml"
 run3 check "$I";                                   expect 0 "spaced catalog_repo still reaches env_setup" "claude plugin marketplace add webspenser/agent-library"
+echo "-- round 4: control bytes, server_match, name messages"
+NU="$W/nulagent"; instance "$NU" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+{ printf 'agent: demo\000-agent\n'; grep -v '^agent:' "$I/instance.yaml"; } > "$NU/instance.yaml"
+{ printf 'name: demo\000-agent\n'; grep -v '^name:' "$A3"; } > "$W/pkg3/agent.yaml"
+run3 check "$NU";                                  expect 2 "NUL inside name: (and the same agent:) is an error" "agent.yaml line 1 has a control character (0x00)"
+cp "$A3" "$W/pkg3/agent.yaml"
+run check "$NU";                                   expect 2 "NUL in the instance agent: is an error" "instance.yaml line 1 has a control character (0x00)"
+DL="$W/delinst"; instance "$DL" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf '# note\177\n' >> "$DL/instance.yaml"
+run check "$DL";                                   expect 2 "DEL anywhere in instance.yaml is an error" "instance.yaml line 6 has a control character (0x7f)"
+sm() { # sm <dir> <printf format for the server_match line>: a custom crm adapter with a full policy
+  instance "$1" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research' 'schedule_digest: "Monday 08:00"'
+  mkdir -p "$1/custom-adapters/crm"
+  { printf '%s\n' 'capability: crm' 'provider: custom'; printf "$2"'\n'; } > "$1/custom-adapters/crm/adapter.yaml"
+  printf '%s\n' 'covers: [draft_only, no_delete]' 'deny: ["*delete*"]' > "$1/custom-adapters/crm/guard.yaml"
+}
+sm "$W/sm-us" 'server_match: good\037crm'
+run check "$W/sm-us";                              expect 1 "0x1f in server_match fails the entry" "crm: the custom adapter's adapter.yaml line 3 has a control character (0x1f)"
+expect 1 "0x1f in adapter.yaml: other entries still print" "FAIL  demo-agent: digest"
+sm "$W/sm-sp" 'server_match: "goodcrm "'
+run check "$W/sm-sp";                              expect 1 "quoted trailing space in server_match fails" "crm: the custom adapter's server_match 'goodcrm ' can never match an MCP tool name, so the guard never enforces it"
+sm "$W/sm-in" 'server_match: good crm'
+run check "$W/sm-in";                              expect 1 "space inside server_match fails" "server_match 'good crm' can never match an MCP tool name"
+sm "$W/sm-dot" 'server_match: good.crm'
+run check "$W/sm-dot";                             expect 1 "dot in server_match fails" "server_match 'good.crm' can never match an MCP tool name"
+sm "$W/sm-uc" 'server_match: GoodCRM'
+run check "$W/sm-uc";                              expect 1 "uppercase server_match fails" "server_match 'GoodCRM' can never match an MCP tool name"
+sm "$W/sm-ok" 'server_match: good-crm   # the Good CRM server'
+run check "$W/sm-ok";                              expect 0 "good-crm with a comment passes" 'custom (matches "good-crm")'
+routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "Good-CRM Prod" 2026-10-05T07:00:00Z
+run verify "$W/sm-ok" prospect "$W/r.json" --repo acme/sales;  expect 0 "verify matches connector names case-insensitively" "OK:"
+{ cat "$A3"; printf 'notes: a\tb\n'; } > "$W/pkg3/agent.yaml"
+TB="$W/tabs"; instance "$TB" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; printf 'notes: x\ty\n' >> "$TB/instance.yaml"
+printf 'agent:\tdemo-agent\n' > "$TB/instance.yaml.new"; grep -v '^agent:' "$TB/instance.yaml" >> "$TB/instance.yaml.new"; mv "$TB/instance.yaml.new" "$TB/instance.yaml"
+run3 check "$TB";                                  expect 0 "tabs inside values still work" "PASS  demo-agent: prospect (tabs)"
+{ cat "$A3"; echo 'name: other-agent'; } > "$W/pkg3/agent.yaml"
+run3 check "$I";                                   expect 2 "disagreeing name: lines are reported as ambiguous" "agent.yaml name: is ambiguous (the guard reads 'demo-agent', the validator reads 'other-agent')"
+cp "$A3" "$W/pkg3/agent.yaml"
 [ -x _template/hooks/schedule_check.py ] && _report ok "script executable" || _report no "script not executable"
 
 finish

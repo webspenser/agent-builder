@@ -41,6 +41,8 @@ WHEN = re.compile(r"^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|d
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
 CAP = re.compile(r"[a-z0-9_]+")
 PROVIDER = re.compile(r"[a-z0-9-]+")
+SERVER_MATCH = re.compile(r"[a-z0-9_-]+")  # MCP tool names hold only [A-Za-z0-9_-]; the builder requires lowercase
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL other than tab, LF, CR
 GITHUB = re.compile(r"^(?:https?://(?:[^/@\s]+@)?|ssh://git@|git@)github\.com[/:]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", re.I)
 PROMPT_TAIL = ("(unattended). Follow this agent's instructions for each activity, in order. "
                "Do not ask questions and do not edit or commit files in this repository. "
@@ -73,13 +75,24 @@ def _guard_value(raw):
     return re.sub(r"^'(.*)'$", r"\1", raw)
 
 
-def _lines(path):
-    """Lines of a file as guard.sh reads them: split on \\n only, one trailing \\r removed, BOM ignored."""
+def _read(path, guard=True):
+    """A file's text, BOM ignored. guard=True (a file guard.sh reads) rejects control characters:
+    a NUL or other C0 control byte can make sed abort, so the guard would read nothing."""
     try:
         text = path.read_bytes().decode("utf-8-sig")
     except (OSError, UnicodeDecodeError) as err:
         raise CheckError(f"cannot read {path.name}: {err}")
-    return [ln[:-1] if ln.endswith("\r") else ln for ln in text.split("\n")]
+    bad = CONTROL.search(text) if guard else None
+    if bad:
+        line = text.count("\n", 0, bad.start()) + 1
+        raise CheckError(f"{path.name} line {line} has a control character (0x{ord(bad.group()):02x}) "
+                         "the guard cannot read reliably")
+    return text
+
+
+def _lines(path, guard=True):
+    """Lines of a file as guard.sh reads them: split on \\n only, one trailing \\r removed, BOM ignored."""
+    return [ln[:-1] if ln.endswith("\r") else ln for ln in _read(path, guard).split("\n")]
 
 
 def flat_yaml(path, dups=None, guard=True):
@@ -88,7 +101,7 @@ def flat_yaml(path, dups=None, guard=True):
     guard=True reads the way guard.sh's yaml_get does (exact `key:` at line start, sed whitespace).
     guard=False (schedules.yaml) is lenient about spacing; keys seen more than once are appended to dups."""
     data = {}
-    for line in _lines(path):
+    for line in _lines(path, guard):
         if guard:
             if ":" not in line:
                 continue
@@ -111,12 +124,8 @@ def agent_yaml(path):
     """agent.yaml the way the builder's validator reads it (keys stripped, last value wins).
 
     Returns (data, keys seen more than once)."""
-    try:
-        text = path.read_bytes().decode("utf-8-sig")
-    except (OSError, UnicodeDecodeError) as err:
-        raise CheckError(f"cannot read {path.name}: {err}")
     data, dups = {}, []
-    for line in text.splitlines():
+    for line in _read(path).splitlines():
         if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
             continue
         key, value = line.split(":", 1)
@@ -168,7 +177,10 @@ def adapter(instance, cap, provider):
     folder = instance / "custom-adapters" / cap if provider == "custom" else ROOT / "capabilities" / cap / "adapters" / provider
     if not (folder / "adapter.yaml").is_file():
         raise CheckError(f"no adapter.yaml for {provider}")
-    return folder, flat_yaml(folder / "adapter.yaml")
+    try:
+        return folder, flat_yaml(folder / "adapter.yaml")
+    except CheckError as err:
+        raise CheckError(f"the {provider} adapter's {err}")
 
 
 def covers(folder):
@@ -204,8 +216,11 @@ def expected(instance, repo=None):
     """Everything check reports, as a dict."""
     meta, agent_dups = agent_yaml(ROOT / "agent.yaml")
     strict_name = flat_yaml(ROOT / "agent.yaml").get("name", "")
-    if not strict_name or strict_name != meta.get("name"):
+    if not strict_name:
         raise CheckError("agent.yaml has no name: line the guard can read")
+    if strict_name != meta.get("name"):
+        raise CheckError(f"agent.yaml name: is ambiguous (the guard reads {strict_name!r}, "
+                         f"the validator reads {meta.get('name', '')!r})")
     inst = flat_yaml(instance / "instance.yaml")
     if not inst.get("agent"):
         raise CheckError("instance.yaml has no agent: line the guard can read")
@@ -273,10 +288,14 @@ def expected(instance, repo=None):
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
                     continue
-                match = ay.get("server_match", "").strip().lower()
+                match = ay.get("server_match", "")  # exactly what yaml_get returns; no further trimming
                 if not match:
                     entry["problems"].append(
                         f"{cap}: the {provider} adapter has no server_match, so the guard never enforces it")
+                elif not SERVER_MATCH.fullmatch(match):
+                    entry["problems"].append(
+                        f"{cap}: the {provider} adapter's server_match {match!r} can never match an MCP tool name, "
+                        "so the guard never enforces it")
                 for inv in invs:
                     if inv not in covered:
                         entry["problems"].append(
