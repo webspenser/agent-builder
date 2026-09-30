@@ -36,14 +36,14 @@ skeleton is `_capability-template/` in the same root. The validator is
    `cp -R "<template>/." "<target>/"` (the `/.` form also copies the
    hidden `.claude-plugin/` and `.codex-plugin/` folders). Set
    `agent.yaml`: `name`, `version: 0.1.0`, one-sentence `description`,
-   `standard: "2.0"`. Set the same name, version, and description in
+   `standard: "2.1"`. Set the same name, version, and description in
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
    (its `name` and its single entry), `gemini-extension.json`, and
    `.codex-plugin/plugin.json`; set the marketplace `owner.name` to the
    publisher the user named in step 3. Set the title in `AGENT.md` and the
    three `adapters/` files to the agent's display name.
-   Keep `hooks/` exactly as copied — three scripts, which the validator
-   checks byte for byte.
+   Keep `hooks/` exactly as copied — four scripts, which the validator
+   checks byte for byte. Keep the `schedule` skill as copied.
 5. **Specification, section by section.** For each, ask, draft,
    confirm, write:
    - Identity and Mission — a role a person could hold; one outcome.
@@ -79,6 +79,15 @@ skeleton is `_capability-template/` in the same root. The validator is
      "*forward*"]` plus an `allow` list of the tools the adapter uses.
      Confirm in `adapter.md` that the provider has no other way to
      send.
+   - Schedules — which Workflow steps may run on a schedule. For each,
+     add `activity_<name>: <capabilities or none>` to `agent.yaml` and
+     make the step's instructions work unattended under the scheduled
+     prompt (no questions; stop and report when an input is missing;
+     write only to connected systems). Every capability an activity uses
+     must be fully covered by guard policies, or the schedule gate
+     refuses it. Set `catalog` and `catalog_repo` in `agent.yaml`: the
+     cloud environment installs the agent from its catalog. If there are any, the interview
+     must write `schedules.yaml` (`timezone`, `schedule_<activity>`).
    - Operating rules — numbered, about how it works.
    - Workflow — ordered steps, each tagged T1, T2, or T3; no critical
      step may need T1.

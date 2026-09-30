@@ -59,7 +59,9 @@ skill, if this agent has one.
    Create `context/samples/` in the instance: the user's own examples
    go there (the package's `samples/` holds only the examples the
    agent ships with). Then run the `<interview-skill>` skill, if this
-   agent has one, to fill the copied files with the user.
+   agent has one, to fill the copied files with the user. The interview
+   also writes `schedules.yaml` at the instance root (timezone and
+   `schedule_*` lines) when the agent declares activities.
 9. **Tools.** Skip if `agent.yaml` lists no `capabilities`. For each
    capability listed there:
    1. List the shipped adapters (`capabilities/<capability>/adapters/`
@@ -98,6 +100,9 @@ skill, if this agent has one.
       whether the adapter's guard policy covers it. A capability is
       **unattended-safe** when every invariant is covered. Scheduled
       runs may use only unattended-safe capabilities.
+   8. If the agent declares activities (`activity_*` in `agent.yaml`)
+      and the interview wrote `schedule_*` lines to `schedules.yaml`,
+      offer to run the `schedule` skill next.
 10. **Version control.** Offer `git init` and a first commit, in a
    private repository. Remind the user that credentials belong in the
    host (connectors, MCP settings, environment variables), never in

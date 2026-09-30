@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "2.0"
+CURRENT_STANDARD = "2.1"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -31,6 +31,9 @@ TEMPLATE_HOOKS = pathlib.Path(__file__).resolve().parents[2] / "_template" / "ho
 REFERENCE_HOOK = TEMPLATE_HOOKS / "session-start.sh"
 REFERENCE_GUARD = TEMPLATE_HOOKS / "guard.sh"
 REFERENCE_POLICY = TEMPLATE_HOOKS / "guard_policy.py"
+REFERENCE_SCHEDULE = TEMPLATE_HOOKS / "schedule_check.py"
+ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+SERVER_MATCH = re.compile(r"^[a-z0-9_-]+$")
 ADAPTER_KEYS = ("capability", "provider", "server_match")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
@@ -238,6 +241,8 @@ def check_adapter(adir, cap, ops, invariants):
             fails.append(f"{rel}: server_match must be a plain value, not a YAML list")
         elif not match:
             fails.append(f"{rel}: missing server_match")
+        elif not SERVER_MATCH.fullmatch(match):
+            fails.append(f"{rel}: server_match must be lowercase letters, digits, _ or - (the guard compares it to MCP tool names)")
     if "adapter.md" in texts:
         rel = f"{prefix}/adapter.md"
         for op in ops:
@@ -298,6 +303,42 @@ def check_capability(root, cap):
     return fails
 
 
+def check_activities(root, meta, caps):
+    """activity_<name>: capabilities (or none); a schedule skill when any exist."""
+    fails = []
+    acts = {k[len("activity_"):]: v for k, v in meta.items() if k.startswith("activity_")}
+    try:
+        raw = read_text(root / "agent.yaml").splitlines()
+    except ReadError:
+        raw = []  # already reported
+    seen = set()
+    for line in raw:  # the same lines parse_agent_yaml reads: top-level keys only
+        if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
+            continue
+        key = line.split(":", 1)[0].strip()
+        if not key.startswith("activity_"):
+            continue
+        if key in seen:
+            fails.append(f"agent.yaml: {key} is declared more than once")
+        seen.add(key)
+    if acts and not (meta.get("catalog") and meta.get("catalog_repo")):
+        fails.append("agent.yaml: activities need catalog and catalog_repo (the cloud environment installs the agent from its catalog)")
+    for act, value in sorted(acts.items()):
+        if not ACTIVITY.match(act):
+            fails.append(f"agent.yaml: activity '{act}' is not kebab-case")
+        names = [c.strip() for c in value.split(",") if c.strip()]
+        if not names:
+            fails.append(f"agent.yaml: activity_{act} lists no capabilities (use none)")
+        if "none" in names and len(names) > 1:
+            fails.append(f"agent.yaml: activity_{act} mixes none with capabilities")
+        for cap in names:
+            if cap != "none" and cap not in caps:
+                fails.append(f"agent.yaml: activity_{act} uses {cap}, which is not in capabilities")
+    if acts and not (root / "skills" / "schedule" / "SKILL.md").is_file():
+        fails.append("missing skills/schedule/SKILL.md (agent.yaml declares activities)")
+    return fails
+
+
 def check_tools(root, meta):
     """Guard hook and engine, capability contracts, adapters, guard policies."""
     fails = []
@@ -309,7 +350,9 @@ def check_tools(root, meta):
         fails.append(f"hooks/hooks.json: needs a PreToolUse command hook {GUARD_COMMAND} with matcher {GUARD_MATCHER}")
     fails.extend(check_reference_script(root, "hooks/guard.sh", REFERENCE_GUARD))
     fails.extend(check_reference_script(root, "hooks/guard_policy.py", REFERENCE_POLICY))
+    fails.extend(check_reference_script(root, "hooks/schedule_check.py", REFERENCE_SCHEDULE))
     caps = [c.strip() for c in meta.get("capabilities", "").split(",") if c.strip()]
+    fails.extend(check_activities(root, meta, caps))
     for cap in caps:
         if not SNAKE.match(cap):
             fails.append(f"agent.yaml: capability '{cap}' is not snake_case")

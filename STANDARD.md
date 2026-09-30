@@ -1,4 +1,4 @@
-# Agent Standard 2.0
+# Agent Standard 2.1
 
 An agent specification is a directory of provider-neutral markdown with a
 single source of truth: one `AGENT.md`, one set of skills, one set of
@@ -11,7 +11,7 @@ bug.
 
 ## Development phase
 
-The standard is 2.0. The validator checks only the current version: an
+The standard is 2.1. The validator checks only the current version: an
 agent that declares another version fails with a message to update it.
 Breaking changes are allowed, and every Webspenser agent is updated in
 the same release as the builder. Compatibility rules will return when
@@ -27,10 +27,11 @@ agent-builder/
   _template/                # empty skeleton, copy to start an agent
   <agent-name>/
     agent.yaml              # identity + standard version
-    hooks/                  # hooks.json and three scripts, from _template
+    hooks/                  # hooks.json and four scripts, from _template
       session-start.sh      # entry hook
       guard.sh              # PreToolUse guard
       guard_policy.py       # guard policy engine
+      schedule_check.py     # schedule gate and routine verifier
     migrations/             # <from>-<to>.md upgrade notes
     capabilities/           # optional, one folder per capability
       <capability>/
@@ -53,6 +54,7 @@ agent-builder/
       <skill-name>/
         SKILL.md            # frontmatter + procedure
         references/         # optional deep-dive files, loaded on demand
+      schedule/             # required when agent.yaml declares activities
     subagents/
       <role-name>.md        # role contract
     templates/              # blank fill-in artifacts the agent PRODUCES
@@ -229,7 +231,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "2.0"                # the Agent Standard version followed
+standard: "2.1"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -287,7 +289,9 @@ the package's `samples/` holds only the examples the agent ships with.
 `templates/`, `samples/`, `skills/`, `subagents/`, and `migrations/`
 mean the package's files. Package paths are read-only in plugin mode:
 write only into the instance. In source mode the package folder is the
-instance (`instance.yaml` with `mode: source` at its root).
+instance (`instance.yaml` with `mode: source` at its root). An agent
+with activities also gets `schedules.yaml` at the instance root (see
+Activities and schedules).
 
 ## Entry hook
 
@@ -563,6 +567,166 @@ Setup's tools step binds each capability:
   A capability is unattended-safe when every invariant is covered.
   Scheduled runs may use only unattended-safe capabilities.
 
+## Activities and schedules
+
+An activity is a Workflow step that can run on a schedule with nobody at
+the keyboard. `agent.yaml` declares each one with a flat key naming the
+capabilities it uses:
+
+```yaml
+activity_prospect: crm
+activity_digest: crm, email_drafts
+activity_research: none
+```
+
+Activity names are kebab-case. A value is `none` or a comma-separated
+list of names from `capabilities`. An agent with any `activity_*` key
+must ship `skills/schedule/SKILL.md`, must set `catalog` and
+`catalog_repo` (the cloud environment installs the agent from its
+catalog), and must write each activity's instructions so it runs to its
+stop conditions unattended. An activity whose capabilities are not all
+covered by guard policies is refused by the gate. An empty
+`activity_x:` fails validation; write `none`.
+
+### schedules.yaml
+
+The instance holds `schedules.yaml` at its root, as flat keys:
+
+```yaml
+timezone: America/New_York
+environment: env_01...
+schedule_prospect: "Monday 07:00"
+then_prospect: prepare
+schedule_digest: "Monday 08:00"
+routine_digest: trig_01...
+```
+
+- `timezone`: an IANA name.
+- `environment` (optional): the id of the cloud environment the
+  agent's routines use, `env_` then letters and digits. The schedule
+  skill writes it after the user confirms the id `verify` reports.
+- `schedule_<activity>`: a weekday or `daily`, then a 24-hour time, in
+  that timezone.
+- `then_<activity>` (optional): activities to run after it in the same
+  session, comma-separated.
+- `routine_<activity>`: the routine's ID, written by the schedule skill
+  after it verifies the routine.
+
+Every activity named must be an `activity_*` in `agent.yaml`. The
+interview writes `timezone`, `schedule_*`, and `then_*`; nothing else in
+the instance declares schedules. A repeated `schedule_`, `then_`, or
+`activity_` key is an error.
+
+### Scheduled runs
+
+A scheduled run is a Claude cloud routine. Each run clones the
+instance's GitHub repository, so the instance folder must be the root of
+that repository. The routine's prompt is exactly:
+
+> Scheduled run of `<activity>`[, then `<next>`, ...] (unattended).
+> Follow this agent's instructions for each activity, in order. Do not
+> ask questions and do not edit or commit files in this repository. If
+> something needs the operator, stop and say exactly what.
+
+Under this prompt a run may not ask questions and may not edit or commit
+instance files. It records its work in the connected systems only, and
+stops and reports when an input is missing.
+
+Routines do not load plugins from the repository, so the agent comes
+from a cloud environment. The user keeps one environment per account
+(suggested name `webspenser-agents`) whose setup script holds, for each
+agent, a version comment and two install lines:
+
+```bash
+# sales-partner 2.1.0
+claude plugin marketplace add webspenser/agent-library
+claude plugin install sales-partner@webspenser
+```
+
+Changing the version comment when the agent is updated makes the
+environment reinstall it. Every routine for the agent uses that
+environment; any other environment does not load the agent or its
+guard. The guard does nothing outside an instance, so sharing the
+environment between agents is safe.
+
+A source-mode instance already carries the agent and its guard as a
+repository-level hook (setup's tools step), so its routine runs load
+both from the cloned repository and the setup script needs no install
+lines for it.
+
+### The unattended gate
+
+An entry may be scheduled only if it passes the gate. For the entry's
+activity and its `then` activities, every capability used must be
+bound, and every invariant of each capability's contract must be in the
+bound adapter's `guard.yaml` `covers`. The gate also fails an entry when:
+
+- `agent.yaml` has no `catalog` or `catalog_repo`;
+- a bound adapter has no `server_match`, or one outside `[a-z0-9_-]+`;
+- a capability has more than one `bind_` line, or a `bind_` line the
+  guard cannot read;
+- an `adapter.yaml` it uses holds control characters;
+- an `activity_`, `schedule_`, or `then_` key is repeated;
+- `schedules.yaml` has an `environment` that is not `env_` then letters
+  and digits;
+- the time is not `<weekday|daily> HH:MM`.
+
+A `routine_<activity>` line with no `schedule_<activity>` also fails
+the check: that routine still runs without the gate, so the checker
+names it for the user to disable or delete.
+
+Some problems stop the whole check with an error (exit 2) instead of
+failing one entry, for example: a timezone that is not an IANA name,
+a missing or empty `schedules.yaml`, an `agent` in `instance.yaml` that
+is not the `name` in `agent.yaml`, and control characters in
+`agent.yaml` or `instance.yaml`.
+
+### The schedule skill
+
+`skills/schedule/SKILL.md` is generic and shipped in `_template`. It:
+
+1. checks that `schedules.yaml` has entries;
+2. checks that the instance folder is the root of a clean GitHub
+   repository, on its default branch (routines clone that branch), in
+   step with `origin`, with `instance.yaml`, `schedules.yaml`,
+   `context/`, and `bindings/` committed;
+3. runs the gate and refuses failing entries;
+4. tells the user what to put in the environment's setup script;
+5. prints the routine's name, repository, environment, connectors,
+   schedule (with the UTC cron), and prompt for the user to create in
+   the web UI;
+6. verifies the routine the user created against the routines API and
+   records `routine_<activity>`;
+7. optionally does a smoke run and reads its log;
+8. on later runs, re-checks everything and names routines the user must
+   disable or delete.
+
+It never creates or deletes routines. The gate runs only when the
+schedule skill runs: after changing bindings, `schedules.yaml`, the
+agent version, or the environment, re-run the skill.
+
+### hooks/schedule_check.py
+
+The skill's checker is `hooks/schedule_check.py`, byte-identical in
+every agent and executable. It needs only `python3`.
+
+- `schedule_check.py check <instance> [--repo owner/name] [--json]`
+  applies the gate to every `schedule_` entry and prints `PASS` or
+  `FAIL` for each, with the routine name, schedule, UTC cron, connectors
+  (each as its provider and the `server_match` text a connector's name
+  must contain), the prompt, and the environment setup script. It exits
+  0 when every entry passes and no `routine_` line lacks its schedule.
+- `schedule_check.py verify <instance> <activity> <routine.json>
+  [--repo owner/name]` compares the routines API's JSON for a routine
+  with what `check` expects (exactly one repository source, and it is
+  this repository; enabled; exact prompt; a connector per bound
+  capability and no connector that matches no bound `server_match`;
+  next run time; the cloud environment) and prints one `MISMATCH` line
+  per difference, or `OK`. Without `--repo` only the repository name is
+  compared. The routine's `environment_id` must equal `environment` in
+  `schedules.yaml`; when `schedules.yaml` has none, `verify` names the
+  routine's environment and asks the user to confirm it and record it.
+
 ## Validation
 
 ```bash
@@ -578,14 +742,14 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"2.0"`.
+- `agent.yaml` exists, and its `standard` is `"2.1"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
   `"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"` (quoted).
-- `hooks/session-start.sh`, `hooks/guard.sh`, and
-  `hooks/guard_policy.py` exist, are executable, and are byte-identical
-  to the builder's `_template/hooks/` copies.
+- `hooks/session-start.sh`, `hooks/guard.sh`, `hooks/guard_policy.py`,
+  and `hooks/schedule_check.py` exist, are executable, and are
+  byte-identical to the builder's `_template/hooks/` copies.
 - Each name in `capabilities` is `snake_case`, and
   `capabilities/<name>/contract.md` exists with a `## Operations` table
   holding at least one backticked operation and a `## Invariants` list
@@ -594,7 +758,8 @@ The validator checks:
 - Each adapter folder name is kebab-case and has `adapter.md` and
   `adapter.yaml`; `adapter.yaml` has exactly `capability`, `provider`,
   and `server_match` as plain values (no lists); `capability` and
-  `provider` equal the folder names.
+  `provider` equal the folder names; `server_match` uses only lowercase
+  letters, digits, `_`, and `-`.
 - `guard.yaml`, when present, parses with the engine's parser (the
   validator imports the template's `guard_policy.py`), and every
   `covers` id is a contract invariant.
@@ -603,3 +768,7 @@ The validator checks:
 - `adapter.md` mentions every operation in backticks and has a
   `## Probe` section.
 - A `capabilities/` folder not listed in `capabilities` fails.
+- Each `activity_<name>` key in `agent.yaml` has a kebab-case name and
+  is declared once; its value is `none` or names only listed
+  capabilities, and does not mix `none` with capabilities.
+- An agent with any `activity_*` key ships `skills/schedule/SKILL.md`.

@@ -68,3 +68,21 @@ policy with `python3 hooks/guard_policy.py --check guard.yaml`.
 
 The user binds each capability to their own system in `instance.yaml`
 (`bind_crm: attio`) during setup. `STANDARD.md` has the details.
+
+## Schedules
+
+Some steps can run with nobody at the keyboard, such as a weekly
+prospecting run. Declare each one in `agent.yaml` as
+`activity_<name>: <capabilities or none>` and write its instructions so
+it runs to its stop conditions under the scheduled prompt: no
+questions, no edits to instance files, work recorded in connected
+systems only, and a clear stop-and-report when an input is missing.
+
+The user's schedule lives in the instance's `schedules.yaml`
+(`timezone` and `schedule_<activity>` lines), written by the interview.
+The `schedule` skill, shipped in the template, checks that every
+capability an activity uses is covered by guard policies, then tells the
+user what to create as Claude cloud routines and verifies the result.
+Routines get the agent from a cloud environment's setup script, so the
+user updates that script's version comment whenever the agent changes.
+
