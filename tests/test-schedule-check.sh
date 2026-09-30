@@ -208,6 +208,25 @@ rj "$W/r.json" 'r["next_run_at"] = "9999-12-31T23:59:00-12:00"'
 run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "overflowing next_run_at is a mismatch" "no readable next_run_at"
 rj "$W/r.json" 'r["enabled"] = "false"'
 run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "string enabled is not enabled" "the routine is not enabled"
+echo "-- round 3: agent.yaml name and activities"
+mkdir -p "$W/pkg3/hooks"; cp "$PKG/hooks/"*.py "$W/pkg3/hooks/"; cp -R "$PKG/capabilities" "$W/pkg3/"
+run3() { OUT=$(python3 -B "$W/pkg3/hooks/schedule_check.py" "$@" 2>&1); RC=$?; }
+A3="$W/agent-good.yaml"; cp "$PKG/agent.yaml" "$A3"
+sed 's/^name:/name :/' "$A3" > "$W/pkg3/agent.yaml"
+NA="$W/noagent"; instance "$NA" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; sed -i.bak '/^agent:/d' "$NA/instance.yaml"
+run3 check "$NA";                                  expect 2 "spaced name: with no instance agent: line" "agent.yaml has no name: line the guard can read"
+{ printf '# x\rname: demo-agent\n'; grep -v '^name:' "$A3"; } > "$W/pkg3/agent.yaml"
+run3 check "$NA";                                  expect 2 "CR-hidden name: line" "agent.yaml has no name: line the guard can read"
+cp "$A3" "$W/pkg3/agent.yaml"
+EA="$W/emptyagent"; instance "$EA" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'; sed -i.bak 's/^agent: .*/agent:/' "$EA/instance.yaml"
+run3 check "$EA";                                  expect 2 "empty agent: line" "instance.yaml has no agent: line the guard can read"
+{ cat "$A3"; echo 'activity_prospect: crm'; } > "$W/pkg3/agent.yaml"
+run3 check "$I";                                   expect 1 "repeated activity key fails entries using it" "agent.yaml declares activity_prospect more than once"
+expect 1 "unaffected entry still passes" "PASS  demo-agent: digest"
+{ cat "$A3"; echo 'activity_prospect : crm'; } > "$W/pkg3/agent.yaml"
+run3 check "$I";                                   expect 1 "repeated activity key, spaced spelling" "declares activity_prospect more than once"
+sed 's/^catalog_repo:/catalog_repo :/' "$A3" > "$W/pkg3/agent.yaml"
+run3 check "$I";                                   expect 0 "spaced catalog_repo still reaches env_setup" "claude plugin marketplace add webspenser/agent-library"
 [ -x _template/hooks/schedule_check.py ] && _report ok "script executable" || _report no "script not executable"
 
 finish

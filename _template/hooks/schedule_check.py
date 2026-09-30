@@ -107,6 +107,26 @@ def flat_yaml(path, dups=None, guard=True):
     return data
 
 
+def agent_yaml(path):
+    """agent.yaml the way the builder's validator reads it (keys stripped, last value wins).
+
+    Returns (data, keys seen more than once)."""
+    try:
+        text = path.read_bytes().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError) as err:
+        raise CheckError(f"cannot read {path.name}: {err}")
+    data, dups = {}, []
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        if key in data and key not in dups:
+            dups.append(key)
+        data[key] = _value(value)
+    return data, dups
+
+
 def bindings(instance):
     """({cap: [provider, ...]}, unreadable line or None), read the way hooks/guard.sh reads bind_ lines."""
     bound, bad = {}, None
@@ -182,8 +202,13 @@ def default_repo(instance, repo=None):
 
 def expected(instance, repo=None):
     """Everything check reports, as a dict."""
-    meta = flat_yaml(ROOT / "agent.yaml")
+    meta, agent_dups = agent_yaml(ROOT / "agent.yaml")
+    strict_name = flat_yaml(ROOT / "agent.yaml").get("name", "")
+    if not strict_name or strict_name != meta.get("name"):
+        raise CheckError("agent.yaml has no name: line the guard can read")
     inst = flat_yaml(instance / "instance.yaml")
+    if not inst.get("agent"):
+        raise CheckError("instance.yaml has no agent: line the guard can read")
     if inst.get("agent") != meta.get("name"):
         raise CheckError(f"instance.yaml agent {inst.get('agent')!r} is not {meta.get('name')!r}")
     bound, bad_line = bindings(instance)
@@ -219,6 +244,8 @@ def expected(instance, repo=None):
         for a in chain:
             if a not in activities:
                 entry["problems"].append(f"{a} is not an activity of {name} (agent.yaml activity_*)")
+            elif f"activity_{a}" in agent_dups:
+                entry["problems"].append(f"agent.yaml declares activity_{a} more than once")
         if not WHEN.match(entry["schedule"].strip()):
             entry["problems"].append(f"schedule {entry['schedule']!r} is not '<weekday|daily> HH:MM'")
         caps = []
