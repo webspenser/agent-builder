@@ -715,7 +715,7 @@ every agent and executable. It needs only `python3`.
   `FAIL` for each, with the routine name, schedule, UTC cron, connectors
   (each as its provider and the `server_match` text a connector's name
   must contain), the prompt, and the environment setup script. It exits
-  0 when every entry passes.
+  0 when every entry passes and no `routine_` line lacks its schedule.
 - `schedule_check.py verify <instance> <activity> <routine.json>
   [--repo owner/name]` compares the routines API's JSON for a routine
   with what `check` expects (exactly one repository source, and it is
