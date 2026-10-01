@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.2.
+Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.3.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
@@ -200,7 +200,7 @@ flowchart TD
   A -- yes --> M{"mode: source?"}
   M -- yes --> Q2["print nothing<br/>(host files load AGENT.md)"]
   M -- no --> H["print header: # Agent: name version,<br/>instance and package folders"]
-  H --> L["load AGENT.md"]
+  H --> L["load AGENT.md (inline up to 9000 bytes, else a pointer)"]
 ```
 
 Nothing at run time compares versions. The guard looks at bindings and
@@ -455,7 +455,6 @@ These are still open. Everything else that used to be on this list is done.
   they get install lines they don't need.
 - **Airtable without field IDs.** A binding with no field IDs passes the
   schedule gate but blocks every write.
-
 - **Catalog version pinning before go-live.** When the setup script's
   cache refreshes, the cloud environment installs the latest catalog
   version. Nothing pins a version yet, so a client could get a new
