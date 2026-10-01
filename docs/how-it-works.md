@@ -214,7 +214,11 @@ flowchart TD
   MC -- no --> OK["allow<br/>(normal permission flow)"]
   MC -- yes --> I{"instance of this agent<br/>found above the folder?"}
   I -- no --> OK
-  I -- yes --> B["for each bind_ line in instance.yaml"]
+  I -- yes --> AP{"guard.yaml at the<br/>package root?"}
+  AP -- no --> B["for each bind_ line in instance.yaml"]
+  AP -- yes --> AE["guard_policy.py --agent:<br/>tool name matches a deny glob?<br/>(any server, bound or not)"]
+  AE -- yes --> BL4["BLOCK: Blocked by … agent guard policy"]
+  AE -- no --> B
   B --> R{"line readable?<br/>cap a-z0-9_, provider a-z0-9-"}
   R -- no --> BL["BLOCK: fail closed"]
   R -- yes --> AD["find tool: package's, or<br/>custom-tools/cap for custom"]
@@ -342,9 +346,9 @@ like a shipped tool. They read its `identity.yaml` and `guard.yaml` from
 `custom-tools/<cap>/`. If its `guard.yaml` doesn't cover every invariant,
 the capability isn't unattended-safe, so its activities can't be scheduled.
 For email, setup and `add-tool` refuse to bind it unless `no_send` is
-covered. The guard doesn't re-check this at call time: it can't see the
-contract, so hand-edited files that skip it are a known gap (see "Guard
-policy" in the Agent Standard). If a
+covered. At call time the agent guard policy's deny list (the
+package-root `guard.yaml`) covers a custom email tool too, whatever its
+own files say. If a
 bound tool has no `identity.yaml`, the guard blocks every connector call
 until it is fixed.
 

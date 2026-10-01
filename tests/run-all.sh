@@ -55,6 +55,9 @@ if grep -rnE 'create_tools|update_tools|values_at' STANDARD.md README.md docs/ho
   echo "FAIL: old guard keys still mentioned"; STATUS=1; fi
 if grep -rnE 'export [A-Z_]*(TOKEN|KEY)=' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
   echo "FAIL: a key is set with export VAR=..., which lands in shell history; use read -rs VAR && export VAR"; STATUS=1; fi
+if grep -rnE 'binding_id|known gap' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
+  echo "FAIL: binding_id or the old known gap is still mentioned"; STATUS=1; fi
+grep -qF 'guard_policy.py --agent' docs/how-it-works.md || { echo "FAIL: how-it-works guard flowchart lacks the agent policy step"; STATUS=1; }
 grep -qF 'validate@main' README.md || { echo "FAIL: README does not use validate@main"; STATUS=1; }
 
 [ "$STATUS" -eq 0 ] && echo "ALL GREEN" || echo "FAILURES ABOVE"
