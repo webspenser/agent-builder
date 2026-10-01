@@ -445,6 +445,17 @@ Everything else is left to the agent's instructions.
 
 These are still open. Everything else that used to be on this list is done.
 
+- **Routine times and time zones.** The routine form uses the browser's
+  time zone and stores a fixed UTC cron. The schedule skill should give
+  times in the user's own zone.
+- **Exact times.** The routine form suggests times just off the hour, but
+  `verify` compares exact times. Decide whether to allow a margin or keep
+  the rule "use the exact time".
+- **Source-mode instances** still need the `catalog` keys to schedule, and
+  they get install lines they don't need.
+- **Airtable without field IDs.** A binding with no field IDs passes the
+  schedule gate but blocks every write.
+
 - **Catalog version pinning before go-live.** When the setup script's
   cache refreshes, the cloud environment installs the latest catalog
   version. Nothing pins a version yet, so a client could get a new
