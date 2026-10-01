@@ -104,7 +104,11 @@ skill, if this agent has one.
       guarded call.
    4. If the contract has a `no_send` invariant and the tool's
       `guard.yaml` does not list it in `covers`, refuse to bind it and
-      say why.
+      say why. If the tool leaves an invariant uncovered that the
+      contract marks `(acceptable)`, explain in plain words what the
+      guard will not enforce and what could happen, and add it to
+      `accept_instruction_only:` in `instance.yaml` only after the user
+      agrees. Never add an invariant the contract does not mark.
    5. Add `bind_<capability>: <provider>` (or `custom`) to
       `instance.yaml`, replacing an earlier line for that capability.
    6. Source mode only: merge into `.claude/settings.json` a
