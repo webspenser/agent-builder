@@ -516,10 +516,12 @@ wrapped in an **n8n workflow**:
   token is pasted into the workflow.
 
 n8n also offers instance-level MCP access, which exposes generic tools
-that run or build *any* workflow (`execute_workflow`,
-`create_workflow_from_code`, …). Those would route around every tool
-policy, so an agent with a wrapped tool must deny them in its root
-`guard.yaml`; the validator checks it.
+that run, test, build or restore *any* workflow (`execute_workflow`,
+`test_workflow`, `create_workflow_from_code`, `restore_workflow_version`,
+…). Those would route around every tool policy, so an agent with a
+wrapped tool must deny them in its root `guard.yaml`. The validator
+checks it for shipped tools, and the schedule check for any bound
+wrapped tool, a client's own custom tool included.
 
 ## Known limits and open questions
 

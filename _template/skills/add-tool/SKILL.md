@@ -51,9 +51,10 @@ with `python3`.
    export as `workflow.n8n.json` in the tool folder, add `wrapper: n8n` to
    `identity.yaml`, and ask the user to connect the trigger's URL as a
    connector whose name contains `server_match`. Remind them that the
-   agent's root `guard.yaml` must deny `*execute_workflow*`,
-   `*create_workflow*`, `*update_workflow*`, `*archive_workflow*` and
-   `*publish_workflow*`.
+   agent's root `guard.yaml` must deny n8n's instance-level tools that run
+   or rebuild any workflow (for example `"*_workflow*"` and
+   `"*restore_workflow*"`); `tool_check.py` and the validator name any it
+   misses.
 4. **`identity.yaml`.** Write three lines: `capability: <cap>`,
    `provider: <tool>` (or `provider: custom` for the instance target),
    and `server_match: <text>`; add `wrapper: n8n` for a wrapped tool.

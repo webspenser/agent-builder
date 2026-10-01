@@ -75,6 +75,16 @@ printf '%s\n' 'accept_instruction_only: no_delete' >> "$HD/instance.yaml"
 run check "$HD";  expect 1 "accepted for one contract, unmarked in another: that one fails" "email_drafts: no_delete is listed in accept_instruction_only, but the contract does not mark it (acceptable)"
 cp "$W/mail-contract.bak" "$PKG/capabilities/email_drafts/contract.md"
 cp "$W/crm-contract.bak" "$PKG/capabilities/crm/contract.md"
+CW="$W/customwrap"; instance "$CW" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+mkdir -p "$CW/custom-tools/crm"; printf '%s\n' 'capability: crm' 'provider: custom' 'server_match: goodcrm' 'wrapper: n8n' > "$CW/custom-tools/crm/identity.yaml"
+cusage "$CW"; printf '%s\n' 'Calls goodcrm:get.' >> "$CW/custom-tools/crm/usage.md"; cp "$PKG/capabilities/crm/tools/good/guard.yaml" "$CW/custom-tools/crm/"
+python3 - "$CW/custom-tools/crm/workflow.n8n.json" <<'PY'
+import json, sys
+nodes = [{"name": "MCP", "type": "@n8n/n8n-nodes-langchain.mcpTrigger", "parameters": {"authentication": "bearerAuth"}},
+         {"name": "get", "type": "n8n-nodes-base.httpRequestTool", "parameters": {"method": "GET", "url": "https://api.example.com"}}]
+json.dump({"nodes": nodes, "connections": {"get": {"ai_tool": [[{"node": "MCP", "type": "ai_tool", "index": 0}]]}}}, open(sys.argv[1], "w"))
+PY
+run check "$CW"; expect 1 "wrapped custom tool needs the dispatcher denies" "crm: the custom tool is wrapped in n8n, so the agent guard policy must deny execute_workflow"
 N="$W/nomail"; instance "$N" good - 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'schedule_digest: "Monday 08:00"'
 run check "$N";                                    expect 1 "unbound capability fails its entry" "email_drafts is not bound"
 expect 1 "other entry still passes" "PASS  demo-agent: prospect (nomail)"

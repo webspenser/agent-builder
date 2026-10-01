@@ -436,8 +436,11 @@ Rules, each checked by `tool_check.py`:
   `ai_tool` connection. At least one: `exposes no tools`. Each is named
   in snake_case, because the node name is the MCP tool name: `tool node
   '<name>' must be named in snake_case`.
-- A tool never lets the caller set its `url` or `method` (no `$fromAI`
-  there): `tool <name> lets the caller set its url`.
+- A tool never lets the caller set its URL, method or request body: no
+  `$fromAI` (any case) in any parameter whose name ends in `url` or is
+  `method`, `jsonBody` or `body`, at any depth, and no `{placeholder}` in
+  a URL: `tool <name> lets the caller set its <parameter path>`. Named
+  fields the caller fills (a body parameter's `value`) are fine.
 - The tools and `usage.md` agree both ways: each tool appears in
   `usage.md` as `<server_match>:<tool>`, and each `<server_match>:<name>`
   in `usage.md` is a tool: `tool <name> is not mapped in usage.md as
@@ -445,12 +448,17 @@ Rules, each checked by `tool_check.py`:
   of the workflow's MCP Server Trigger``.
 - No literal bearer token anywhere in the workflow: `holds a literal
   bearer token; keep secrets in n8n credentials`.
+- Every node has a text name: `every node needs a text name`.
 
 Use one workflow per system and a per-workflow MCP Server Trigger only.
 n8n's instance-level MCP access exposes generic tools that run or build
-any workflow (`execute_workflow`, `create_workflow_from_code`, …), which
-would bypass every tool policy, so an agent with a wrapped tool must
-deny them in its agent guard policy (see Validation).
+any workflow (`execute_workflow`, `create_workflow_from_code`, `update_workflow`, `archive_workflow`, `publish_workflow`, `unpublish_workflow`, `test_workflow` and `restore_workflow_version`), which would bypass every tool policy, so an
+agent with a wrapped tool must deny every one of them in its agent guard
+policy; a broad pattern such as `"*_workflow*"` counts. The validator
+checks the package's wrapped tools, and the schedule gate fails an entry
+whose bound tool (an instance's custom tool included) is wrapped while
+the agent guard policy misses one: `the <provider> tool is wrapped in
+n8n, so the agent guard policy must deny <tool>`.
 
 The host connects to the trigger's URL with its secret: Claude Code
 sends it as a header in the MCP config; for a claude.ai connector used
@@ -1026,9 +1034,10 @@ The validator checks:
   `guard.yaml` covering `no_send` when the contract has it.
 - A `guard.yaml` at the package root parses as an agent guard policy.
   When any contract has `no_send`, it must exist and its `covers` must
-  include `no_send`. When any tool says `wrapper: n8n`, its `deny` must
-  include `*execute_workflow*`, `*create_workflow*`, `*update_workflow*`,
-  `*archive_workflow*` and `*publish_workflow*` (compared ignoring case).
+  include `no_send`. When any tool says `wrapper: n8n`, its `deny`
+  patterns must match each of `execute_workflow`, `create_workflow_from_code`, `update_workflow`, `archive_workflow`, `publish_workflow`, `unpublish_workflow`, `test_workflow` and `restore_workflow_version` (ignoring case; a broad pattern
+  counts): `<tool folder> is wrapped in n8n, so guard.yaml at the root
+  must deny <tool>`.
 - No contract marks `no_send` `(acceptable)`.
 - `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
   most 25 lines and pointing at `AGENT.md`.

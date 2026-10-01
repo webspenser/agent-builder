@@ -37,8 +37,6 @@ REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
-N8N_DISPATCHERS = ("*execute_workflow*", "*create_workflow*", "*update_workflow*",
-                   "*archive_workflow*", "*publish_workflow*")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
@@ -286,7 +284,7 @@ def check_agent_policy(root, caps):
             policy = engine.parse_agent(read_text(path))
         except (ReadError, engine.PolicyError) as err:
             return [f"guard.yaml: {err}"]
-        covers, deny = policy.get("covers", []), [p.lower() for p in policy["deny"]]
+        covers, deny = policy.get("covers", []), policy["deny"]
     fails = []
     for cap in caps:
         try:
@@ -305,10 +303,9 @@ def check_agent_policy(root, caps):
                 continue  # reported by the tool check
             if data.get("wrapper") != "n8n":
                 continue
-            for pattern in N8N_DISPATCHERS:
-                if pattern not in deny:
-                    fails.append(f"capabilities/{cap}/tools/{ident.parent.name} is wrapped in n8n, "
-                                 f'so guard.yaml at the root must deny "{pattern}"')
+            for name in checker.dispatchers_not_denied(deny):
+                fails.append(f"capabilities/{cap}/tools/{ident.parent.name} is wrapped in n8n, "
+                             f"so guard.yaml at the root must deny {name}")
     return fails
 
 

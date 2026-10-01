@@ -218,6 +218,17 @@ def covers(folder):
         raise CheckError(f"{folder.name}/guard.yaml: {err}")
 
 
+def agent_deny():
+    """deny patterns of the agent guard policy (package-root guard.yaml), or [] when there is none."""
+    policy = ROOT / "guard.yaml"
+    if not (policy.exists() or policy.is_symlink()):
+        return []
+    try:
+        return guard_policy.parse_agent(policy.read_text(encoding="utf-8"))["deny"]
+    except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
+        raise CheckError(f"guard.yaml: {err}")
+
+
 def agent_covers():
     """covers of the agent guard policy (package-root guard.yaml), or [] when there is none."""
     policy = ROOT / "guard.yaml"
@@ -353,6 +364,15 @@ def expected(instance, repo=None):
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
                     continue
+                if ay.get("wrapper") == "n8n":
+                    try:
+                        missing = tool_check.dispatchers_not_denied(agent_deny())
+                    except CheckError as err:
+                        missing = []
+                        entry["problems"].append(f"{cap}: {err}")
+                    for name in missing:
+                        entry["problems"].append(
+                            f"{cap}: the {provider} tool is wrapped in n8n, so the agent guard policy must deny {name}")
                 match = ay.get("server_match", "")  # exactly what yaml_get returns; no further trimming
                 if not match:
                     entry["problems"].append(

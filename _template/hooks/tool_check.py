@@ -10,6 +10,7 @@ custom-tools/<cap>/. Prints one 'FAIL: <message>' line per problem, or one
 'OK:' line. Exit 0 valid, 1 FAIL lines, 2 ERROR (unreadable input). Never a
 traceback. The validator, schedule_check.py and the add-tool skill all use it.
 """
+import fnmatch
 import json
 import pathlib
 import re
@@ -35,6 +36,10 @@ ACCEPTABLE = re.compile(r"^[-*]\s+`([^`]+)`\s+\(acceptable\)")
 N8N_TRIGGER = "@n8n/n8n-nodes-langchain.mcpTrigger"
 N8N_AUTH = ("bearerAuth", "headerAuth")
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
+N8N_DISPATCHER_TOOLS = ("execute_workflow", "create_workflow_from_code", "update_workflow", "archive_workflow",
+                        "publish_workflow", "unpublish_workflow", "test_workflow", "restore_workflow_version")
+CALLER_SET = re.compile(r"(?i)\$fromai")
+PLACEHOLDER = re.compile(r"(?<!\{)\{[A-Za-z_][A-Za-z0-9_]*\}(?!\})")
 LITERAL_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 
 
@@ -126,6 +131,28 @@ def _strings(obj):
             yield from _strings(value)
 
 
+def dispatchers_not_denied(deny):
+    """n8n instance-level tools that run or rebuild any workflow and that no deny pattern matches."""
+    patterns = [p.lower() for p in deny]
+    return [t for t in N8N_DISPATCHER_TOOLS if not any(fnmatch.fnmatchcase(t, p) for p in patterns)]
+
+
+def _caller_set(params, path=""):
+    """Paths under a tool node's parameters where the caller sets a URL, method or request body."""
+    found = []
+    items = params.items() if isinstance(params, dict) else enumerate(params) if isinstance(params, list) else []
+    for key, value in items:
+        here = f"{path}.{key}" if path and isinstance(key, str) else (key if isinstance(key, str) else path)
+        name = key.lower() if isinstance(key, str) else ""
+        if isinstance(value, str):
+            risky = name.endswith("url") or name in ("method", "jsonbody", "body")
+            if risky and (CALLER_SET.search(value) or (name.endswith("url") and PLACEHOLDER.search(value))):
+                found.append(here)
+        else:
+            found.extend(_caller_set(value, here))
+    return found
+
+
 def check_workflow(folder, label, server_match, usage_text):
     """FAIL messages for a wrapped tool's workflow.n8n.json (an n8n workflow export)."""
     rel = f"{label}/workflow.n8n.json"
@@ -140,6 +167,8 @@ def check_workflow(folder, label, server_match, usage_text):
     conns = wf.get("connections") if isinstance(wf, dict) else None
     if not isinstance(nodes, list) or not isinstance(conns, dict) or not all(isinstance(n, dict) for n in nodes):
         return [f"{rel}: needs a nodes list and a connections object (an n8n workflow export)"]
+    if not all(isinstance(n.get("name"), str) for n in nodes):
+        return [f"{rel}: every node needs a text name"]
     triggers = [n for n in nodes if n.get("type") == N8N_TRIGGER]
     if len(triggers) != 1:
         return [f"{rel}: needs exactly one MCP Server Trigger node ({N8N_TRIGGER}), found {len(triggers)}"]
@@ -161,12 +190,8 @@ def check_workflow(folder, label, server_match, usage_text):
     for name in sorted(tools):
         if not TOOL_NAME.fullmatch(name):
             fails.append(f"{rel}: tool node {name!r} must be named in snake_case (the name is the MCP tool name)")
-        tparams = (by_name.get(name) or {}).get("parameters")
-        tparams = tparams if isinstance(tparams, dict) else {}
-        for key in ("url", "method"):
-            value = tparams.get(key)
-            if isinstance(value, str) and "$fromAI" in value:
-                fails.append(f"{rel}: tool {name} lets the caller set its {key}; fix it in the workflow")
+        for where in _caller_set((by_name.get(name) or {}).get("parameters")):
+            fails.append(f"{rel}: tool {name} lets the caller set its {where}; fix it in the workflow")
     mapped = set(re.findall(rf"(?<![A-Za-z0-9_-]){re.escape(server_match)}:([A-Za-z0-9_]+)", usage_text)) if server_match else set()
     for name in sorted(tools - mapped):
         fails.append(f"{rel}: tool {name} is not mapped in usage.md as {server_match}:{name}")

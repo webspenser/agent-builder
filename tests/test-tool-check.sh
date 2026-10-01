@@ -151,4 +151,22 @@ import json, sys; p = sys.argv[1]; d = json.load(open(p))
 d["nodes"].append(dict(d["nodes"][0], name="MCP2")); json.dump(d, open(p, "w"))
 PY
 run "$T" "$C/contract.md"; expect 1 "two triggers refused" "needs exactly one MCP Server Trigger node"
+
+echo "-- wrapped (n8n): review fixes"
+mutate() { python3 - "$T/workflow.n8n.json" "$1" <<'PY'
+import json, sys; p, code = sys.argv[1], sys.argv[2]; d = json.load(open(p)); exec(code); json.dump(d, open(p, "w"))
+PY
+}
+wrapped; mutate 'd["nodes"].append({"name": ["x"], "type": "n8n-nodes-base.noOp"})'
+run "$T" "$C/contract.md"; expect 1 "list as a node name: FAIL, not a crash" "every node needs a text name"
+wrapped; mutate 'd["nodes"][1]["parameters"]["url"] = "={{ $fromai(\"u\") }}"'
+run "$T" "$C/contract.md"; expect 1 "lowercase \$fromai in url refused" "tool create lets the caller set its url"
+wrapped; mutate 'd["nodes"][1]["parameters"]["options"] = {"url": "={{ $fromAI(\"u\") }}"}'
+run "$T" "$C/contract.md"; expect 1 "nested url refused" "tool create lets the caller set its options.url"
+wrapped; mutate 'd["nodes"][1]["parameters"]["jsonBody"] = "={{ $fromAI(\"body\") }}"'
+run "$T" "$C/contract.md"; expect 1 "caller-set request body refused" "tool create lets the caller set its jsonBody"
+wrapped; mutate 'd["nodes"][1]["parameters"]["url"] = "https://api.example.com/{path}"'
+run "$T" "$C/contract.md"; expect 1 "placeholder in url refused" "tool create lets the caller set its url"
+wrapped; mutate 'd["nodes"][1]["parameters"]["bodyParameters"] = {"parameters": [{"name": "email", "value": "={{ $fromAI(\"email\") }}"}]}'
+run "$T" "$C/contract.md"; expect 0 "a named body field from the caller is fine" "OK: "
 finish

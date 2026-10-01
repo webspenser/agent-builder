@@ -509,11 +509,18 @@ json.dump({"nodes": nodes, "connections": conns}, open(sys.argv[1], "w"))
 PY
 }
 make_valid_agent "$FIX/wrapnodeny"; wrapdemo "$FIX/wrapnodeny"
-fails_with "$FIX/wrapnodeny" 'capabilities/crm/tools/demo is wrapped in n8n, so guard.yaml at the root must deny "*execute_workflow*"'
+fails_with "$FIX/wrapnodeny" 'capabilities/crm/tools/demo is wrapped in n8n, so guard.yaml at the root must deny execute_workflow'
 make_valid_agent "$FIX/wrapok"; wrapdemo "$FIX/wrapok"
 printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*EXECUTE_WORKFLOW*", "*create_workflow*", "*update_workflow*",' \
-  '       "*archive_workflow*", "*publish_workflow*"]' > "$FIX/wrapok/guard.yaml"
+  '       "*archive_workflow*", "*publish_workflow*", "*test_workflow*", "*restore_workflow*"]' > "$FIX/wrapok/guard.yaml"
 assert_pass $V "$FIX/wrapok"
+make_valid_agent "$FIX/wrapbroad"; wrapdemo "$FIX/wrapbroad"
+printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*_workflow*", "*restore_workflow*"]' > "$FIX/wrapbroad/guard.yaml"
+assert_pass $V "$FIX/wrapbroad"   # a broad pattern that covers every dispatcher is enough
+make_valid_agent "$FIX/wrapnotest"; wrapdemo "$FIX/wrapnotest"
+printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*execute_workflow*", "*create_workflow*", "*update_workflow*",' \
+  '       "*archive_workflow*", "*publish_workflow*"]' > "$FIX/wrapnotest/guard.yaml"
+fails_with "$FIX/wrapnotest" 'capabilities/crm/tools/demo is wrapped in n8n, so guard.yaml at the root must deny test_workflow'
 make_valid_agent "$FIX/noagentpolicy"; rm "$FIX/noagentpolicy/guard.yaml"
 fails_with "$FIX/noagentpolicy" "the contract of crm has no_send, so the agent needs a guard.yaml at its root that covers no_send"
 make_valid_agent "$FIX/agentnocover"; printf '%s\n' 'deny: ["*send*"]' > "$FIX/agentnocover/guard.yaml"

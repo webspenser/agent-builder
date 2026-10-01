@@ -52,7 +52,7 @@ LinkedIn and call touches keep today's model: the agent drafts them, the owner d
 | 15 | Link-click unsubscribes are a **known limit**: InvokeIQ suppresses them, the CRM is not told. The digest says so | No unsubscribe event exists. Follow-up: ask InvokeIQ for one, or use the link-clicked URL if it carries it. |
 | 16 | `allowed_countries` in `operating-config.md`, default `[US]`. EU/UK need an operator legitimate-interest note; Canada needs an operator-confirmed consent basis | Cold email law differs by country. |
 | 17 | Agent Standard 6.0, builder 6.0.0, sales-partner 6.0.0; no backward compatibility | Dev-phase rule. |
-| 18 | **Wrapped tools** become an Agent Builder pattern: a tool for a service without MCP ships an n8n workflow template; agents' guard policies deny dispatcher tools (`*execute_workflow*`, n8n's workflow create/update/archive/publish tools) | The user will wrap most non-MCP services this way. A connector that can run or build arbitrary workflows would bypass every per-tool policy. |
+| 18 | **Wrapped tools** become an Agent Builder pattern: a tool for a service without MCP ships an n8n workflow template; agents' guard policies deny dispatcher tools (n8n's execute, test, create, update, archive, publish, unpublish and restore workflow tools; amended after review on 2026-10-01 to add test and restore) | The user will wrap most non-MCP services this way. A connector that can run or build arbitrary workflows would bypass every per-tool policy. |
 
 ## Part A — agent-builder 6.0.0
 
@@ -70,7 +70,7 @@ LinkedIn and call touches keep today's model: the agent drafts them, the owner d
 - The service's secrets are n8n credentials. The agent package and the instance hold none.
 - The trigger requires Bearer or Header auth. Setup records how the host connects (Claude Code: an `Authorization` header in the MCP config; claude.ai custom connector for cloud routines: confirmed at acceptance, with an unguessable trigger path as the fallback).
 - `tool_check.py`: a `wrapper: n8n` tool must ship `workflow.n8n.json`, and the tool names of its MCP Server Trigger's attached tool nodes must equal the names mapped in `usage.md`.
-- Guidance (STANDARD.md, writing-an-agent): one service per workflow; per-workflow trigger only, never instance-level MCP; the agent guard policy denies dispatcher tools (`*execute_workflow*`, `*create_workflow*`, `*update_workflow*`, `*archive_workflow*`, `*publish_workflow*`).
+- Guidance (STANDARD.md, writing-an-agent): one service per workflow; per-workflow trigger only, never instance-level MCP; the agent guard policy denies dispatcher tools (`*execute_workflow*`, `*create_workflow*`, `*update_workflow*`, `*archive_workflow*`, `*publish_workflow*`, `*test_workflow*`, `*restore_workflow*`).
 
 ### A3. Docs and tests
 
