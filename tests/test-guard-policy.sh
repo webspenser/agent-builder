@@ -115,11 +115,10 @@ run 2 "unknown_writes: block"        mcp__a__other '{"v":{"s":"a"}}' "not a know
 
 echo "-- field identity"
 policy 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [create_records]' '    at: ["records[].fields"]' '  - kind: update' '    tools: [update_records]' '    at: ["records[].fields"]' \
-  'rules:' '  - field: Status' '    binding_id: required' '    create: [draft]' '    update: [voided]'
+  'rules:' '  - field: Status' '    create: [draft]' '    update: [voided]'
 printf '%s\n' '# CRM binding — Airtable' 'base_id: appXXXXXXXXXXXXXX' 'field_status: fldAAAAAAAAAAAAAA' > "$W/bindings.md"
 run 2 "status by field ID"           mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}' "Status may only be written as voided" "$W/bindings.md"
 run 0 "draft by field ID on create"  mcp__airtable__create_records '{"records":[{"fields":{"fldAAAAAAAAAAAAAA":"draft","fldBBBBBBBBBBBBBB":"x"}}]}' "" "$W/bindings.md"
-run 2 "required ID missing"          mcp__airtable__create_records '{"records":[{"fields":{"fldBBBBBBBBBBBBBB":"x"}}]}' "has not recorded field_status"
 run 0 "read tool needs no binding"   mcp__airtable__list_records '{}'
 bind() { printf '%s\n' "$@" > "$W/bindings.md"; }
 UPD='{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}'
@@ -134,8 +133,64 @@ bind 'field_status: fldAAAAAAAAAAAAAA  # note'
 run 2 "ID with trailing comment blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
 bind 'field_status: fldAAAAAAAAAAAAAA (Activities.Status)'
 run 2 "ID with parenthetical blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
-bind 'base_id: `appXXXXXXXXXXXXXX` (my base)' '- field_status: fldAAAAAAAAAAAAAA'
-run 2 "bullet form ignored: not recorded" mcp__airtable__update_records "$VOID" "has not recorded field_status" "$W/bindings.md"
+
+echo "-- bound_keys_only"
+policy 'covers: [x]' 'bound_keys_only: true';         parses 1 "bound_keys_only needs writes"
+policy 'covers: [x]' 'bound_keys_only: yes' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; parses 1 "bound_keys_only only takes true"
+B() { policy 'covers: [draft_only]' 'bound_keys_only: true' 'writes:' '  - kind: create' '    tools: [create_records]' '    at: ["records[].fields"]' \
+  '  - kind: update' '    tools: [update_records]' '    at: ["records[].fields"]' \
+  'rules:' '  - field: Status' '    create: [draft]' '    update: [voided]'; }
+B; parses 0 "bound_keys_only parses"
+bind 'base_id: appXXXXXXXXXXXXXX' 'field_status: fldAAAAAAAAAAAAAA' 'field_lead: fldLLLLLLLLLLLLL1' 'field_lead: fldLLLLLLLLLLLLL2' 'field_name: fldNNNNNNNNNNNNNN'
+run 0 "recorded IDs pass"            mcp__airtable__create_records '{"records":[{"fields":{"fldAAAAAAAAAAAAAA":"draft","fldNNNNNNNNNNNNNN":"Acme"}}]}' "" "$W/bindings.md"
+run 0 "both IDs of a repeated name count" mcp__airtable__create_records '{"records":[{"fields":{"fldLLLLLLLLLLLLL1":["recA"]}},{"fields":{"fldLLLLLLLLLLLLL2":["recB"]}}]}' "" "$W/bindings.md"
+run 0 "recorded ID matched ignoring case" mcp__airtable__create_records '{"records":[{"fields":{"FLDNNNNNNNNNNNNNN":"Acme"}}]}' "" "$W/bindings.md"
+run 2 "unrecorded fld key blocked"   mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldZZZZZZZZZZZZZZ":"approved"}}]}' "fldZZZZZZZZZZZZZZ is not a recorded field ID" "$W/bindings.md"
+run 2 "field name key blocked too"   mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"Status":"voided"}}]}' "Status is not a recorded field ID" "$W/bindings.md"
+run 2 "rule still applies to a recorded ID" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}' "Status may only be written as voided" "$W/bindings.md"
+bind 'field_status: fldS1SSSSSSSSSSSS' 'field_status: fldS2SSSSSSSSSSSS'
+run 2 "a rule covers every ID recorded under its name" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldS2SSSSSSSSSSSS":"sent"}}]}' "Status may only be written as voided" "$W/bindings.md"
+bind 'base_id: appXXXXXXXXXXXXXX'
+run 2 "no field_ lines: every write blocked" mcp__airtable__create_records '{"records":[{"fields":{"fldNNNNNNNNNNNNNN":"Acme"}}]}' "has not recorded any field IDs" "$W/bindings.md"
+run 0 "no field_ lines: reads pass"  mcp__airtable__list_records '{}' "" "$W/bindings.md"
+bind '- field_status: fldAAAAAAAAAAAAAA'
+run 2 "bulleted line is not a binding" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"voided"}}]}' "has not recorded any field IDs" "$W/bindings.md"
+run 2 "no bindings file: writes blocked" mcp__airtable__create_records '{"records":[{"fields":{"fldNNNNNNNNNNNNNN":"Acme"}}]}' "has not recorded any field IDs"
+
+echo "-- agent policy"
+aparses() { # aparses <0|1> <label>
+  local out rc; out=$(python3 "$E" --check --agent "$W/guard.yaml" 2>&1); rc=$?
+  if [ "$rc" -eq "$1" ] && ! printf '%s' "$out" | grep -q Traceback; then _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
+}
+arun() { # arun <rc> <label> <tool_name> [text]
+  local out rc
+  out=$(printf '{"tool_name":"%s","tool_input":{}}' "$3" | python3 "$E" --agent "$W/guard.yaml" "demo agent guard policy" 2>&1); rc=$?
+  if [ "$rc" -eq "$1" ] && { [ -z "${4:-}" ] || printf '%s\n' "$out" | grep -qF -- "$4"; } && ! printf '%s' "$out" | grep -q Traceback; then
+    _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
+}
+policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'; aparses 0 "agent policy parses"
+policy 'deny: ["*send*"]';                         aparses 0 "covers is optional"
+policy 'covers: [no_send]';                        aparses 1 "deny is required"
+policy 'deny: []';                                 aparses 1 "deny may not be empty"
+policy 'deny: ["*send*"]' 'allow: [x]';            aparses 1 "allow is not an agent policy key"
+policy 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; aparses 1 "writes is not an agent policy key"
+policy 'covers: [Bad]' 'deny: ["*send*"]';         aparses 1 "covers ids are snake_case"
+: > "$W/guard.yaml";                               aparses 1 "empty agent policy"
+policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'
+arun 2 "deny matches on any server" mcp__claude_ai_Slack__slack_send_message "Blocked by demo agent guard policy: slack_send_message is denied (*send*)"
+arun 2 "deny matches a suffix after __ in the server" mcp__x__gmail__reply "denied (*reply*)"
+arun 0 "replies is not reply" mcp__claude_ai_Attio__list-comment-replies
+arun 0 "other tools pass" mcp__claude_ai_Gmail__create_draft
+arun 2 "non-MCP name fails closed" Bash "cannot check this call"
+out=$(printf '{not json' | python3 "$E" --agent "$W/guard.yaml" x 2>&1); rc=$?
+[ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q Traceback && _report ok "agent: bad JSON blocks" || _report no "agent bad JSON (rc=$rc): $out"
+out=$(printf '{}' | python3 "$E" --agent "$W/missing.yaml" x 2>&1); rc=$?
+[ "$rc" -eq 2 ] && _report ok "agent: missing policy blocks" || _report no "agent missing (rc=$rc): $out"
+policy 'covers: [x]' 'allow: [a]' 'deny: ["*send*"]'
+out=$(python3 "$E" --check "$W/guard.yaml" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && _report ok "plain --check still parses a tool policy" || _report no "plain --check (rc=$rc): $out"
+out=$(python3 "$E" --check --agent "$W/guard.yaml" 2>&1); rc=$?
+[ "$rc" -eq 1 ] && _report ok "a tool policy is not an agent policy" || _report no "tool as agent (rc=$rc): $out"
 
 echo "-- fail closed"
 policy 'covers: [x]' 'allow: [a'
@@ -215,9 +270,16 @@ run 2 "forbidden field blocked even when empty" mcp__a__u '{"v":{"hs_pipeline_st
 run 0 "other fields in the same map still allowed (create)" mcp__a__c '{"v":{"hs_task_status":"NOT_STARTED","hs_task_subject":"x"}}'
 run 0 "other fields in the same map still allowed (update)" mcp__a__u '{"v":{"hs_task_status":"COMPLETED"}}'
 run 2 "other rules still apply next to a forbid rule" mcp__a__c '{"v":{"hs_task_status":"COMPLETED"}}' "hs_task_status may only be written as NOT_STARTED on create"
-F '    forbid: true' '    binding_id: required'; parses 0 "forbid with binding_id parses"
+F '    forbid: true' '    binding_id: required'; parses 1 "binding_id is an unknown rule key"
+F '    forbid: true'
 printf '%s\n' 'field_hs_pipeline_stage: stageprop1' > "$W/fb.md"
-run 2 "forbid with binding_id blocks the bound ID" mcp__a__u '{"v":{"stageprop1":"x"}}' "hs_pipeline_stage may not be written" "$W/fb.md"
-run 2 "forbid with binding_id missing from bindings blocks" mcp__a__u '{"v":{"hs_task_status":"COMPLETED"}}' "has not recorded field_hs_pipeline_stage"
+run 2 "forbid blocks a bound ID" mcp__a__u '{"v":{"stageprop1":"x"}}' "hs_pipeline_stage may not be written" "$W/fb.md"
+F '    forbid: update';                 parses 0 "forbid: update parses"
+F '    forbid: update' '    create: [x]'; parses 1 "forbid: update combined with create fails"
+F '    forbid: update'
+run 0 "forbid: update allows the field on create" mcp__a__c '{"v":{"hs_pipeline_stage":"done","hs_task_status":"NOT_STARTED"}}'
+run 2 "forbid: update blocks the field on update" mcp__a__u '{"v":{"hs_pipeline_stage":"done"}}' "hs_pipeline_stage may not be changed after create"
+run 2 "forbid: update blocks on an unknown write checked as update" mcp__a__other '{"v":{"hs_pipeline_stage":"done"}}' "may not be changed after create"
+run 2 "forbid: update blocks a bound ID on update" mcp__a__u '{"v":{"stageprop1":"x"}}' "may not be changed after create" "$W/fb.md"
 
 finish

@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "4.0"
+CURRENT_STANDARD = "5.0"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -269,6 +269,30 @@ def check_capability(root, cap):
     return fails
 
 
+def check_agent_policy(root, caps):
+    """The package-root guard.yaml: parses as an agent policy; required to cover no_send when a contract has it."""
+    path = root / "guard.yaml"
+    covers = None
+    if path.exists() or path.is_symlink():
+        engine = load_policy_engine()
+        if engine is None:
+            return ["cannot load the reference guard_policy.py to check guard.yaml"]
+        try:
+            covers = engine.parse_agent(read_text(path)).get("covers", [])
+        except (ReadError, engine.PolicyError) as err:
+            return [f"guard.yaml: {err}"]
+    fails = []
+    for cap in caps:
+        try:
+            text = read_text(root / "capabilities" / cap / "contract.md")
+        except ReadError:
+            continue  # reported by check_capability
+        invariants = [m.group(1) for line in section(text, "Invariants") or [] for m in [INVARIANT.match(line)] if m]
+        if "no_send" in invariants and (covers is None or "no_send" not in covers):
+            fails.append(f"the contract of {cap} has no_send, so the agent needs a guard.yaml at its root that covers no_send")
+    return fails
+
+
 def check_activities(root, meta, caps):
     """activity_<name>: capabilities (or none); a schedule skill when any exist."""
     fails = []
@@ -330,6 +354,7 @@ def check_tools(root, meta):
             fails.append(f"agent.yaml: capability '{cap}' is not snake_case")
             continue
         fails.extend(check_capability(root, cap))
+    fails.extend(check_agent_policy(root, [c for c in caps if SNAKE.match(c)]))
     folder = root / "capabilities"
     if folder.is_dir():
         for d in sorted(folder.iterdir()):

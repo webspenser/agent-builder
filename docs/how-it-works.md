@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.3.
+Current: standard 5.0. Agent Builder 5.0.0, sales-partner 5.0.0.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
@@ -167,7 +167,7 @@ different moment.
 flowchart TD
   S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
   V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>skill and subagent format"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 4.0<br/>four host manifests agree"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 5.0<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
@@ -214,7 +214,11 @@ flowchart TD
   MC -- no --> OK["allow<br/>(normal permission flow)"]
   MC -- yes --> I{"instance of this agent<br/>found above the folder?"}
   I -- no --> OK
-  I -- yes --> B["for each bind_ line in instance.yaml"]
+  I -- yes --> AP{"guard.yaml at the<br/>package root?"}
+  AP -- no --> B["for each bind_ line in instance.yaml"]
+  AP -- yes --> AE["guard_policy.py --agent:<br/>tool name matches a deny glob?<br/>(any server, bound or not)"]
+  AE -- yes --> BL4["BLOCK: Blocked by … agent guard policy"]
+  AE -- no --> B
   B --> R{"line readable?<br/>cap a-z0-9_, provider a-z0-9-"}
   R -- no --> BL["BLOCK: fail closed"]
   R -- yes --> AD["find tool: package's, or<br/>custom-tools/cap for custom"]
@@ -342,9 +346,9 @@ like a shipped tool. They read its `identity.yaml` and `guard.yaml` from
 `custom-tools/<cap>/`. If its `guard.yaml` doesn't cover every invariant,
 the capability isn't unattended-safe, so its activities can't be scheduled.
 For email, setup and `add-tool` refuse to bind it unless `no_send` is
-covered. The guard doesn't re-check this at call time: it can't see the
-contract, so hand-edited files that skip it are a known gap (see "Guard
-policy" in the Agent Standard). If a
+covered. At call time the agent guard policy's deny list (the
+package-root `guard.yaml`) covers a custom email tool too, whatever its
+own files say. If a
 bound tool has no `identity.yaml`, the guard blocks every connector call
 until it is fixed.
 
@@ -402,17 +406,24 @@ recognise a protected field in each of them.
   "field Status" would never match a call, and renaming the column in
   Airtable would also get around a rule keyed on the name.
 
-So the Airtable policy's rules say `binding_id: required`. Setup's probe
-records the real IDs in `bindings/crm.md`, one plain line each:
+So setup's probe records the ID of every field in the agent's Airtable
+tables in `bindings/crm.md`, one plain line each (a name used in two
+tables gets two lines):
 
 ```
 field_status: fldAbc123
 field_do_not_contact: fldDef456
+field_lead: fldGhi789
+field_lead: fldJkl012
 ```
 
-The engine checks writes against those IDs. If the lines are missing, every
-Airtable write is blocked. That fails safe. Setup's probe records the
-lines, so re-running the tools step fixes it.
+The Airtable policy says `bound_keys_only: true`: a write may use only
+those recorded IDs. The rules for `Status` and `Do Not Contact` match
+their IDs, and any other key is refused. That closes two holes. A
+column deleted and recreated in Airtable gets a new ID, and that ID is
+refused until the probe runs again, so the rule can't be dodged. And
+with no IDs recorded, every Airtable write is blocked. Both fail safe:
+the agent re-runs the probe and retries once.
 
 **The rules a policy can hold.** Each rule names one field and does one of
 these things:
@@ -425,6 +436,23 @@ these things:
   `hs_pipeline_stage`, `hs_pipeline` and `hs_task_completion_date`. A
   Task's pipeline stages mirror its statuses, so these fields would be
   another way to change a draft's status.
+- **Freeze it after create.** With `forbid: update`, the field can be set
+  when the record is created and never changed after. Every CRM tool
+  uses this for the draft's body (`draft_body`, `Draft Body`,
+  `hs_task_body`), so an approved draft can't be rewritten before it
+  goes out. HubSpot records a voided draft's outcome as a Note instead
+  of editing the Task.
+
+**One deny list for the whole agent.** A tool's policy only fires for
+calls to its own server. An agent can also ship a `guard.yaml` at its
+package root: a deny-only list (sales-partner: `*send*`, `*reply*`,
+`*forward*`, `*publish*`, and a few named posting tools) that the guard
+applies to every MCP call in the instance, whatever the server. So a
+Slack or social connector the client happens to have connected can't
+send for the agent either, and a hand-made custom tool is covered too.
+Any agent with a `no_send` capability must ship it. It matches tool
+names, not what a tool does, so the list is checked against the read
+tools of common connectors.
 
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a

@@ -76,6 +76,13 @@ setup offers to create the fields by hand or with an API key in the
 user's own terminal. Check a
 tool folder with `python3 hooks/tool_check.py <tool folder> <contract.md>`.
 
+If any capability has a `no_send` invariant, also ship a `guard.yaml` at
+the package root: an agent guard policy with `covers: [no_send]` and a
+`deny` list of send and publish globs (`*send*`, `*reply*`,
+`*forward*`, `*publish*`, …). The guard applies it to every MCP call in
+an instance, whatever the server. Check each glob against the read
+tools of the connectors your users will have, so no read is denied.
+
 The user binds each capability to their own system in `instance.yaml`
 (`bind_crm: attio`) during setup. `STANDARD.md` has the details.
 

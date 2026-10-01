@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "4.0"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "5.0"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
@@ -21,6 +21,7 @@ printf '%s\n' 'covers: [draft_only]' > "$PKG/capabilities/crm/tools/half/guard.y
 printf '%s\n' 'capability: crm' 'provider: bare' 'server_match: barecrm' > "$PKG/capabilities/crm/tools/bare/identity.yaml"
 printf '%s\n' 'capability: email_drafts' 'provider: mail' 'server_match: mail' > "$PKG/capabilities/email_drafts/tools/mail/identity.yaml"
 printf '%s\n' 'covers: [no_send]' 'deny: ["*send*"]' > "$PKG/capabilities/email_drafts/tools/mail/guard.yaml"
+printf '%s\n' 'covers: [no_send]' 'deny: ["*send*"]' > "$PKG/guard.yaml"
 for t in good half bare; do printf '%s\n' '`get`' '## Probe' 'x' > "$PKG/capabilities/crm/tools/$t/usage.md"; done
 printf '%s\n' '`draft`' '## Probe' 'x' > "$PKG/capabilities/email_drafts/tools/mail/usage.md"
 cusage() { printf '%s\n' '`get`' '## Probe' 'x' > "$1/custom-tools/crm/usage.md"; }  # cusage <instance>: usage.md for a custom crm tool
@@ -47,6 +48,14 @@ expect 0 "version comment" "# demo-agent 3.0.0"
 expect 0 "UTC cron" "(UTC cron: 0 7 * * 1)"
 expect 0 "connectors with server_match" 'connectors: good (matches "goodcrm"), mail (matches "mail")'
 expect 0 "prompt with then" 'prompt: Scheduled run of `prospect`, then `research` (unattended). Follow this agent'"'"'s instructions for each activity, in order.'
+mv "$PKG/guard.yaml" "$W/agent-guard.bak"
+run check "$I" --repo acme/sales; expect 1 "no agent policy: digest fails the gate" "email_drafts: invariant no_send is not covered by the agent guard policy"
+expect 1 "no agent policy: prospect (crm only) still passes" "PASS  demo-agent: prospect (sales)"
+printf '%s\n' 'deny: ["*send*"]' > "$PKG/guard.yaml"
+run check "$I" --repo acme/sales; expect 1 "agent policy without no_send in covers fails" "not covered by the agent guard policy"
+printf '%s\n' 'deny: [' > "$PKG/guard.yaml"
+run check "$I" --repo acme/sales; expect 1 "unreadable agent policy fails the gate" "email_drafts: guard.yaml: "
+mv "$W/agent-guard.bak" "$PKG/guard.yaml"
 N="$W/nomail"; instance "$N" good - 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'schedule_digest: "Monday 08:00"'
 run check "$N";                                    expect 1 "unbound capability fails its entry" "email_drafts is not bound"
 expect 1 "other entry still passes" "PASS  demo-agent: prospect (nomail)"
@@ -215,7 +224,7 @@ run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "overflowing n
 rj "$W/r.json" 'r["enabled"] = "false"'
 run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "string enabled is not enabled" "the routine is not enabled"
 echo "-- round 3: agent.yaml name and activities"
-mkdir -p "$W/pkg3/hooks"; cp "$PKG/hooks/"*.py "$W/pkg3/hooks/"; cp -R "$PKG/capabilities" "$W/pkg3/"
+mkdir -p "$W/pkg3/hooks"; cp "$PKG/hooks/"*.py "$W/pkg3/hooks/"; cp -R "$PKG/capabilities" "$PKG/guard.yaml" "$W/pkg3/"
 run3() { OUT=$(python3 -B "$W/pkg3/hooks/schedule_check.py" "$@" 2>&1); RC=$?; }
 A3="$W/agent-good.yaml"; cp "$PKG/agent.yaml" "$A3"
 sed 's/^name:/name :/' "$A3" > "$W/pkg3/agent.yaml"
