@@ -99,8 +99,7 @@ run_guard "$H" "$(call mcp__democrm__list-records)"
 
 echo "-- field IDs from bindings"
 printf '%s\n' 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [add-entry]' '    at: [values]' '  - kind: update' '    tools: [update-entry]' '    at: [values]' \
-  'rules:' '  - field: status' '    binding_id: required' '    update: [voided]' > "$TD/guard.yaml"
-run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "required binding missing" "has not recorded field_status"
+  'rules:' '  - field: status' '    update: [voided]' > "$TD/guard.yaml"
 mkdir -p "$I/bindings"; printf '%s\n' 'field_status: fldS' > "$I/bindings/crm.md"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"voided"}}')"; expect 0 "binding ID recognized"
 run_guard "$I" "$(call mcp__democrm__update-entry '{"values":{"fldS":"sent"}}')"; expect 2 "binding ID enforced"

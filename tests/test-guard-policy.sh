@@ -115,11 +115,10 @@ run 2 "unknown_writes: block"        mcp__a__other '{"v":{"s":"a"}}' "not a know
 
 echo "-- field identity"
 policy 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [create_records]' '    at: ["records[].fields"]' '  - kind: update' '    tools: [update_records]' '    at: ["records[].fields"]' \
-  'rules:' '  - field: Status' '    binding_id: required' '    create: [draft]' '    update: [voided]'
+  'rules:' '  - field: Status' '    create: [draft]' '    update: [voided]'
 printf '%s\n' '# CRM binding — Airtable' 'base_id: appXXXXXXXXXXXXXX' 'field_status: fldAAAAAAAAAAAAAA' > "$W/bindings.md"
 run 2 "status by field ID"           mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}' "Status may only be written as voided" "$W/bindings.md"
 run 0 "draft by field ID on create"  mcp__airtable__create_records '{"records":[{"fields":{"fldAAAAAAAAAAAAAA":"draft","fldBBBBBBBBBBBBBB":"x"}}]}' "" "$W/bindings.md"
-run 2 "required ID missing"          mcp__airtable__create_records '{"records":[{"fields":{"fldBBBBBBBBBBBBBB":"x"}}]}' "has not recorded field_status"
 run 0 "read tool needs no binding"   mcp__airtable__list_records '{}'
 bind() { printf '%s\n' "$@" > "$W/bindings.md"; }
 UPD='{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}'
@@ -134,8 +133,6 @@ bind 'field_status: fldAAAAAAAAAAAAAA  # note'
 run 2 "ID with trailing comment blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
 bind 'field_status: fldAAAAAAAAAAAAAA (Activities.Status)'
 run 2 "ID with parenthetical blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
-bind 'base_id: `appXXXXXXXXXXXXXX` (my base)' '- field_status: fldAAAAAAAAAAAAAA'
-run 2 "bullet form ignored: not recorded" mcp__airtable__update_records "$VOID" "has not recorded field_status" "$W/bindings.md"
 
 echo "-- fail closed"
 policy 'covers: [x]' 'allow: [a'
@@ -215,9 +212,16 @@ run 2 "forbidden field blocked even when empty" mcp__a__u '{"v":{"hs_pipeline_st
 run 0 "other fields in the same map still allowed (create)" mcp__a__c '{"v":{"hs_task_status":"NOT_STARTED","hs_task_subject":"x"}}'
 run 0 "other fields in the same map still allowed (update)" mcp__a__u '{"v":{"hs_task_status":"COMPLETED"}}'
 run 2 "other rules still apply next to a forbid rule" mcp__a__c '{"v":{"hs_task_status":"COMPLETED"}}' "hs_task_status may only be written as NOT_STARTED on create"
-F '    forbid: true' '    binding_id: required'; parses 0 "forbid with binding_id parses"
+F '    forbid: true' '    binding_id: required'; parses 1 "binding_id is an unknown rule key"
+F '    forbid: true'
 printf '%s\n' 'field_hs_pipeline_stage: stageprop1' > "$W/fb.md"
-run 2 "forbid with binding_id blocks the bound ID" mcp__a__u '{"v":{"stageprop1":"x"}}' "hs_pipeline_stage may not be written" "$W/fb.md"
-run 2 "forbid with binding_id missing from bindings blocks" mcp__a__u '{"v":{"hs_task_status":"COMPLETED"}}' "has not recorded field_hs_pipeline_stage"
+run 2 "forbid blocks a bound ID" mcp__a__u '{"v":{"stageprop1":"x"}}' "hs_pipeline_stage may not be written" "$W/fb.md"
+F '    forbid: update';                 parses 0 "forbid: update parses"
+F '    forbid: update' '    create: [x]'; parses 1 "forbid: update combined with create fails"
+F '    forbid: update'
+run 0 "forbid: update allows the field on create" mcp__a__c '{"v":{"hs_pipeline_stage":"done","hs_task_status":"NOT_STARTED"}}'
+run 2 "forbid: update blocks the field on update" mcp__a__u '{"v":{"hs_pipeline_stage":"done"}}' "hs_pipeline_stage may not be changed after create"
+run 2 "forbid: update blocks on an unknown write checked as update" mcp__a__other '{"v":{"hs_pipeline_stage":"done"}}' "may not be changed after create"
+run 2 "forbid: update blocks a bound ID on update" mcp__a__u '{"v":{"stageprop1":"x"}}' "may not be changed after create" "$W/fb.md"
 
 finish

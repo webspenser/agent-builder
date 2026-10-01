@@ -22,7 +22,7 @@ import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "rules")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
-RULE_KEYS = ("field", "binding_id", "forbid", "create", "update", "any")
+RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
@@ -190,12 +190,10 @@ def _validate(policy):
         for rule in policy["rules"]:
             if not isinstance(rule.get("field"), str) or not rule["field"]:
                 raise PolicyError("each rule needs a field")
-            if rule.get("binding_id", "required") != "required":
-                raise PolicyError("binding_id may only be 'required'")
             lists = [k for k in ("create", "update", "any") if k in rule]
             if "forbid" in rule:
-                if rule["forbid"] != "true":
-                    raise PolicyError(f"rule for {rule['field']}: forbid may only be true")
+                if rule["forbid"] not in ("true", "update"):
+                    raise PolicyError(f"rule for {rule['field']}: forbid may only be true or update")
                 if lists:
                     raise PolicyError(f"rule for {rule['field']}: forbid cannot be combined with create, update, or any")
                 continue
@@ -393,8 +391,6 @@ def problems(policy, event, bindings, server_match=None):
     for rule in rules:
         field = _norm(rule["field"])
         bound = bindings.get(f"field_{field}")
-        if rule.get("binding_id") == "required" and not bound:
-            found.append(f"the probe has not recorded field_{field} in bindings; re-run setup's tools step")
         ids[field] = {field} | ({_norm(bound)} if bound else set())
     unwrap = policy.get("unwrap", [])
     for kind, amap in tagged:
@@ -405,9 +401,12 @@ def problems(policy, event, bindings, server_match=None):
                 found.append(f"attribute {key} is addressed by ID; use its name")
         for rule in rules:
             field = _norm(rule["field"])
-            if rule.get("forbid") == "true":
-                if any(_norm(key) in ids[field] for key in amap):
-                    found.append(f"{rule['field']} may not be written")
+            forbid = rule.get("forbid")
+            if forbid:
+                if forbid == "true" or kind == "update":
+                    if any(_norm(key) in ids[field] for key in amap):
+                        found.append(f"{rule['field']} may not be written" if forbid == "true"
+                                     else f"{rule['field']} may not be changed after create")
                 continue
             allowed = rule.get(kind) or rule.get("any")
             if not allowed:
