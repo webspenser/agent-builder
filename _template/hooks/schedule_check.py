@@ -7,8 +7,9 @@ Usage:
 
 check  — for every schedule_<activity> in the instance's schedules.yaml:
          applies the unattended gate (every capability its activities use is
-         bound, and every contract invariant is in the bound tool's
-         guard.yaml covers) and prints what the user needs to create the
+         bound, every contract invariant is in the bound tool's guard.yaml
+         covers, and no_send is also in the agent guard policy's covers)
+         and prints what the user needs to create the
          routine: name, schedule and UTC cron, connectors, prompt, and the
          cloud-environment setup script. A routine_<activity> line with no
          schedule_<activity> also fails. Exit 0 when every entry passes,
@@ -214,6 +215,17 @@ def covers(folder):
         raise CheckError(f"{folder.name}/guard.yaml: {err}")
 
 
+def agent_covers():
+    """covers of the agent guard policy (package-root guard.yaml), or [] when there is none."""
+    policy = ROOT / "guard.yaml"
+    if not (policy.exists() or policy.is_symlink()):
+        return []
+    try:
+        return guard_policy.parse_agent(policy.read_text(encoding="utf-8")).get("covers", [])
+    except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
+        raise CheckError(f"guard.yaml: {err}")
+
+
 def utc_cron(when, tz):
     """UTC cron for `<day|daily> HH:MM` in tz, taken at the next occurrence."""
     m = WHEN.match(when.strip())
@@ -314,6 +326,13 @@ def expected(instance, repo=None):
             if len(providers) > 1:
                 entry["problems"].append(f"{cap} is bound more than once; the guard applies every binding")
             invs = invariants(cap)
+            if "no_send" in invs:
+                try:
+                    if "no_send" not in agent_covers():
+                        entry["problems"].append(
+                            f"{cap}: invariant no_send is not covered by the agent guard policy (guard.yaml at the package root)")
+                except CheckError as err:
+                    entry["problems"].append(f"{cap}: {err}")
             for provider in providers:
                 try:
                     folder, ay = tool(instance, cap, provider)
