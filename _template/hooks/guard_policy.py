@@ -20,7 +20,7 @@ import re
 import sys
 import unicodedata
 
-KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "rules")
+KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only", "rules")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
@@ -168,6 +168,8 @@ def _validate(policy):
             raise PolicyError(f"covers: '{inv}' is not a snake_case invariant id")
     if policy.get("unknown_writes", "update") not in ("update", "block"):
         raise PolicyError("unknown_writes must be update or block")
+    if policy.get("bound_keys_only", "true") != "true":
+        raise PolicyError("bound_keys_only may only be true")
     for preset in policy.get("refuse_keys", []):
         if preset not in REFUSE_PRESETS:
             raise PolicyError(f"refuse_keys: unknown preset '{preset}'")
@@ -184,8 +186,8 @@ def _validate(policy):
         for path in entry["at"]:
             if not PATH.match(path):
                 raise PolicyError(f"writes: {path} is not a path like values or \"records[].fields\"")
-    if ("rules" in policy or "refuse_keys" in policy) and not policy.get("writes"):
-        raise PolicyError("writes is required when rules or refuse_keys are present")
+    if ("rules" in policy or "refuse_keys" in policy or "bound_keys_only" in policy) and not policy.get("writes"):
+        raise PolicyError("writes is required when rules, refuse_keys or bound_keys_only are present")
     if "rules" in policy:
         for rule in policy["rules"]:
             if not isinstance(rule.get("field"), str) or not rule["field"]:
@@ -336,6 +338,8 @@ def read_bindings(path):
                 if not BARE_ID.match(value):
                     shown = "".join(c for c in m.group(2) if c.isprintable())[:60]
                     raise PolicyError(f"bindings: {key} must be a bare ID, got {shown}")
+                data.setdefault(key, set()).add(value)
+                continue
             data[key] = value
     return data
 
@@ -357,7 +361,8 @@ def problems(policy, event, bindings, server_match=None):
         return [f"{shown} is not in the allow list"]
     rules = policy.get("rules", [])
     refuse = [REFUSE_PRESETS[p] for p in policy.get("refuse_keys", [])]
-    if not rules and not refuse:
+    keyed = policy.get("bound_keys_only") == "true"
+    if not rules and not refuse and not keyed:
         return []
     writes = policy.get("writes", [])
     matched = [w for w in writes if _matches(names, w["tools"])]
@@ -387,18 +392,23 @@ def problems(policy, event, bindings, server_match=None):
                     return [f"{shown} writes values at {path}, which no writes entry for this tool lists"]
                 tagged += [("update", m) for m in stray]
     found = []
+    recorded = {_norm(i) for k, v in bindings.items() if k.startswith("field_") for i in v}
     ids = {}
     for rule in rules:
         field = _norm(rule["field"])
-        bound = bindings.get(f"field_{field}")
-        ids[field] = {field} | ({_norm(bound)} if bound else set())
+        ids[field] = {field} | {_norm(i) for i in bindings.get(f"field_{field}", ())}
     unwrap = policy.get("unwrap", [])
+    if keyed and not recorded and any(amap for _, amap in tagged):
+        found.append("the probe has not recorded any field IDs in bindings; re-run setup's tools step")
+        keyed = False  # one message is enough
     for kind, amap in tagged:
         for key in amap:
             if any(unicodedata.category(ch) == "Cf" for ch in str(key)):
                 raise PolicyError("attribute key contains invisible characters")
             if any(p.match(str(key)) for p in refuse):
                 found.append(f"attribute {key} is addressed by ID; use its name")
+            if keyed and _norm(key) not in recorded:
+                found.append(f"{key} is not a recorded field ID; re-run the probe (setup's tools step)")
         for rule in rules:
             field = _norm(rule["field"])
             forbid = rule.get("forbid")

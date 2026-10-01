@@ -134,6 +134,29 @@ run 2 "ID with trailing comment blocked" mcp__airtable__update_records "$VOID" "
 bind 'field_status: fldAAAAAAAAAAAAAA (Activities.Status)'
 run 2 "ID with parenthetical blocked" mcp__airtable__update_records "$VOID" "field_status must be a bare ID" "$W/bindings.md"
 
+echo "-- bound_keys_only"
+policy 'covers: [x]' 'bound_keys_only: true';         parses 1 "bound_keys_only needs writes"
+policy 'covers: [x]' 'bound_keys_only: yes' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; parses 1 "bound_keys_only only takes true"
+B() { policy 'covers: [draft_only]' 'bound_keys_only: true' 'writes:' '  - kind: create' '    tools: [create_records]' '    at: ["records[].fields"]' \
+  '  - kind: update' '    tools: [update_records]' '    at: ["records[].fields"]' \
+  'rules:' '  - field: Status' '    create: [draft]' '    update: [voided]'; }
+B; parses 0 "bound_keys_only parses"
+bind 'base_id: appXXXXXXXXXXXXXX' 'field_status: fldAAAAAAAAAAAAAA' 'field_lead: fldLLLLLLLLLLLLL1' 'field_lead: fldLLLLLLLLLLLLL2' 'field_name: fldNNNNNNNNNNNNNN'
+run 0 "recorded IDs pass"            mcp__airtable__create_records '{"records":[{"fields":{"fldAAAAAAAAAAAAAA":"draft","fldNNNNNNNNNNNNNN":"Acme"}}]}' "" "$W/bindings.md"
+run 0 "both IDs of a repeated name count" mcp__airtable__create_records '{"records":[{"fields":{"fldLLLLLLLLLLLLL1":["recA"]}},{"fields":{"fldLLLLLLLLLLLLL2":["recB"]}}]}' "" "$W/bindings.md"
+run 0 "recorded ID matched ignoring case" mcp__airtable__create_records '{"records":[{"fields":{"FLDNNNNNNNNNNNNNN":"Acme"}}]}' "" "$W/bindings.md"
+run 2 "unrecorded fld key blocked"   mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldZZZZZZZZZZZZZZ":"approved"}}]}' "fldZZZZZZZZZZZZZZ is not a recorded field ID" "$W/bindings.md"
+run 2 "field name key blocked too"   mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"Status":"voided"}}]}' "Status is not a recorded field ID" "$W/bindings.md"
+run 2 "rule still applies to a recorded ID" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"approved"}}]}' "Status may only be written as voided" "$W/bindings.md"
+bind 'field_status: fldS1SSSSSSSSSSSS' 'field_status: fldS2SSSSSSSSSSSS'
+run 2 "a rule covers every ID recorded under its name" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldS2SSSSSSSSSSSS":"sent"}}]}' "Status may only be written as voided" "$W/bindings.md"
+bind 'base_id: appXXXXXXXXXXXXXX'
+run 2 "no field_ lines: every write blocked" mcp__airtable__create_records '{"records":[{"fields":{"fldNNNNNNNNNNNNNN":"Acme"}}]}' "has not recorded any field IDs" "$W/bindings.md"
+run 0 "no field_ lines: reads pass"  mcp__airtable__list_records '{}' "" "$W/bindings.md"
+bind '- field_status: fldAAAAAAAAAAAAAA'
+run 2 "bulleted line is not a binding" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"voided"}}]}' "has not recorded any field IDs" "$W/bindings.md"
+run 2 "no bindings file: writes blocked" mcp__airtable__create_records '{"records":[{"fields":{"fldNNNNNNNNNNNNNN":"Acme"}}]}' "has not recorded any field IDs"
+
 echo "-- fail closed"
 policy 'covers: [x]' 'allow: [a'
 run 2 "invalid policy blocks"        mcp__a__a '{}' "cannot check this call"
