@@ -3,9 +3,11 @@
 
 Usage:
   guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]   hook input JSON on stdin
-  guard_policy.py --check <guard.yaml>                                      parse only
+  guard_policy.py --agent <guard.yaml> [label]                              agent policy; hook input on stdin
+  guard_policy.py --check [--agent] <guard.yaml>                            parse only
 
-Decides one PreToolUse call against one tool's guard policy: exit 2 blocks
+Decides one PreToolUse call against one tool's guard policy (or, with
+--agent, against the agent guard policy: deny-only, every server): exit 2 blocks
 (stderr says why), exit 0 allows. Any error blocks — a bug fails closed.
 With server_match, `allow` only counts a tool-name suffix whose server segment
 (the text between the previous "__" and that suffix's "__") contains it, so
@@ -21,6 +23,7 @@ import sys
 import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only", "rules")
+AGENT_KEYS = ("covers", "deny")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
@@ -207,7 +210,28 @@ def _validate(policy):
 
 
 def parse(text):
-    """Parse and validate a guard.yaml text. Raises PolicyError."""
+    """Parse and validate a tool's guard.yaml text. Raises PolicyError."""
+    policy = _read(text, KEYS)
+    _validate(policy)
+    return policy
+
+
+def parse_agent(text):
+    """Parse and validate an agent guard policy (the package-root guard.yaml)."""
+    policy = _read(text, AGENT_KEYS)
+    deny = policy.get("deny")
+    if not isinstance(deny, list) or not deny or not all(deny):
+        raise PolicyError("deny must be a non-empty list of tool-name patterns")
+    covers = policy.get("covers", [])
+    if not isinstance(covers, list):
+        raise PolicyError("covers must be a list like [a, b]")
+    for inv in covers:
+        if not SNAKE.match(inv):
+            raise PolicyError(f"covers: '{inv}' is not a snake_case invariant id")
+    return policy
+
+
+def _read(text, keys):
     lines = text.splitlines()
     policy, i = {}, 0
     while i < len(lines):
@@ -223,7 +247,7 @@ def parse(text):
         if line[0] == " " or not m:
             raise PolicyError(f"line {lineno}: expected 'key: value' at column 0")
         key, value = m.group(1), (m.group(2) or "").strip()
-        if key not in KEYS:
+        if key not in keys:
             raise PolicyError(f"line {lineno}: unknown key '{key}'")
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
@@ -248,7 +272,6 @@ def parse(text):
             policy[key] = _scalar(value, lineno)
     if not policy:
         raise PolicyError("the policy is empty")
-    _validate(policy)
     return policy
 
 
@@ -429,7 +452,42 @@ def problems(policy, event, bindings, server_match=None):
     return found
 
 
+def agent_problems(policy, event):
+    """The agent policy: deny patterns over every suffix, whatever the server."""
+    names = [suffix for suffix, _ in _candidates(event.get("tool_name"))]
+    for pattern in policy["deny"]:
+        if _matches(names, [pattern]):
+            return [f"{names[0]} is denied ({pattern})"]
+    return []
+
+
 def main(argv):
+    if len(argv) == 3 and argv[0] == "--check" and argv[1] == "--agent":
+        try:
+            with open(argv[2], encoding="utf-8") as fh:
+                parse_agent(fh.read())
+        except Exception as err:  # never a traceback
+            print(f"FAIL: {type(err).__name__}: {err}")
+            return 1
+        return 0
+    if argv and argv[0] == "--agent":
+        if len(argv) not in (2, 3):
+            print("usage: guard_policy.py --agent <guard.yaml> [label]", file=sys.stderr)
+            return 2
+        label = argv[2] if len(argv) == 3 else "agent guard policy"
+        try:
+            with open(argv[1], encoding="utf-8") as fh:
+                policy = parse_agent(fh.read())
+            event = json.load(sys.stdin)
+            if not isinstance(event, dict):
+                raise PolicyError("hook input is not an object")
+            found = agent_problems(policy, event)
+        except Exception as err:  # fail closed
+            print(f"Blocked by {label}: cannot check this call ({type(err).__name__}: {err})", file=sys.stderr)
+            return 2
+        for problem in found:
+            print(f"Blocked by {label}: {problem}", file=sys.stderr)
+        return 2 if found else 0
     if len(argv) == 2 and argv[0] == "--check":
         try:
             with open(argv[1], encoding="utf-8") as fh:
@@ -439,7 +497,7 @@ def main(argv):
             return 1
         return 0
     if len(argv) not in (2, 3, 4):
-        print("usage: guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match] | --check <guard.yaml>", file=sys.stderr)
+        print("usage: guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match] | --agent <guard.yaml> [label] | --check [--agent] <guard.yaml>", file=sys.stderr)
         return 2
     label = argv[2] if len(argv) >= 3 else "guard policy"
     server_match = argv[3] if len(argv) == 4 else None

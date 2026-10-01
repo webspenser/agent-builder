@@ -157,6 +157,41 @@ bind '- field_status: fldAAAAAAAAAAAAAA'
 run 2 "bulleted line is not a binding" mcp__airtable__update_records '{"records":[{"id":"recX","fields":{"fldAAAAAAAAAAAAAA":"voided"}}]}' "has not recorded any field IDs" "$W/bindings.md"
 run 2 "no bindings file: writes blocked" mcp__airtable__create_records '{"records":[{"fields":{"fldNNNNNNNNNNNNNN":"Acme"}}]}' "has not recorded any field IDs"
 
+echo "-- agent policy"
+aparses() { # aparses <0|1> <label>
+  local out rc; out=$(python3 "$E" --check --agent "$W/guard.yaml" 2>&1); rc=$?
+  if [ "$rc" -eq "$1" ] && ! printf '%s' "$out" | grep -q Traceback; then _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
+}
+arun() { # arun <rc> <label> <tool_name> [text]
+  local out rc
+  out=$(printf '{"tool_name":"%s","tool_input":{}}' "$3" | python3 "$E" --agent "$W/guard.yaml" "demo agent guard policy" 2>&1); rc=$?
+  if [ "$rc" -eq "$1" ] && { [ -z "${4:-}" ] || printf '%s\n' "$out" | grep -qF -- "$4"; } && ! printf '%s' "$out" | grep -q Traceback; then
+    _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
+}
+policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'; aparses 0 "agent policy parses"
+policy 'deny: ["*send*"]';                         aparses 0 "covers is optional"
+policy 'covers: [no_send]';                        aparses 1 "deny is required"
+policy 'deny: []';                                 aparses 1 "deny may not be empty"
+policy 'deny: ["*send*"]' 'allow: [x]';            aparses 1 "allow is not an agent policy key"
+policy 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; aparses 1 "writes is not an agent policy key"
+policy 'covers: [Bad]' 'deny: ["*send*"]';         aparses 1 "covers ids are snake_case"
+: > "$W/guard.yaml";                               aparses 1 "empty agent policy"
+policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'
+arun 2 "deny matches on any server" mcp__claude_ai_Slack__slack_send_message "Blocked by demo agent guard policy: slack_send_message is denied (*send*)"
+arun 2 "deny matches a suffix after __ in the server" mcp__x__gmail__reply "denied (*reply*)"
+arun 0 "replies is not reply" mcp__claude_ai_Attio__list-comment-replies
+arun 0 "other tools pass" mcp__claude_ai_Gmail__create_draft
+arun 2 "non-MCP name fails closed" Bash "cannot check this call"
+out=$(printf '{not json' | python3 "$E" --agent "$W/guard.yaml" x 2>&1); rc=$?
+[ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q Traceback && _report ok "agent: bad JSON blocks" || _report no "agent bad JSON (rc=$rc): $out"
+out=$(printf '{}' | python3 "$E" --agent "$W/missing.yaml" x 2>&1); rc=$?
+[ "$rc" -eq 2 ] && _report ok "agent: missing policy blocks" || _report no "agent missing (rc=$rc): $out"
+policy 'covers: [x]' 'allow: [a]' 'deny: ["*send*"]'
+out=$(python3 "$E" --check "$W/guard.yaml" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && _report ok "plain --check still parses a tool policy" || _report no "plain --check (rc=$rc): $out"
+out=$(python3 "$E" --check --agent "$W/guard.yaml" 2>&1); rc=$?
+[ "$rc" -eq 1 ] && _report ok "a tool policy is not an agent policy" || _report no "tool as agent (rc=$rc): $out"
+
 echo "-- fail closed"
 policy 'covers: [x]' 'allow: [a'
 run 2 "invalid policy blocks"        mcp__a__a '{}' "cannot check this call"
