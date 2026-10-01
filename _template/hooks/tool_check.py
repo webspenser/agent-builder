@@ -10,6 +10,7 @@ custom-tools/<cap>/. Prints one 'FAIL: <message>' line per problem, or one
 'OK:' line. Exit 0 valid, 1 FAIL lines, 2 ERROR (unreadable input). Never a
 traceback. The validator, schedule_check.py and the add-tool skill all use it.
 """
+import json
 import pathlib
 import re
 import sys
@@ -24,13 +25,17 @@ except Exception:  # reported per tool that has a guard.yaml
     guard_policy = None
 
 USAGE = "Usage: tool_check.py <tool-folder> <contract.md> [--custom]"
-IDENTITY_KEYS = ("capability", "provider", "server_match")
+IDENTITY_KEYS = ("capability", "provider", "server_match", "wrapper")
 KEBAB = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 SERVER_MATCH = re.compile(r"[a-z0-9_-]+")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL other than tab, LF, CR
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
 ACCEPTABLE = re.compile(r"^[-*]\s+`([^`]+)`\s+\(acceptable\)")
+N8N_TRIGGER = "@n8n/n8n-nodes-langchain.mcpTrigger"
+N8N_AUTH = ("bearerAuth", "headerAuth")
+TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
+LITERAL_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 
 
 class ToolError(Exception):
@@ -97,7 +102,7 @@ def parse_identity(text, rel):
             fails.append(f"{rel} line {n}: write '{key.strip()}:' with no spaces before the colon")
             continue
         if key not in IDENTITY_KEYS:
-            fails.append(f"{rel}: unknown key '{key}' (identity.yaml holds capability, provider, server_match)")
+            fails.append(f"{rel}: unknown key '{key}' (identity.yaml holds capability, provider, server_match, wrapper)")
             continue
         if key in data:
             fails.append(f"{rel}: {key} appears more than once")
@@ -108,6 +113,68 @@ def parse_identity(text, rel):
             value = ""
         data[key] = value
     return data, fails
+
+
+def _strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            yield from _strings(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from _strings(value)
+
+
+def check_workflow(folder, label, server_match, usage_text):
+    """FAIL messages for a wrapped tool's workflow.n8n.json (an n8n workflow export)."""
+    rel = f"{label}/workflow.n8n.json"
+    path = folder / "workflow.n8n.json"
+    if not path.is_file():
+        return [f"missing {rel} (identity.yaml says wrapper: n8n)"]
+    try:
+        wf = json.loads(read(path))
+    except (ToolError, ValueError) as err:
+        return [f"{rel}: not valid JSON ({err})"]
+    nodes = wf.get("nodes") if isinstance(wf, dict) else None
+    conns = wf.get("connections") if isinstance(wf, dict) else None
+    if not isinstance(nodes, list) or not isinstance(conns, dict) or not all(isinstance(n, dict) for n in nodes):
+        return [f"{rel}: needs a nodes list and a connections object (an n8n workflow export)"]
+    triggers = [n for n in nodes if n.get("type") == N8N_TRIGGER]
+    if len(triggers) != 1:
+        return [f"{rel}: needs exactly one MCP Server Trigger node ({N8N_TRIGGER}), found {len(triggers)}"]
+    trigger, fails = triggers[0], []
+    params = trigger.get("parameters")
+    auth = params.get("authentication") if isinstance(params, dict) else None
+    if auth not in N8N_AUTH:
+        fails.append(f"{rel}: the MCP Server Trigger must require Bearer or Header auth (authentication is {auth!r})")
+    tools = set()
+    for source, outputs in conns.items():
+        groups = outputs.get("ai_tool", []) if isinstance(outputs, dict) else []
+        for group in groups if isinstance(groups, list) else []:
+            for link in group if isinstance(group, list) else []:
+                if isinstance(link, dict) and link.get("node") == trigger.get("name"):
+                    tools.add(source)
+    if not tools:
+        fails.append(f"{rel}: the MCP Server Trigger exposes no tools")
+    by_name = {n.get("name"): n for n in nodes}
+    for name in sorted(tools):
+        if not TOOL_NAME.fullmatch(name):
+            fails.append(f"{rel}: tool node {name!r} must be named in snake_case (the name is the MCP tool name)")
+        tparams = (by_name.get(name) or {}).get("parameters")
+        tparams = tparams if isinstance(tparams, dict) else {}
+        for key in ("url", "method"):
+            value = tparams.get(key)
+            if isinstance(value, str) and "$fromAI" in value:
+                fails.append(f"{rel}: tool {name} lets the caller set its {key}; fix it in the workflow")
+    mapped = set(re.findall(rf"(?<![A-Za-z0-9_-]){re.escape(server_match)}:([A-Za-z0-9_]+)", usage_text)) if server_match else set()
+    for name in sorted(tools - mapped):
+        fails.append(f"{rel}: tool {name} is not mapped in usage.md as {server_match}:{name}")
+    for name in sorted(mapped - tools):
+        fails.append(f"{label}/usage.md: `{server_match}:{name}` is not a tool of the workflow's MCP Server Trigger")
+    if any(LITERAL_BEARER.search(text) for text in _strings(wf)):
+        fails.append(f"{rel}: holds a literal bearer token; keep secrets in n8n credentials")
+    return fails
 
 
 def check_tool(folder, cap, ops, invariants, custom=False, label=None):
@@ -142,6 +209,9 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
                              "(the guard compares it to MCP tool names)")
             elif not match:
                 fails.append(f"{rel}: missing server_match")
+            wrapper = identity.get("wrapper")
+            if wrapper is not None and wrapper != "n8n":
+                fails.append(f"{rel}: wrapper must be n8n (got {wrapper!r})")
 
     usage = folder / "usage.md"
     if not usage.is_file():
@@ -157,6 +227,13 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
                     fails.append(f"{label}/usage.md: does not map operation `{op}`")
             if section(text, "Probe") is None:
                 fails.append(f"{label}/usage.md: needs a ## Probe section")
+
+    if identity.get("wrapper") == "n8n" and usage.is_file():
+        try:
+            usage_text = read(usage)
+        except ToolError:
+            usage_text = ""  # already reported
+        fails.extend(check_workflow(folder, label, identity.get("server_match", ""), usage_text))
 
     if (folder / "bootstrap.py").exists() and usage.is_file():
         try:
