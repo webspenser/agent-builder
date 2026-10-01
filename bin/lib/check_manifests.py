@@ -260,6 +260,9 @@ def check_capability(root, cap):
     for inv in invariants:
         if not SNAKE.match(inv):
             fails.append(f"{rel}: invariant '{inv}' is not snake_case")
+    checker = load_tool_checker()
+    if checker is not None and "no_send" in checker.acceptable(text):
+        fails.append(f"{rel}: no_send cannot be marked (acceptable)")
     folder = base / "tools"
     tools = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
     if not tools:

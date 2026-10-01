@@ -30,6 +30,7 @@ SERVER_MATCH = re.compile(r"[a-z0-9_-]+")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL other than tab, LF, CR
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
+ACCEPTABLE = re.compile(r"^[-*]\s+`([^`]+)`\s+\(acceptable\)")
 
 
 class ToolError(Exception):
@@ -62,6 +63,11 @@ def read_contract(path):
     ops = [m.group(1) for line in section(text, "Operations") or [] for m in [OPERATION.match(line)] if m]
     invs = [m.group(1) for line in section(text, "Invariants") or [] for m in [INVARIANT.match(line)] if m]
     return ops, invs
+
+
+def acceptable(text):
+    """Invariant ids under ## Invariants marked (acceptable): an instance may accept them as instruction-only."""
+    return {m.group(1) for line in section(text, "Invariants") or [] for m in [ACCEPTABLE.match(line)] if m}
 
 
 def _scalar(raw):

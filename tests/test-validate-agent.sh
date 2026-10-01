@@ -491,6 +491,10 @@ make_valid_agent "$FIX/nosendcov"; printf '%s\n' 'covers: [draft_only]' > "$FIX/
 fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_send"
 make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
 assert_pass $V "$FIX/instronly"   # a tool without a policy is allowed: instruction-only
+make_valid_agent "$FIX/acc"; sed -i.bak 's/^- `draft_only` — only drafts/- `draft_only` (acceptable) — only drafts/' "$FIX/acc/capabilities/crm/contract.md"
+assert_pass $V "$FIX/acc"   # an acceptable mark parses; the invariant id is still draft_only
+make_valid_agent "$FIX/accnosend"; sed -i.bak 's/^- `no_send` — never sends/- `no_send` (acceptable) — never sends/' "$FIX/accnosend/capabilities/crm/contract.md"
+fails_with "$FIX/accnosend" "capabilities/crm/contract.md: no_send cannot be marked (acceptable)"
 make_valid_agent "$FIX/noagentpolicy"; rm "$FIX/noagentpolicy/guard.yaml"
 fails_with "$FIX/noagentpolicy" "the contract of crm has no_send, so the agent needs a guard.yaml at its root that covers no_send"
 make_valid_agent "$FIX/agentnocover"; printf '%s\n' 'deny: ["*send*"]' > "$FIX/agentnocover/guard.yaml"
