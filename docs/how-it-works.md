@@ -4,13 +4,14 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.0.
+Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.3.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
 - [What an agent package holds](#what-an-agent-package-holds)
 - [What a client's instance holds](#what-a-clients-instance-holds)
 - [A client's journey](#a-clients-journey)
+- [CRM tools at a glance](#crm-tools-at-a-glance)
 - [The checks](#the-checks)
   - [1. At publish time: the validator in CI](#1-at-publish-time-the-validator-in-ci)
   - [2. At run time: session start and the guard](#2-at-run-time-session-start-and-the-guard)
@@ -18,7 +19,7 @@ Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.0.
   - [4. Inside a scheduled run](#4-inside-a-scheduled-run)
 - [Custom tools: bringing your own tool](#custom-tools-bringing-your-own-tool)
 - [Activities, in detail](#activities-in-detail)
-- [Field IDs (Airtable), in detail](#field-ids-airtable-in-detail)
+- [Field names and IDs, in detail](#field-names-and-ids-in-detail)
 - [Known limits and open questions](#known-limits-and-open-questions)
 
 ## The three repositories
@@ -29,7 +30,7 @@ Current: standard 4.0. Agent Builder 4.0.0, sales-partner 4.0.0.
 | [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: a five-stage sales pipeline over a CRM. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
-The builder's version and the standard's version move together. The standard is in active development: agents track agent-builder's main branch (`validate@main`), and version tags come with the first official release.
+The builder's version and the standard's version move together. The standard is in active development, so there are no version tags yet. An agent's CI uses `validate@main` and always checks against the latest standard. Tags come with the first official release. There is no migration machinery: a change to the standard is made directly in the agents.
 
 ## Vocabulary
 
@@ -40,7 +41,7 @@ The builder's version and the standard's version move together. The standard is 
 | **Capability** | A kind of tool the agent needs, e.g. `crm`, `email_drafts`. | `capabilities/<cap>/` |
 | **Contract** | The capability's operations plus its **invariants**, the rules that must always hold (e.g. `no_send`: never send email). | `capabilities/<cap>/contract.md` |
 | **Tool** | How the contract maps onto one specific system (Attio, Airtable, HubSpot, Gmail). | `capabilities/<cap>/tools/<tool>/` |
-| **Guard policy** | The tool's enforcement rules: which tool calls are allowed, which are denied, and which field values may be written. Its `covers` list names the invariants it enforces. | `…/tools/<tool>/guard.yaml` |
+| **Guard policy** | The tool's enforcement rules: which tool calls are allowed, which are denied, which field values may be written, and which fields may never be written at all. Its `covers` list names the invariants it enforces. | `…/tools/<tool>/guard.yaml` |
 | **Binding** | The instance's choice of tool for a capability. | `bind_<cap>: <tool>` in `instance.yaml` |
 | **Unattended-safe** | Every invariant of the contract is in the bound tool's `covers`: enforced by code, not only by instructions. | Computed by setup and the schedule checker |
 | **Activity** | A workflow step that may run on a schedule, with no one watching. | `activity_<name>: <caps>` in `agent.yaml` |
@@ -50,7 +51,7 @@ The builder's version and the standard's version move together. The standard is 
 ## What an agent package holds
 
 ```
-agent.yaml                  name, version, standard, capabilities, catalog, activity_* lines
+agent.yaml                  name, version, description, standard, capabilities, catalog, activity_* lines
 AGENT.md                    the agent's instructions (loaded at session start)
 skills/  subagents/  templates/  samples/  evals/
 hosts/                      host pointer files (CLAUDE.md, GEMINI.md, AGENTS.md)
@@ -60,7 +61,7 @@ capabilities/<cap>/
     usage.md                how the agent uses this tool, for the model to read
     identity.yaml           capability, provider, server_match, for the hooks to read
     guard.yaml              enforcement rules (optional, but required for no_send)
-    bootstrap.py            optional one-time schema setup in the tool
+    bootstrap.py            optional one-time field setup, run by the person with their own API key
 hooks/                      identical in every agent (copied from the builder)
   hooks.json                wires the two hooks below into Claude Code
   session-start.sh          loads the agent when a session opens in an instance
@@ -99,17 +100,54 @@ MCP settings, environment variables.
 flowchart LR
   A["Install from catalog<br/>claude plugin install sales-partner@webspenser"] --> B["/sales-partner:setup<br/>in an empty folder"]
   B --> C["Interview<br/>writes context/ and schedules.yaml"]
-  C --> D["Tools step<br/>pick a tool or add one, probe, create fields by hand or with an API key, write bindings/, bind_ lines"]
+  C --> D["Tools step<br/>pick a tool or add one, probe, create fields by hand or with bootstrap.py, write bindings/, bind_ lines"]
   D --> E["Everyday use<br/>guard checks every connector call"]
   D --> F["/sales-partner:schedule<br/>gate, environment, routines, verify"]
   F --> G["Cloud routine runs<br/>unattended, guarded"]
 ```
 
-The tools step can also create a tool's fields. If the probe finds them
-missing, setup offers two choices: create them yourself from the tool's
-`## Setup` list, or run the tool's `bootstrap.py` with an API key in
-your own terminal. The key never enters the chat or any file. The
-probe runs again and must pass before the tool is bound.
+The tools step can also help create a tool's fields. If the probe finds
+them missing, setup offers two choices:
+
+- **By hand.** Setup shows the tool's `## Setup` list as plain steps in
+  that system, and you create the fields yourself.
+- **With `bootstrap.py`.** Only tools that ship the script offer this
+  (today, Attio and HubSpot). You create an API key in that system and run
+  the script in your own terminal. You type the key at a hidden prompt
+  (`read -rs`), so it never appears on screen or in your shell history. It
+  stays in that terminal's environment only. It never enters the chat or
+  any file. The script only adds what is missing and never deletes or
+  renames anything.
+
+Either way, the probe runs again and must pass before the tool is bound.
+
+## CRM tools at a glance
+
+The `crm` capability ships three tools in sales-partner. All three follow
+the same contract, so the pipeline works the same way on each. Only the
+home of each record differs.
+
+| | Attio | Airtable | HubSpot |
+|---|---|---|---|
+| **Lead** | A company record, plus one entry in the list `sales_partner_pipeline` | A row in the Leads table | A Company |
+| **Contact** | A People record | A row in the Contacts table | A Contact, linked to its company |
+| **Research** | An entry in the list `sales_partner_research` | A row in the Research table | A Note on the company |
+| **Activity (a draft or logged interaction)** | An entry in the list `sales_partner_outreach` | A row in the Activities table | A Task on the company (and contact) |
+| **Where draft / approved / sent / voided lives** | The `status` field on the entry | The `Status` field on the row | HubSpot's built-in task status: Not started = draft, In progress or Waiting = approved, Completed = sent, Deferred = voided |
+| **Outbound or inbound** | The `direction` field | The `Direction` field | The built-in task priority: High = outbound, None = inbound |
+| **Approval queue** | The view "Awaiting Approval" on the outreach list: status is draft and direction is outbound | The view "Awaiting Approval" on Activities: Status is draft and Direction is outbound | A Tasks view: status is Not started and priority is High |
+| **What setup needs** | An API key, to run `bootstrap.py` (or create the lists and fields by hand) | Create the four tables by hand. No script. Setup's probe records two field IDs | 16 custom fields on Companies and Contacts (none on Tasks). Run `bootstrap.py` with a private-app token, or create them by hand |
+| **Guard blocks, on top of the shared rules** | Attribute keys given as IDs | Writes with no recorded field IDs | Writing a pipeline stage, pipeline or completion date on a Task |
+
+In every tool, the agent can only create a draft or void one. Approving
+and sending are done by a person, in the CRM. The operator creates the
+saved views by hand, because none of the connectors can create views.
+
+In HubSpot, a lead's location uses HubSpot's own city, state and country
+fields, so it needs no custom field. HubSpot's Tasks work on the free
+tier because drafts use the built-in task status. Each tool's setup list
+and views are in its `usage.md` under `capabilities/crm/tools/` in the
+sales-partner repository.
 
 ## The checks
 
@@ -128,21 +166,20 @@ different moment.
 ```mermaid
 flowchart TD
   S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
-  V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/, skill and subagent format"]
-  V --> HO["hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md"]
+  V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>skill and subagent format"]
   V --> MF["Manifests<br/>agent.yaml name, version, standard 4.0<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
-  V --> BU["Release rule, on PRs<br/>files changed means version bumped"]
+  V --> BU["Release rule, when CI asks for it<br/>files changed means version bumped"]
   TL --> T1["PreToolUse guard hook wired"]
   TL --> T2["hooks are byte-identical<br/>to the builder's _template/hooks"]
   TL --> T3["each capability: contract has<br/>Operations and Invariants"]
-  TL --> T4["each tool passes tool_check.py:<br/>usage.md maps every operation and has a Probe;<br/>identity.yaml keys valid;<br/>server_match is a-z 0-9 _ -"]
-  TL --> T5["guard.yaml parses; covers only names<br/>real invariants; no_send must be covered"]
+  TL --> T4["each tool passes tool_check.py:<br/>usage.md maps every operation and has a Probe,<br/>and a Setup section when bootstrap.py exists;<br/>identity.yaml keys valid;<br/>server_match is a-z 0-9 _ -"]
+  TL --> T5["guard.yaml parses, rules valid (forbid, writes);<br/>covers only names real invariants;<br/>no_send must be covered"]
   TL --> T6["add-tool skill present and<br/>byte-identical to the builder's"]
   AC --> A1["activity names kebab-case, not repeated"]
-  AC --> A2["capabilities exist; none not mixed"]
+  AC --> A2["capabilities exist; none is not mixed with others"]
   AC --> A3["skills/schedule present;<br/>catalog and catalog_repo set"]
 ```
 
@@ -163,7 +200,7 @@ flowchart TD
   A -- yes --> M{"mode: source?"}
   M -- yes --> Q2["print nothing<br/>(host files load AGENT.md)"]
   M -- no --> H["print header: # Agent: name version,<br/>instance and package folders"]
-  H --> L["load AGENT.md"]
+  H --> L["load AGENT.md (inline up to 9000 bytes, else a pointer)"]
 ```
 
 Nothing at run time compares versions. The guard looks at bindings and
@@ -189,9 +226,11 @@ flowchart TD
   GY -- no --> B
   GY -- yes --> E["guard_policy.py with guard.yaml<br/>and bindings/cap.md"]
   E --> E1["tool in allow list,<br/>and not in deny list"]
-  E1 --> E2["writes: kind by tool and path<br/>each written field value is allowed<br/>(status: draft on create, voided on update;<br/>do_not_contact only to true)"]
-  E2 --> E3["Airtable: field IDs from bindings/cap.md;<br/>Attio: refuse uuid keys"]
-  E3 --> D{"passes?"}
+  E1 --> E2["writes: says where values sit in the call,<br/>and whether it is a create or an update"]
+  E2 --> E3["forbid: fields that may never be written<br/>(HubSpot: pipeline stage, pipeline, completion date)"]
+  E3 --> E4["each other ruled field's value is allowed<br/>(status: draft on create, voided on update;<br/>do_not_contact only to true)"]
+  E4 --> E5["Airtable: field IDs from bindings/cap.md;<br/>Attio: refuse uuid keys"]
+  E5 --> D{"passes?"}
   D -- no --> BL2["BLOCK: Blocked by … guard policy"]
   D -- yes --> B
   B -- all lines done --> OK
@@ -347,16 +386,24 @@ activity_digest: crm, email_drafts
 Web search and file reads are not capabilities, so activities don't list
 them.
 
-## Field IDs (Airtable), in detail
+## Field names and IDs, in detail
 
-Attio's tools write fields by **name** (`status`, `do_not_contact`), so its
-guard policy can check those names directly. Airtable's tools write fields
-by **ID** (`fldXXXXXXXX`). A policy that said "field Status" would never
-match a call, and renaming the column in Airtable would also get around a
-rule keyed on the name.
+Each tool writes to its CRM in a different way, and the guard has to
+recognise a protected field in each of them.
+
+- **Attio** writes fields by **name** (`status`, `do_not_contact`), so
+  its guard policy can check those names directly. It also refuses any
+  key that looks like an Attio ID, because an ID could hide a protected
+  field.
+- **HubSpot** writes properties by **name** too (`hs_task_status`,
+  `sp_do_not_contact`). Its binding holds no field IDs, only the
+  account's `hub_id`.
+- **Airtable** writes fields by **ID** (`fldXXXXXXXX`). A policy that said
+  "field Status" would never match a call, and renaming the column in
+  Airtable would also get around a rule keyed on the name.
 
 So the Airtable policy's rules say `binding_id: required`. Setup's probe
-records the real IDs in `bindings/crm.md`:
+records the real IDs in `bindings/crm.md`, one plain line each:
 
 ```
 field_status: fldAbc123
@@ -364,8 +411,25 @@ field_do_not_contact: fldDef456
 ```
 
 The engine checks writes against those IDs. If the lines are missing, every
-Airtable write is blocked. That fails safe, but it surprises users; making
-the gate flag it earlier is on the list below.
+Airtable write is blocked. That fails safe. Setup's probe records the
+lines, so re-running the tools step fixes it.
+
+**The rules a policy can hold.** Each rule names one field and does one of
+these things:
+
+- **Limit its values.** The field may be written only as the listed
+  values, and the list can differ for a create and an update. Example:
+  `status` may be created only as `draft` and updated only to `voided`.
+- **Forbid it.** With `forbid: true`, the field may never be written, on
+  create or update, whatever the value. HubSpot uses this for
+  `hs_pipeline_stage`, `hs_pipeline` and `hs_task_completion_date`. A
+  Task's pipeline stages mirror its statuses, so these fields would be
+  another way to change a draft's status.
+
+A policy's `writes:` list tells the engine where in each tool call the
+values sit (for example `createRequest.objects[].properties` for a
+HubSpot create) and whether that tool creates or updates. Without it the
+engine would not know which values to check.
 
 **The balance.** The guard enforces only the few invariants that would do
 real harm if broken:
@@ -379,25 +443,40 @@ Everything else is left to the agent's instructions.
 
 ## Known limits and open questions
 
-Engineering follow-ups:
+These are still open. Everything else that used to be on this list is done.
 
-- **No re-check at run time.** The gate runs only when the schedule skill
-  runs. A hook at the start of each scheduled run would catch binding or
-  version drift.
-- **Unpinned version.** When the setup script's cache refreshes, the
-  environment installs the latest catalog version. Nothing pins a version.
-- **Time zones.** The skill should give the routine time in the user's
-  browser zone, because the form uses that zone.
-- **Exact times.** The routine UI suggests times just off the hour, but
+- **Routine times and time zones.** The routine form uses the browser's
+  time zone and stores a fixed UTC cron. The schedule skill should give
+  times in the user's own zone.
+- **Exact times.** The routine form suggests times just off the hour, but
   `verify` compares exact times. Decide whether to allow a margin or keep
   the rule "use the exact time".
-- **Source-mode instances** still need `catalog` keys to schedule, and get
-  install lines they don't need.
-- **Scheduled prospecting** uses web search only. Apify would need a
-  scraping capability.
-- **Airtable without field IDs** passes the gate but blocks every write.
-
-Design questions:
-
-- **Compliance** (CAN-SPAM, GDPR, TCPA) as a first-class track, and which
-  tools to build next.
+- **Source-mode instances** still need the `catalog` keys to schedule, and
+  they get install lines they don't need.
+- **Airtable without field IDs.** A binding with no field IDs passes the
+  schedule gate but blocks every write.
+- **Catalog version pinning before go-live.** When the setup script's
+  cache refreshes, the cloud environment installs the latest catalog
+  version. Nothing pins a version yet, so a client could get a new
+  release they have not seen. This needs fixing before agents go live
+  for clients.
+- **A run-time re-check for scheduled runs.** The gate runs only when the
+  schedule skill runs. A check at the start of each scheduled run would
+  catch binding or version drift that happens afterwards.
+- **Compliance.** CAN-SPAM, GDPR and TCPA are not yet a first-class
+  track in the standard.
+- **More CRMs.** Attio, Airtable and HubSpot ship today. Which tool to
+  build next is undecided.
+- **A scraping capability.** Scheduled prospecting uses web search only.
+  A service such as Apify would need its own capability.
+- **Connector-driven field setup.** Fields are created by hand or with
+  `bootstrap.py` and the person's own API key, because the connectors
+  can't create fields or views. If connectors gain that ability, setup
+  could do it without an API key.
+- **The custom `no_send` tool gap.** `add-tool`, `tool_check.py` and the
+  schedule gate refuse a custom email tool whose guard doesn't cover
+  `no_send`. The guard itself can't see the contract, so a hand-edited
+  instance that skips this isn't blocked at call time.
+- **Guard support on Gemini and Codex.** The guard's hook wiring
+  (`hooks/hooks.json`) is Claude Code's. The Gemini and Codex manifests
+  ship but are not verified, so the guard isn't confirmed to run there.
