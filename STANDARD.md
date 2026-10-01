@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 4.0. It is in active development: agents track
+The standard is 5.0. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "4.0"`.
+`agent.yaml`, and the validator requires `standard: "5.0"`.
 
 ## Directory layout
 
@@ -231,7 +231,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "4.0"                # the Agent Standard version followed
+standard: "5.0"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -486,10 +486,10 @@ validation error and, at runtime, a block.
   (`["a" "b"]` is an error).
 - The exceptions are `rules:` and `writes:`, whose values are block
   lists: each item starts with `  - `, with further keys indented four
-  spaces. A `rules` item holds `field:` plus any of `binding_id:`,
-  `create:`, `update:`, `any:`, or `field:` plus `forbid: true` (and
-  optionally `binding_id:`); `forbid` takes no other value and is never
-  combined with `create`, `update` or `any`. A `writes` item holds `kind:`, `tools:`
+  spaces. A `rules` item holds `field:` plus any of `create:`,
+  `update:`, `any:`, or `field:` plus `forbid: true` or `forbid: update`;
+  `forbid` takes no other value and is never combined with `create`,
+  `update` or `any`. A `writes` item holds `kind:`, `tools:`
   and `at:`, the last two as flow lists. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
@@ -503,10 +503,11 @@ validation error and, at runtime, a block.
 | `covers` | yes | Invariant ids this policy enforces (snake_case) |
 | `allow` | no | Tool-name glob patterns that may be called; if present, everything else on the matched server is blocked |
 | `deny` | no | Tool-name glob patterns that are always blocked |
-| `writes` | if `rules` or `refuse_keys` | A list of `{kind, tools, at}` entries. `kind` is `create` or `update`; `tools` are tool-name globs, matched as in `allow`/`deny`; `at` lists where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`). A path containing `[]` must be quoted: `"records[].fields"` |
+| `writes` | if `rules`, `refuse_keys` or `bound_keys_only` | A list of `{kind, tools, at}` entries. `kind` is `create` or `update`; `tools` are tool-name globs, matched as in `allow`/`deny`; `at` lists where attribute maps sit in the tool input: a key (`values`), a dotted path (`a.b`), or a list path (`records[].fields`). A path containing `[]` must be quoted: `"records[].fields"` |
 | `unwrap` | no | Keys whose value stands for a wrapped value (`{"option": "draft"}`); without them any object value on a write is an error |
 | `unknown_writes` | no | `update` (default) or `block`: a call that holds an attribute map at a `writes` path that no `writes` entry for that tool lists |
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
+| `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
 
 ### Semantics
@@ -563,17 +564,27 @@ validation error and, at runtime, a block.
    `create` for creates, `update` for updates and unknown writes; `any`
    applies when the kind's own list is absent. No applicable list: not
    checked. A rule with `forbid: true` blocks any write of its field, on
-   create or update, whatever the value (`<field> may not be written`);
-   other fields in the same map are still checked by their own rules.
+   create or update, whatever the value (`<field> may not be written`).
+   A rule with `forbid: update` blocks its field in a map checked as an
+   update, unknown writes included (`<field> may not be changed after
+   create`), and does not check creates. Other fields in the same map
+   are still checked by their own rules.
 5. **Refused keys.** `refuse_keys: [uuid]` blocks any UUID-shaped key
    in a map (it could hide a ruled field).
-6. **Field identity.** `field_<name>` (the name normalized: lowercase,
-   spaces and hyphens become underscores) in `bindings/<capability>.md` (a
-   `key: value` line) adds that ID as a key matching the rule. With
-   `binding_id: required`, a write while the ID is missing is blocked.
-7. **Errors.** An invalid policy, unreadable bindings, bad JSON, or any
+6. **Recorded keys.** With `bound_keys_only: true`, every key in every
+   collected map (create, update or unknown) must equal, ignoring case,
+   an ID recorded in some `field_<name>` binding; otherwise
+   `<key> is not a recorded field ID; re-run the probe (setup's tools
+   step)`. With no `field_` lines at all, a call holding a non-empty map
+   is blocked with `the probe has not recorded any field IDs in
+   bindings; re-run setup's tools step`.
+7. **Field identity.** Each `field_<name>` line (the name normalized:
+   lowercase, spaces and hyphens become underscores) in
+   `bindings/<capability>.md` adds its ID as a key matching the rule for
+   that name. The key may repeat; every line adds one ID.
+8. **Errors.** An invalid policy, unreadable bindings, bad JSON, or any
    engine exception blocks, with the cause on stderr.
-8. **Output.** Exit 2 with one line per problem, prefixed
+9. **Output.** Exit 2 with one line per problem, prefixed
    `Blocked by <label>: `; exit 0 otherwise. `--check` prints
    `FAIL: …` and exits 1 on an invalid policy. `guard.sh` passes the label
    `<agent> guard policy (<capability>/<provider>)`.
@@ -586,7 +597,9 @@ Each is an invalid policy, and fails closed.
 - `tools` or `at` is missing or empty.
 - An `at` path is not a valid path.
 - A `writes` entry has an unknown key.
-- `rules` or `refuse_keys` is present without `writes`.
+- `rules`, `refuse_keys` or `bound_keys_only` is present without `writes`.
+- `bound_keys_only` is not `true`.
+- `forbid` is not `true` or `update`.
 
 ### Field identity
 
@@ -594,16 +607,51 @@ A rule names a field. It matches that key in the call, ignoring case
 and separators (`Do Not Contact`, `do_not_contact`). Some providers key
 fields by ID instead (Airtable writes `fld…`), so the probe records the
 ID in `bindings/<capability>.md` as `field_<name>: <id>`, and the rule
-matches that key too. `binding_id: required` makes the ID mandatory: a
-write while it is missing is blocked.
+matches that key too. A name used in two places (Airtable tables can
+share a field name) gets one line per ID, and a rule for that name
+matches all of them, which fails closed. With `bound_keys_only: true`
+the recorded IDs are also the only keys a write may use, so a field
+added or recreated in the provider is refused until the probe runs
+again.
 
 The exact form is a plain line, `field_<name>: <ID>`, with nothing else
 on it: no bullet, and no trailing comment or note. The engine strips one
 surrounding pair of backticks or matching quotes; the rest must match
 `^[A-Za-z0-9_.-]+$`, or the call is blocked with `field_<name> must be a
-bare ID`. A bulleted line is not read as a binding, so with
-`binding_id: required` it counts as not recorded. Keys that do not start
-with `field_` are not checked.
+bare ID`. A bulleted line is not read as a binding. Keys that do not
+start with `field_` are not checked.
+
+### Agent guard policy
+
+An agent may ship one more policy, `guard.yaml` at the package root. It
+is deny-only and applies to every MCP call inside an instance of the
+agent, whatever the server, bound or not:
+
+```yaml
+# guard.yaml — sales-partner agent guard policy
+covers: [no_send]
+deny: ["*send*", "*reply*", "*forward*", "*publish*", "*schedule_message*",
+       "*cross_post*", "*posts_create*", "*bulk_upload_posts*", "*execute_write*"]
+```
+
+The grammar is the tool policy's. The keys are `covers` (optional,
+`snake_case` ids) and `deny` (required, a non-empty list of tool-name
+globs); any other key is a parse error. The engine runs it as
+`guard_policy.py --agent <guard.yaml> [label]` with the hook input on
+stdin, and `--check --agent <guard.yaml>` only parses it. Candidate
+names are every suffix after `mcp__` that follows a `__`, with no
+`server_match`, so every suffix counts. A matching pattern blocks with
+`<tool> is denied (<pattern>)`; errors block as in a tool policy.
+
+When any capability's contract has a `no_send` invariant, the agent
+must ship this file and its `covers` must include `no_send`. The
+validator and the schedule gate both check it.
+
+Globs match names, not behaviour: a connector whose send tool has an
+unusual name (a generic `execute_write`) is caught only if the author
+lists it. Check the list against the read tools of the connectors your
+users have, so no read is denied. For scheduled runs the connector
+restriction (`verify`) stays the strongest control.
 
 ## Bindings
 
@@ -626,9 +674,15 @@ matcher `mcp__.*` and command `"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"`.
 `guard_policy.py` is the engine:
 `python3 guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]`,
 with the hook input on stdin. `--check <guard.yaml>` only parses the
-policy. It never prints a traceback.
+policy. `--agent <guard.yaml> [label]` and `--check --agent <guard.yaml>`
+do the same for the agent guard policy. It never prints a traceback.
 
-Inside an instance of the agent (source mode included), `guard.sh`
+Inside an instance of the agent (source mode included), for an MCP
+call, `guard.sh` first runs the agent guard policy when `guard.yaml`
+exists at the package root (a dangling symlink or a directory by that
+name still reaches the engine, which blocks), with the label `<agent>
+agent guard policy`. A missing engine, a missing `python3`, or any other
+nonzero exit from the engine blocks. Then `guard.sh`
 reads each `bind_<capability>: <provider>` line in `instance.yaml`. It
 finds the tool (the package's `capabilities/<capability>/tools/<provider>/`,
 or for `custom` the instance's `custom-tools/<capability>/`). When the
@@ -661,10 +715,10 @@ symlink by that name) it blocks every MCP call, since its policy could
 never apply; the message says to fix `identity.yaml` (`tool_check.py`
 reports it).
 
-Known gap: a custom tool for a `no_send` capability that has no
-`guard.yaml` is refused by `add-tool`, `tool_check.py` and the schedule
-gate, but the guard itself cannot see the contract, so a hand-edited
-instance like that is not blocked at call time.
+A custom tool bound to a `no_send` capability is covered by the agent
+guard policy's deny list, whatever its own files say; `add-tool`,
+`tool_check.py` and the schedule gate still require its own
+`guard.yaml`.
 
 Matching over-covers on purpose, so a name containing `__` cannot hide
 a match: `server_match` is tested against everything after `mcp__` in
@@ -779,7 +833,7 @@ from a cloud environment. The user keeps one environment per account
 agent, a version comment and two install lines:
 
 ```bash
-# sales-partner 4.0.0
+# sales-partner 5.0.0
 claude plugin marketplace add webspenser/agent-library
 claude plugin install sales-partner@webspenser
 ```
@@ -800,7 +854,8 @@ lines for it.
 An entry may be scheduled only if it passes the gate. For the entry's
 activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
-bound tool's `guard.yaml` `covers`. The gate also fails an entry when:
+bound tool's `guard.yaml` `covers`. A `no_send` invariant must also be
+in the agent guard policy's `covers`. The gate also fails an entry when:
 
 - `agent.yaml` has no `catalog` or `catalog_repo`;
 - a bound tool has no `server_match`, or one outside `[a-z0-9_-]+`;
@@ -884,7 +939,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"4.0"`.
+- `agent.yaml` exists, and its `standard` is `"5.0"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -902,6 +957,9 @@ The validator checks:
   identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
   and `guard.yaml` rules in Tools above, and
   `guard.yaml` covering `no_send` when the contract has it.
+- A `guard.yaml` at the package root parses as an agent guard policy.
+  When any contract has `no_send`, it must exist and its `covers` must
+  include `no_send`.
 - `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
   most 25 lines and pointing at `AGENT.md`.
 - An agent with capabilities ships `skills/add-tool/SKILL.md`,

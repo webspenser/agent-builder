@@ -59,8 +59,11 @@ with `python3`.
      anything destructive;
    - `writes` entries, each with a `kind` (`create` or `update`), the `tools`
      it covers and the argument paths `at` where the value maps sit;
-   - field `rules`, with `binding_id: required` when the system writes
-     fields by ID rather than by name.
+   - field `rules`; when the system writes fields by ID rather than by
+     name, add `bound_keys_only: true` and have the probe record every
+     field's ID as a `field_<name>: <id>` line;
+   - `forbid: update` on any field that must not change after create,
+     such as an approved draft's body.
 
    Put every enforced invariant in `covers`. Tell the user plainly which
    invariants stay instruction-only (not in `covers`), and that a
