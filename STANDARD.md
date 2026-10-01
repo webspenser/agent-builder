@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 5.0. It is in active development: agents track
+The standard is 6.0. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "5.0"`.
+`agent.yaml`, and the validator requires `standard: "6.0"`.
 
 ## Directory layout
 
@@ -231,7 +231,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "5.0"                # the Agent Standard version followed
+standard: "6.0"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -275,7 +275,14 @@ A folder is an instance of an agent when it holds `instance.yaml`:
 agent: sales-partner       # the agent's name
 mode: plugin               # plugin | source
 bind_crm: attio            # one line per bound capability
+accept_instruction_only: enroll_ready_only   # optional; see The unattended gate
 ```
+
+`accept_instruction_only` lists invariants the operator knowingly
+accepts as held by instructions alone, comma-separated. Only setup
+writes it, after explaining in plain words what is not enforced and
+what could happen; only invariants the contract marks `(acceptable)`
+may be listed (see Capabilities).
 
 `context/<file>` in `AGENT.md`, skills, and contracts means the
 instance's file; if it is missing, run the step that produces it —
@@ -328,7 +335,12 @@ mailbox. The package describes it in two layers:
   operation name in backticks) and the rules every tool must uphold
   (a `## Invariants` list, each item starting with a `snake_case` id in
   backticks). Skills and sub-agent contracts call operations, never a
-  provider's tools.
+  provider's tools. An invariant no guard can check by design (for
+  example one that depends on a record's state in another system) may
+  be marked acceptable by writing ` (acceptable)` right after its id:
+  ``- `enroll_ready_only` (acceptable) — …``. An instance may then
+  accept it as instruction-only (`accept_instruction_only`). `no_send`
+  can never be marked acceptable.
 - `capabilities/<capability>/tools/<tool>/` — one folder per system
   (see Tools).
 
@@ -338,17 +350,19 @@ A tool connects one capability's contract to one system. Its folder,
 `capabilities/<capability>/tools/<tool>/` (kebab-case name), holds four
 files, each with one reader and one purpose:
 
-- `identity.yaml` is read by the hooks. It holds exactly three flat
-  keys, as plain values:
+- `identity.yaml` is read by the hooks. It holds three flat keys, as
+  plain values, plus an optional fourth:
 
       capability: crm
       provider: attio
       server_match: attio          # part of the MCP server name, lowercase
+      wrapper: n8n                 # optional: the system is reached through an n8n workflow
 
   `capability` is the capability's folder name. `provider` is the tool's
   folder name (`custom` in an instance's `custom-tools/`). `server_match`
   matches `[a-z0-9_-]+`; the guard compares it to the lowercased text
-  after `mcp__` in a tool name. Any other key is an error.
+  after `mcp__` in a tool name. `wrapper`, when present, must be `n8n`
+  (see Wrapped tools). Any other key is an error.
 - `usage.md` is read by the model. It maps every operation of the
   contract, each named in backticks, to that system's exact tool calls,
   fields, filters and views. It has a `## Probe` section: the read-only
@@ -386,14 +400,61 @@ and instance rules cannot drift.
 It prints one `FAIL: <message>` line per problem, or one `OK:` line, and
 exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
 
-- `identity.yaml` exists, has exactly the three keys, `capability` and
-  `provider` match the folder (or `custom`), and `server_match` is
-  lowercase letters, digits, `_` or `-`;
+- `identity.yaml` exists, has the three keys (and at most `wrapper:
+  n8n` besides), `capability` and `provider` match the folder (or
+  `custom`), and `server_match` is lowercase letters, digits, `_` or `-`;
+- a `wrapper: n8n` tool passes the Wrapped tools checks below;
 - `usage.md` exists, mentions every contract operation in backticks, and
   has a `## Probe` section;
 - `guard.yaml`, when present, parses with the engine's parser and its
   `covers` names only contract invariants;
 - when the contract has `no_send`, `guard.yaml` exists and covers it;
+
+### Wrapped tools (n8n)
+
+A system with no MCP server is wrapped in an n8n workflow. The tool
+folder then ships `workflow.n8n.json`, an n8n workflow export whose
+**MCP Server Trigger** exposes exactly the tools `usage.md` maps, each a
+thin call to the system, and `identity.yaml` says `wrapper: n8n`.
+`server_match` is the name the user gives the connector for the
+trigger's URL. The system's keys are n8n credentials: the package and
+the instance hold none.
+
+Rules, each checked by `tool_check.py`:
+
+- `workflow.n8n.json` exists and is an n8n export (a `nodes` list and a
+  `connections` object): `missing <tool>/workflow.n8n.json (identity.yaml
+  says wrapper: n8n)`, `not valid JSON`, `needs a nodes list and a
+  connections object`.
+- Exactly one MCP Server Trigger node
+  (`@n8n/n8n-nodes-langchain.mcpTrigger`): `needs exactly one MCP Server
+  Trigger node`.
+- The trigger requires Bearer or Header auth (`authentication` is
+  `bearerAuth` or `headerAuth`): `the MCP Server Trigger must require
+  Bearer or Header auth`.
+- The exposed tools are the nodes connected to the trigger by an
+  `ai_tool` connection. At least one: `exposes no tools`. Each is named
+  in snake_case, because the node name is the MCP tool name: `tool node
+  '<name>' must be named in snake_case`.
+- A tool never lets the caller set its `url` or `method` (no `$fromAI`
+  there): `tool <name> lets the caller set its url`.
+- The tools and `usage.md` agree both ways: each tool appears in
+  `usage.md` as `<server_match>:<tool>`, and each `<server_match>:<name>`
+  in `usage.md` is a tool: `tool <name> is not mapped in usage.md as
+  <server_match>:<name>`, ``usage.md: `<server_match>:<name>` is not a tool
+  of the workflow's MCP Server Trigger``.
+- No literal bearer token anywhere in the workflow: `holds a literal
+  bearer token; keep secrets in n8n credentials`.
+
+Use one workflow per system and a per-workflow MCP Server Trigger only.
+n8n's instance-level MCP access exposes generic tools that run or build
+any workflow (`execute_workflow`, `create_workflow_from_code`, …), which
+would bypass every tool policy, so an agent with a wrapped tool must
+deny them in its agent guard policy (see Validation).
+
+The host connects to the trigger's URL with its secret: Claude Code
+sends it as a header in the MCP config; for a claude.ai connector used
+by scheduled runs, setup records the method the user's host supports.
 
 ### The add-tool skill
 
@@ -855,7 +916,11 @@ An entry may be scheduled only if it passes the gate. For the entry's
 activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
 bound tool's `guard.yaml` `covers`. A `no_send` invariant must also be
-in the agent guard policy's `covers`. The gate also fails an entry when:
+in the agent guard policy's `covers`. An invariant the contract marks
+`(acceptable)` and `instance.yaml` lists in `accept_instruction_only`
+counts as covered; the check prints it under the passing entry as
+`ACCEPTED (instruction-only): <capability>: <invariant>`, every time.
+The gate also fails an entry when:
 
 - `agent.yaml` has no `catalog` or `catalog_repo`;
 - a bound tool has no `server_match`, or one outside `[a-z0-9_-]+`;
@@ -866,7 +931,9 @@ in the agent guard policy's `covers`. The gate also fails an entry when:
 - an `activity_`, `schedule_`, or `then_` key is repeated;
 - `schedules.yaml` has an `environment` that is not `env_` then letters
   and digits;
-- the time is not `<weekday|daily> HH:MM`.
+- the time is not `<weekday|daily> HH:MM`;
+- `accept_instruction_only` lists an invariant of one of the entry's
+  capabilities that its contract does not mark `(acceptable)`.
 
 A `routine_<activity>` line with no `schedule_<activity>` also fails
 the check: that routine still runs without the gate, so the checker
@@ -939,7 +1006,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"5.0"`.
+- `agent.yaml` exists, and its `standard` is `"6.0"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -959,7 +1026,10 @@ The validator checks:
   `guard.yaml` covering `no_send` when the contract has it.
 - A `guard.yaml` at the package root parses as an agent guard policy.
   When any contract has `no_send`, it must exist and its `covers` must
-  include `no_send`.
+  include `no_send`. When any tool says `wrapper: n8n`, its `deny` must
+  include `*execute_workflow*`, `*create_workflow*`, `*update_workflow*`,
+  `*archive_workflow*` and `*publish_workflow*` (compared ignoring case).
+- No contract marks `no_send` `(acceptable)`.
 - `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
   most 25 lines and pointing at `AGENT.md`.
 - An agent with capabilities ships `skills/add-tool/SKILL.md`,

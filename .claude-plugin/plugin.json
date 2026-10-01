@@ -1,6 +1,6 @@
 {
   "name": "agent-builder",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "Build your own AI agent on the Webspenser Agent Standard — a guided wizard, a template, and a validator.",
   "author": { "name": "Webspenser" },
   "repository": "https://github.com/webspenser/agent-builder",

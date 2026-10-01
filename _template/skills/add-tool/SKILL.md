@@ -41,9 +41,22 @@ with `python3`.
    tool names and confirm with the user. If the system has no tools in
    this session, explain how to connect it in the host (a connector or an
    MCP server, where the user enters any login themselves), and stop.
-4. **`identity.yaml`.** Write exactly three lines: `capability: <cap>`,
+
+   If the system has no MCP server at all, offer to wrap it in n8n (the
+   Agent Standard's "Wrapped tools"): an n8n workflow whose MCP Server
+   Trigger requires Bearer or Header auth and exposes one snake_case tool
+   node per call `usage.md` needs, each a fixed call to the system (never
+   a URL or method the caller sets). The system's key goes into an n8n
+   credential, never into the agent or the instance. Save the workflow
+   export as `workflow.n8n.json` in the tool folder, add `wrapper: n8n` to
+   `identity.yaml`, and ask the user to connect the trigger's URL as a
+   connector whose name contains `server_match`. Remind them that the
+   agent's root `guard.yaml` must deny `*execute_workflow*`,
+   `*create_workflow*`, `*update_workflow*`, `*archive_workflow*` and
+   `*publish_workflow*`.
+4. **`identity.yaml`.** Write three lines: `capability: <cap>`,
    `provider: <tool>` (or `provider: custom` for the instance target),
-   and `server_match: <text>`.
+   and `server_match: <text>`; add `wrapper: n8n` for a wrapped tool.
 5. **`usage.md`.** Write how the agent uses this system:
    - For every contract operation, name it in backticks (e.g.
      `` `create_lead` ``) and give the exact tool calls, object and field

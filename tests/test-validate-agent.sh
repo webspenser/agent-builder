@@ -17,7 +17,7 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete ag
   for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/hosts/$a.md"; done
   echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
   echo '# Cases' > "$d/evals/cases.md"
-  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "5.0"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "6.0"' 'capabilities: crm' > "$d/agent.yaml"
   printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
@@ -129,7 +129,7 @@ assert_pass $V "$FIX/mf-sub"
 # agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
 make_valid_agent "$FIX/mf-loose"
 printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
-  "version: '0.1.0'" 'description: A demo agent' 'standard: "5.0"' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "6.0"' \
   'capabilities: crm   # the only one' 'extra:' '  - nested' > "$FIX/mf-loose/agent.yaml"
 assert_pass $V "$FIX/mf-loose"
 
@@ -141,7 +141,7 @@ fails_with "$FIX/mf-badname" "agent.yaml: name 'Demo_Agent' is not kebab-case"
 make_valid_agent "$FIX/mf-badver" demo-agent "1.0"
 fails_with "$FIX/mf-badver" "agent.yaml: version '1.0' is not MAJOR.MINOR.PATCH"
 make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "3.0"/' "$FIX/mf-std20/agent.yaml"
-fails_with "$FIX/mf-std20" "agent.yaml: standard '3.0' must be \"5.0\""
+fails_with "$FIX/mf-std20" "agent.yaml: standard '3.0' must be \"6.0\""
 
 # Host manifest problems.
 make_valid_agent "$FIX/mf-nogem"; rm "$FIX/mf-nogem/gemini-extension.json"
@@ -522,8 +522,8 @@ make_valid_agent "$FIX/badagentpolicy"; printf '%s\n' 'covers: [no_send]' 'allow
 fails_with "$FIX/badagentpolicy" "guard.yaml: line 2: unknown key 'allow'"
 make_valid_agent "$FIX/dirpolicy"; rm "$FIX/dirpolicy/guard.yaml"; mkdir "$FIX/dirpolicy/guard.yaml"
 fails_with "$FIX/dirpolicy" "guard.yaml: cannot be read (Is a directory)"
-make_valid_agent "$FIX/oldstd"; sed -i.bak 's/standard: "5.0"/standard: "4.0"/' "$FIX/oldstd/agent.yaml"
-fails_with "$FIX/oldstd" "agent.yaml: standard '4.0' must be \"5.0\""
+make_valid_agent "$FIX/oldstd"; sed -i.bak 's/standard: "6.0"/standard: "5.0"/' "$FIX/oldstd/agent.yaml"
+fails_with "$FIX/oldstd" "agent.yaml: standard '5.0' must be \"6.0\""
 
 echo "-- activities"
 make_valid_agent "$FIX/act"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"

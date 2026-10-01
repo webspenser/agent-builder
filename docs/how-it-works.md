@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 5.0. Agent Builder 5.0.0, sales-partner 5.0.0.
+Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
@@ -20,6 +20,8 @@ Current: standard 5.0. Agent Builder 5.0.0, sales-partner 5.0.0.
 - [Custom tools: bringing your own tool](#custom-tools-bringing-your-own-tool)
 - [Activities, in detail](#activities-in-detail)
 - [Field names and IDs, in detail](#field-names-and-ids-in-detail)
+- [Accepted risks](#accepted-risks)
+- [Wrapping a service in n8n](#wrapping-a-service-in-n8n)
 - [Known limits and open questions](#known-limits-and-open-questions)
 
 ## The three repositories
@@ -468,6 +470,56 @@ real harm if broken:
 - never send email (`no_send`).
 
 Everything else is left to the agent's instructions.
+
+## Accepted risks
+
+Some rules can't be checked by the guard at all, because the guard sees
+one tool call at a time and never reads another system. For example,
+"enroll only leads the owner moved to Ready to Send" depends on the
+lead's stage in the CRM, which the call to the sending platform doesn't
+carry. A contract marks such an invariant `(acceptable)`.
+
+Normally an activity can't be scheduled while any invariant is held only
+by instructions. For an acceptable one, setup explains in plain words
+what isn't enforced and what could go wrong, and only if the owner
+agrees writes it to `accept_instruction_only:` in `instance.yaml`. The
+schedule check then passes and prints the risk under the entry, every
+time:
+
+```
+PASS  sales-partner: enroll (acme)
+  …
+  ACCEPTED (instruction-only): sequences: enroll_ready_only
+```
+
+`no_send` can never be accepted, and an invariant the contract doesn't
+mark can't be either: the check fails.
+
+## Wrapping a service in n8n
+
+Some systems (InvokeIQ, for example) have an API but no MCP server. The
+agent must not call such an API from the shell: the guard only sees MCP
+calls, so a `curl` would bypass every policy. Instead the system is
+wrapped in an **n8n workflow**:
+
+- The workflow's **MCP Server Trigger** exposes a few named tools, each a
+  fixed call to the API (for example `enroll_contact`, `suppress`). No
+  tool takes a URL or an HTTP method from the caller.
+- The API key is an **n8n credential**. The agent package and the
+  client's instance never hold it.
+- The trigger requires Bearer or Header auth, and the client connects its
+  URL as a connector. Calls show up as `mcp__<connector>__<tool>`, so the
+  tool's guard policy applies like any other.
+- The tool folder ships the workflow as `workflow.n8n.json` with
+  `wrapper: n8n` in `identity.yaml`. `tool_check.py` checks that the
+  workflow's tools and `usage.md` agree, that auth is on, and that no
+  token is pasted into the workflow.
+
+n8n also offers instance-level MCP access, which exposes generic tools
+that run or build *any* workflow (`execute_workflow`,
+`create_workflow_from_code`, …). Those would route around every tool
+policy, so an agent with a wrapped tool must deny them in its root
+`guard.yaml`; the validator checks it.
 
 ## Known limits and open questions
 

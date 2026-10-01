@@ -8,7 +8,7 @@ GUARD="$PWD/_template/hooks/guard.sh"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; TD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$TD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "5.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "6.0"' > "$PKG/agent.yaml"
 printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \

@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "5.0"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "6.0"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
