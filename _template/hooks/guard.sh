@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Agent Standard guard hook — identical in every agent.
-# PreToolUse hook for MCP tools. Inside an instance of this agent, every bound
-# tool whose server_match appears in the tool name gets its guard policy
-# (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the call and
-# shows stderr to the model; exit 0 hands it to the normal permission flow.
+# PreToolUse hook for MCP tools. Inside an instance of this agent, the agent
+# guard policy (package-root guard.yaml, deny-only) applies to every MCP call;
+# then every bound tool whose server_match appears in the tool name gets its
+# guard policy (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the
+# call and shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 BOM=$(printf '\357\273\277')  # a leading UTF-8 byte-order mark must not hide line 1
@@ -15,6 +16,7 @@ yaml_get() { # yaml_get <file> <key>: top-level scalar; quotes and trailing comm
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 block() { printf 'Blocked by %s guard: %s\n' "$name" "$1" >&2; exit 2; }
 pblock() { printf 'Blocked by %s guard policy (%s/%s): %s\n' "$name" "$cap" "$provider" "$1" >&2; exit 2; }
+ablock() { printf 'Blocked by %s agent guard policy: %s\n' "$name" "$1" >&2; exit 2; }
 
 name=$(yaml_get "$root/agent.yaml" name)
 [ -n "$name" ] || exit 0
@@ -48,6 +50,21 @@ tool=$names
 case "$tool" in mcp__?*__?*) ;; *) exit 0 ;; esac
 [ -z "${unnamed:-}" ] || block "instance.yaml has bindings but no agent: line; fix it or re-run setup"
 rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match on the whole
+
+# The agent guard policy (package-root guard.yaml) applies to every MCP call,
+# whatever the server. A dangling symlink or a directory still reaches the
+# engine, which fails closed on it.
+apolicy="$root/guard.yaml"
+if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
+  engine="$root/hooks/guard_policy.py"
+  [ -f "$engine" ] || ablock "the guard policy engine is missing from $name"
+  command -v python3 >/dev/null 2>&1 || ablock "python3 is required to run the guard policy"
+  printf '%s' "$input" | python3 "$engine" --agent "$apolicy" "$name agent guard policy"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ "$rc" -eq 2 ] && exit 2
+    ablock "the guard policy engine failed (exit $rc)"
+  fi
+fi
 
 first=1
 while IFS= read -r line || [ -n "$line" ]; do
