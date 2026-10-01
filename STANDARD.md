@@ -487,7 +487,9 @@ validation error and, at runtime, a block.
 - The exceptions are `rules:` and `writes:`, whose values are block
   lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `binding_id:`,
-  `create:`, `update:`, `any:`. A `writes` item holds `kind:`, `tools:`
+  `create:`, `update:`, `any:`, or `field:` plus `forbid: true` (and
+  optionally `binding_id:`); `forbid` takes no other value and is never
+  combined with `create`, `update` or `any`. A `writes` item holds `kind:`, `tools:`
   and `at:`, the last two as flow lists. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
@@ -560,7 +562,9 @@ validation error and, at runtime, a block.
    flattened value to equal exactly one entry of the applicable list —
    `create` for creates, `update` for updates and unknown writes; `any`
    applies when the kind's own list is absent. No applicable list: not
-   checked.
+   checked. A rule with `forbid: true` blocks any write of its field, on
+   create or update, whatever the value (`<field> may not be written`);
+   other fields in the same map are still checked by their own rules.
 5. **Refused keys.** `refuse_keys: [uuid]` blocks any UUID-shaped key
    in a map (it could hide a ruled field).
 6. **Field identity.** `field_<name>` (the name normalized: lowercase,

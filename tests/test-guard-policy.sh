@@ -197,4 +197,27 @@ G;        run 0 "matched tool at its own path is fine" mcp__a__m '{"v":{"s":"a"}
 G;        run 0 "matched tool at a path no entry lists is unchecked" mcp__a__m '{"z":{"s":"approved"}}'
 G;        run 2 "matched tool with tool_input not an object" mcp__a__m '[1]' "cannot check this call"
 
+echo "-- forbid"
+F() { policy 'covers: [draft_only]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]' '  - kind: update' '    tools: [u]' '    at: [v]' 'rules:' '  - field: hs_pipeline_stage' "$@" '  - field: hs_task_status' '    create: [NOT_STARTED]' '    update: [COMPLETED]'; }
+F '    forbid: true';                   parses 0 "forbid: true parses"
+F '    forbid: yes';                    parses 1 "forbid: yes fails"
+F '    forbid: false';                  parses 1 "forbid: false fails"
+F '    forbid: [true]';                 parses 1 "forbid as a list fails"
+F '    forbid: true' '    create: [x]'; parses 1 "forbid combined with create fails"
+F '    forbid: true' '    update: [x]'; parses 1 "forbid combined with update fails"
+F '    forbid: true' '    any: [x]';    parses 1 "forbid combined with any fails"
+F '    forbid: true'
+run 2 "forbidden field blocked on create" mcp__a__c '{"v":{"hs_pipeline_stage":"done","hs_task_status":"NOT_STARTED"}}' "hs_pipeline_stage may not be written"
+run 2 "forbidden field blocked on update" mcp__a__u '{"v":{"hs_pipeline_stage":"done"}}' "hs_pipeline_stage may not be written"
+run 2 "forbidden field blocked with a differently cased key" mcp__a__u '{"v":{"HS_Pipeline_Stage":"done"}}' "hs_pipeline_stage may not be written"
+run 2 "forbidden field blocked with a spaced key" mcp__a__u '{"v":{"hs pipeline-stage":"x"}}' "hs_pipeline_stage may not be written"
+run 2 "forbidden field blocked even when empty" mcp__a__u '{"v":{"hs_pipeline_stage":""}}' "hs_pipeline_stage may not be written"
+run 0 "other fields in the same map still allowed (create)" mcp__a__c '{"v":{"hs_task_status":"NOT_STARTED","hs_task_subject":"x"}}'
+run 0 "other fields in the same map still allowed (update)" mcp__a__u '{"v":{"hs_task_status":"COMPLETED"}}'
+run 2 "other rules still apply next to a forbid rule" mcp__a__c '{"v":{"hs_task_status":"COMPLETED"}}' "hs_task_status may only be written as NOT_STARTED on create"
+F '    forbid: true' '    binding_id: required'; parses 0 "forbid with binding_id parses"
+printf '%s\n' 'field_hs_pipeline_stage: stageprop1' > "$W/fb.md"
+run 2 "forbid with binding_id blocks the bound ID" mcp__a__u '{"v":{"stageprop1":"x"}}' "hs_pipeline_stage may not be written" "$W/fb.md"
+run 2 "forbid with binding_id missing from bindings blocks" mcp__a__u '{"v":{"hs_task_status":"COMPLETED"}}' "has not recorded field_hs_pipeline_stage"
+
 finish
