@@ -37,6 +37,8 @@ REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
+N8N_DISPATCHERS = ("*execute_workflow*", "*create_workflow*", "*update_workflow*",
+                   "*archive_workflow*", "*publish_workflow*")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
@@ -275,15 +277,16 @@ def check_capability(root, cap):
 def check_agent_policy(root, caps):
     """The package-root guard.yaml: parses as an agent policy; required to cover no_send when a contract has it."""
     path = root / "guard.yaml"
-    covers = None
+    covers, deny = None, []
     if path.exists() or path.is_symlink():
         engine = load_policy_engine()
         if engine is None:
             return ["cannot load the reference guard_policy.py to check guard.yaml"]
         try:
-            covers = engine.parse_agent(read_text(path)).get("covers", [])
+            policy = engine.parse_agent(read_text(path))
         except (ReadError, engine.PolicyError) as err:
             return [f"guard.yaml: {err}"]
+        covers, deny = policy.get("covers", []), [p.lower() for p in policy["deny"]]
     fails = []
     for cap in caps:
         try:
@@ -293,6 +296,19 @@ def check_agent_policy(root, caps):
         invariants = [m.group(1) for line in section(text, "Invariants") or [] for m in [INVARIANT.match(line)] if m]
         if "no_send" in invariants and (covers is None or "no_send" not in covers):
             fails.append(f"the contract of {cap} has no_send, so the agent needs a guard.yaml at its root that covers no_send")
+    checker = load_tool_checker()
+    for cap in caps:
+        for ident in sorted((root / "capabilities" / cap / "tools").glob("*/identity.yaml")):
+            try:
+                data, _ = checker.parse_identity(read_text(ident), str(ident)) if checker else ({}, [])
+            except ReadError:
+                continue  # reported by the tool check
+            if data.get("wrapper") != "n8n":
+                continue
+            for pattern in N8N_DISPATCHERS:
+                if pattern not in deny:
+                    fails.append(f"capabilities/{cap}/tools/{ident.parent.name} is wrapped in n8n, "
+                                 f'so guard.yaml at the root must deny "{pattern}"')
     return fails
 
 

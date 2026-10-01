@@ -495,6 +495,25 @@ make_valid_agent "$FIX/acc"; sed -i.bak 's/^- `draft_only` — only drafts/- `dr
 assert_pass $V "$FIX/acc"   # an acceptable mark parses; the invariant id is still draft_only
 make_valid_agent "$FIX/accnosend"; sed -i.bak 's/^- `no_send` — never sends/- `no_send` (acceptable) — never sends/' "$FIX/accnosend/capabilities/crm/contract.md"
 fails_with "$FIX/accnosend" "capabilities/crm/contract.md: no_send cannot be marked (acceptable)"
+wrapdemo() { # wrapdemo <dir>: the demo tool becomes n8n-wrapped with a valid workflow
+  local a="$1/capabilities/crm/tools/demo"
+  printf '%s\n' 'wrapper: n8n' >> "$a/identity.yaml"
+  python3 - "$a/workflow.n8n.json" <<'PY'
+import json, sys
+nodes = [{"name": "MCP", "type": "@n8n/n8n-nodes-langchain.mcpTrigger", "parameters": {"authentication": "bearerAuth"}}]
+conns = {}
+for n in ("create", "get", "whoami"):
+    nodes.append({"name": n, "type": "n8n-nodes-base.httpRequestTool", "parameters": {"method": "POST", "url": "https://api.example.com"}})
+    conns[n] = {"ai_tool": [[{"node": "MCP", "type": "ai_tool", "index": 0}]]}
+json.dump({"nodes": nodes, "connections": conns}, open(sys.argv[1], "w"))
+PY
+}
+make_valid_agent "$FIX/wrapnodeny"; wrapdemo "$FIX/wrapnodeny"
+fails_with "$FIX/wrapnodeny" 'capabilities/crm/tools/demo is wrapped in n8n, so guard.yaml at the root must deny "*execute_workflow*"'
+make_valid_agent "$FIX/wrapok"; wrapdemo "$FIX/wrapok"
+printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*EXECUTE_WORKFLOW*", "*create_workflow*", "*update_workflow*",' \
+  '       "*archive_workflow*", "*publish_workflow*"]' > "$FIX/wrapok/guard.yaml"
+assert_pass $V "$FIX/wrapok"
 make_valid_agent "$FIX/noagentpolicy"; rm "$FIX/noagentpolicy/guard.yaml"
 fails_with "$FIX/noagentpolicy" "the contract of crm has no_send, so the agent needs a guard.yaml at its root that covers no_send"
 make_valid_agent "$FIX/agentnocover"; printf '%s\n' 'deny: ["*send*"]' > "$FIX/agentnocover/guard.yaml"
