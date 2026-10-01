@@ -8,7 +8,10 @@ Usage:
 check  — for every schedule_<activity> in the instance's schedules.yaml:
          applies the unattended gate (every capability its activities use is
          bound, every contract invariant is in the bound tool's guard.yaml
-         covers, and no_send is also in the agent guard policy's covers)
+         covers, and no_send is also in the agent guard policy's covers;
+         an invariant the contract marks (acceptable) and instance.yaml
+         lists in accept_instruction_only counts as covered and is shown as
+         ACCEPTED)
          and prints what the user needs to create the
          routine: name, schedule and UTC cron, connectors, prompt, and the
          cloud-environment setup script. A routine_<activity> line with no
@@ -260,6 +263,7 @@ def expected(instance, repo=None):
     if inst.get("agent") != meta.get("name"):
         raise CheckError(f"instance.yaml agent {inst.get('agent')!r} is not {meta.get('name')!r}")
     bound, bad_line = bindings(instance)
+    accepted = listed(inst.get("accept_instruction_only", ""))
     dups = []
     sched = flat_yaml(instance / "schedules.yaml", dups, guard=False)
     activities = {k[len("activity_"):]: listed(v) for k, v in meta.items() if k.startswith("activity_")}
@@ -290,7 +294,7 @@ def expected(instance, repo=None):
         act = key[len("schedule_"):]
         entry = {"activity": act, "then": listed(sched.get(f"then_{act}", "")),
                  "schedule": sched[key], "routine_id": sched.get(f"routine_{act}", ""),
-                 "problems": []}
+                 "problems": [], "accepted": []}
         for k in (key, f"then_{act}"):
             if k in dups:
                 entry["problems"].append(f"{k} appears more than once")
@@ -333,6 +337,15 @@ def expected(instance, repo=None):
                             f"{cap}: invariant no_send is not covered by the agent guard policy (guard.yaml at the package root)")
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
+            try:
+                marked = tool_check.acceptable(_read(ROOT / "capabilities" / cap / "contract.md", guard=False))
+            except CheckError as err:
+                entry["problems"].append(f"{cap}: {err}")
+                marked = set()
+            for inv in accepted:
+                if inv in invs and inv not in marked:
+                    entry["problems"].append(
+                        f"{cap}: {inv} is listed in accept_instruction_only, but the contract does not mark it (acceptable)")
             for provider in providers:
                 try:
                     folder, ay = tool(instance, cap, provider)
@@ -349,9 +362,14 @@ def expected(instance, repo=None):
                         f"{cap}: the {provider} tool's server_match {match!r} can never match an MCP tool name, "
                         "so the guard never enforces it")
                 for inv in invs:
-                    if inv not in covered:
-                        entry["problems"].append(
-                            f"{cap}: invariant {inv} is not covered by the {provider} tool's guard policy")
+                    if inv in covered:
+                        continue
+                    if inv in accepted and inv in marked:
+                        if f"{cap}: {inv}" not in entry["accepted"]:
+                            entry["accepted"].append(f"{cap}: {inv}")
+                        continue
+                    entry["problems"].append(
+                        f"{cap}: invariant {inv} is not covered by the {provider} tool's guard policy")
                 connectors.append(ay.get("provider", provider))
                 matches.append(match)
                 binds.append({"capability": cap, "provider": provider, "server_match": match})
@@ -526,6 +544,8 @@ def _text(result):
             out += [f"  schedule: {e['schedule']} {result['timezone']}  (UTC cron: {e['utc_cron']})",
                     f"  connectors: {', '.join(shown) or 'none'}",
                     f"  prompt: {e['prompt']}"]
+            for a in e["accepted"]:
+                out.append(f"  ACCEPTED (instruction-only): {a}")
             if e["routine_id"]:
                 out.append(f"  recorded routine: {e['routine_id']}")
     return "\n".join(out)

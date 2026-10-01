@@ -56,6 +56,25 @@ run check "$I" --repo acme/sales; expect 1 "agent policy without no_send in cove
 printf '%s\n' 'deny: [' > "$PKG/guard.yaml"
 run check "$I" --repo acme/sales; expect 1 "unreadable agent policy fails the gate" "email_drafts: guard.yaml: "
 mv "$W/agent-guard.bak" "$PKG/guard.yaml"
+cp "$PKG/capabilities/crm/contract.md" "$W/crm-contract.bak"
+sed -i.bak 's/^- `no_delete` — y/- `no_delete` (acceptable) — y/' "$PKG/capabilities/crm/contract.md"
+HA="$W/halfacc"; instance "$HA" half mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+printf '%s\n' 'accept_instruction_only: no_delete  # owner accepted 2026-10-01' >> "$HA/instance.yaml"
+run check "$HA";  expect 0 "accepted acceptable invariant passes" "PASS  demo-agent: prospect (halfacc)"
+expect 0 "accepted invariant is shown" "ACCEPTED (instruction-only): crm: no_delete"
+HN="$W/halfnoacc"; instance "$HN" half mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run check "$HN";  expect 1 "acceptable but not accepted still fails" "crm: invariant no_delete is not covered by the half tool's guard policy"
+HB="$W/bareacc"; instance "$HB" bare mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+printf '%s\n' 'accept_instruction_only: "draft_only, no_delete"' >> "$HB/instance.yaml"
+run check "$HB";  expect 1 "accepting an unmarked invariant fails" "crm: draft_only is listed in accept_instruction_only, but the contract does not mark it (acceptable)"
+run check "$HA" --json; expect 0 "json carries accepted" '"accepted": ['
+cp "$PKG/capabilities/email_drafts/contract.md" "$W/mail-contract.bak"
+printf '%s\n' '- `no_delete` — z' >> "$PKG/capabilities/email_drafts/contract.md"
+HD="$W/halfaccdigest"; instance "$HD" half mail 'timezone: UTC' 'schedule_digest: "Monday 08:00"'
+printf '%s\n' 'accept_instruction_only: no_delete' >> "$HD/instance.yaml"
+run check "$HD";  expect 1 "accepted for one contract, unmarked in another: that one fails" "email_drafts: no_delete is listed in accept_instruction_only, but the contract does not mark it (acceptable)"
+cp "$W/mail-contract.bak" "$PKG/capabilities/email_drafts/contract.md"
+cp "$W/crm-contract.bak" "$PKG/capabilities/crm/contract.md"
 N="$W/nomail"; instance "$N" good - 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'schedule_digest: "Monday 08:00"'
 run check "$N";                                    expect 1 "unbound capability fails its entry" "email_drafts is not bound"
 expect 1 "other entry still passes" "PASS  demo-agent: prospect (nomail)"
