@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship Part B of the outbound enrollment design: sales-partner 6.0.0 with the `Ready to Send` stage, a `sequences` capability wrapping InvokeIQ in n8n, scheduled `enroll` and `sync-replies` activities, and an n8n reply relay.
+**Goal:** Ship Part B of the outbound enrollment design: sales-partner 6.0.0 with the `Ready to Send` stage, a `sequences` capability wrapping InvokeIQ in n8n, scheduled `enroll` and `sync-replies` activities, and an n8n reply relay for Attio.
+
+**The user's own stack (live tests run against these):** Attio CRM, InvokeIQ cold email, Loops warm email (Loops is out of scope here). HubSpot and Airtable stay supported because other businesses use them.
 
 **Architecture:** The lead stage carries the plan (`Approach Drafted` → `Ready to Send`, human-only, → `Contacted`); Activities carry touches (`draft` → `sent`/`voided`). A new `sequences` capability has one tool, `invokeiq`, wrapped in an n8n MCP workflow (`wrapper: n8n`, n8n OAuth2). Two new skills run as scheduled activities: `enroll` (Ready-to-Send leads → InvokeIQ campaign by score band) and `sync-replies` (relay-written inbound Activities → stage, Do Not Contact, suppression). An n8n webhook relay records InvokeIQ replies and bounces as inbound Activities.
 
@@ -23,7 +25,8 @@
 ## Decisions this plan makes (flagged for the user at handoff)
 
 1. `enroll` and `sync-replies` are **skills** (like `send-digest`), not sub-agent contracts: each is one bounded procedure with no judgement calls that need isolation, and skills need no manifest changes.
-2. The reply relay ships for **HubSpot only** in 6.0.0 (the user's CRM, the one the acceptance runs on). `usage.md` documents exactly what any relay must write, so Airtable and Attio relays follow the same recipe later (or as done-for-you setup).
+2. The reply relay ships for **Attio only** in 6.0.0 (the user's CRM, the one the acceptance runs on). `usage.md` documents exactly what any relay must write, so HubSpot and Airtable relays follow the same recipe later (or as done-for-you setup).
+5. **Checkpoint before Task 6:** Tasks 6, 7 and 9 add to `AGENT.md`, which is near its inline limit. Execution stops after Task 5 for a discussion with the user about streamlining the agent as a whole: how it is positioned, how behaviours are defined, and how to keep the main context small (more in sub-agent contracts and skills, less in `AGENT.md`). Tasks 6 to 9 are revised from that discussion before they run.
 3. A bounce is recorded only as the relay's inbound Activity (summary `bounced`); the Approacher never reuses an email address that has a `bounced` Activity. No new contact field.
 4. Inbound Activities the agent logs itself (LinkedIn replies, call debriefs) keep today's `draft` status; only the relay writes inbound Activities at `sent` (it writes through n8n, outside the guard).
 
@@ -294,7 +297,7 @@ grep -qx 'activity_enroll: crm, sequences' "$SP/agent.yaml" && _report ok "enrol
 `tests/test-schedules.sh`: the `inst` helper also writes `bind_sequences: invokeiq` and `accept_instruction_only: enroll_ready_only`, plus `schedule_enroll: "daily 10:00"`; add:
 
 ```bash
-inst "$W/enr" hubspot
+inst "$W/enr" attio
 out=$(python3 -B "$C" check "$W/enr" --repo acme/sales 2>&1); rc=$?
 [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF 'ACCEPTED (instruction-only): sequences: enroll_ready_only' && _report ok "enroll passes with the accepted invariant shown" || _report no "enroll gate (rc=$rc): $out"
 sed -i.bak '/accept_instruction_only/d' "$W/enr/instance.yaml"
@@ -360,22 +363,22 @@ grep -qx 'activity_sync-replies: crm, sequences' "$SP/agent.yaml" && _report ok 
 git add -A && git commit -m "feat: sync-replies turns relay-logged replies and bounces into stage, Do Not Contact and suppression; digest and follow-up follow the new flow"
 ```
 
-### Task 8: HubSpot reply relay
+### Task 8: Attio reply relay
 
 **Files:**
-- Create: `capabilities/sequences/tools/invokeiq/relay/hubspot.n8n.json`
+- Create: `capabilities/sequences/tools/invokeiq/relay/attio.n8n.json`
 - Modify: `capabilities/sequences/tools/invokeiq/usage.md` (`## Reply relay`), `tests/test-content.sh`
 
 - [ ] **Step 1: Failing tests.**
 
 ```bash
-RL="$SP/capabilities/sequences/tools/invokeiq/relay/hubspot.n8n.json"
-python3 - "$RL" <<'PY' && _report ok "hubspot relay: webhook, signature check, task create" || _report no "hubspot relay structure"
+RL="$SP/capabilities/sequences/tools/invokeiq/relay/attio.n8n.json"
+python3 - "$RL" <<'PY' && _report ok "attio relay: webhook, signature check, outreach entry create" || _report no "attio relay structure"
 import json, sys
 d = json.load(open(sys.argv[1])); types = [n["type"] for n in d["nodes"]]
 assert "n8n-nodes-base.webhook" in types
 assert any(t in ("n8n-nodes-base.crypto", "n8n-nodes-base.code") for t in types)
-assert any("hubspot" in t.lower() for t in types)
+assert "api.attio.com" in json.dumps(d)
 s = json.dumps(d)
 assert "X-InvokeIQ-Signature".lower() in s.lower() and "contact.replied" in s
 assert '"id"' not in json.dumps([n.get("credentials", {}) for n in d["nodes"]])
@@ -384,7 +387,7 @@ assert_contains "$SP/capabilities/sequences/tools/invokeiq/usage.md" '## Reply r
 assert_contains "$SP/capabilities/sequences/tools/invokeiq/usage.md" 'never changes the stage'
 ```
 
-- [ ] **Step 2: Build in n8n and export.** Webhook (POST, path `webspenser-invokeiq-replies`, raw body) → verify `X-InvokeIQ-Signature` = `sha256=` + HMAC-SHA256(raw body, signing secret from an n8n credential) — mismatch → respond 401 and stop → keep only `contact.replied` and the bounce event → HubSpot: find the contact by `data.contact.email`, its associated company → create a Task on that company: `hs_task_subject` `email inbound — <company>`, `hs_task_status` `COMPLETED`, `hs_task_priority` `NONE`, `hs_task_type` `EMAIL`, `hs_task_body` `<p>Direction: inbound</p><p>Summary: <category>: <threadSummary></p><p>Sentiment: <sentiment> (<sentimentScore>)</p><p>Subject: <subject></p><p><snippet></p><p>Received: <receivedAt></p>` (bounce: summary `bounced`). Export as in Task 4 Step 4 (strip ids), save, archive the build copy.
+- [ ] **Step 2: Build in n8n and export.** Webhook (POST, path `webspenser-invokeiq-replies`, raw body) → verify `X-InvokeIQ-Signature` = `sha256=` + HMAC-SHA256(raw body, signing secret from an n8n credential) — mismatch → respond 401 and stop → keep only `contact.replied` and the bounce event → Attio (HTTP Request nodes against `https://api.attio.com/v2`, using a new Attio API credential created in n8n for this relay): find the person by `data.contact.email` (`people`, filter `email_addresses`), take their company → add an entry to the `sales_partner_outreach` list for that company, shaped as `attio/usage.md`'s `log_activity` shapes it: `channel` `email`, `direction` `inbound`, `status` `sent`, `summary` `<category>: <threadSummary>`, `draft_body` = sentiment, score, subject, snippet, received time (bounce: summary `bounced`). Match the attribute slugs in `attio/usage.md` exactly. Export as in Task 4 Step 4 (strip ids), save, archive the build copy.
 - `usage.md` `## Reply relay`: what it does, that it never changes the stage, Do Not Contact or anything else, the import/secret/Publish steps, and the exact Activity it must write — so an Airtable or Attio relay can be built to the same recipe.
 
 - [ ] **Step 3: Verify and commit.**
@@ -432,8 +435,8 @@ Do not merge: merge agent-builder #19 first, re-run this PR's CI, then merge —
 
 ### Task 10: Acceptance (with the user)
 
-- [ ] The user creates an InvokeIQ API key and a test campaign whose only contact will be their own address; imports `workflow.n8n.json` and the HubSpot relay; adds the n8n credentials; publishes both; connects the `invokeiq` connector in claude.ai and Claude Code; sets the InvokeIQ webhook to the relay URL with a signing secret.
-- [ ] In a scratch instance bound to HubSpot + InvokeIQ: run the Approacher on one test lead → personalization draft → the user drags the lead to `Ready to Send` → run `enroll` → lead `Contacted`, Task `COMPLETED`, contact in the InvokeIQ campaign with the custom fields.
-- [ ] The user replies to the email → relay writes an inbound Task → run `sync-replies` → `Replied`. Reply "please remove me" from a second test address → Do Not Contact + suppression.
+- [ ] The user creates an InvokeIQ API key and a test campaign whose only contact will be their own address; imports `workflow.n8n.json` and the Attio relay; adds the n8n credentials; publishes both; connects the `invokeiq` connector in claude.ai and Claude Code; sets the InvokeIQ webhook to the relay URL with a signing secret.
+- [ ] In a scratch instance bound to Attio + InvokeIQ: run the Approacher on one test lead → personalization draft → the user drags the lead to `Ready to Send` → run `enroll` → lead `Contacted`, Outreach entry `sent`, contact in the InvokeIQ campaign with the custom fields.
+- [ ] The user replies to the email → relay writes an inbound Outreach entry → run `sync-replies` → `Replied`. Reply "please remove me" from a second test address → Do Not Contact + suppression.
 - [ ] Record what the bounced/opened/clicked payloads look like and whether a link click carries the URL (spec decision 15).
 - [ ] Fix anything found; then the user approves merging #19 and this PR.
