@@ -267,7 +267,97 @@ assert_contains "$SP/skills/write-cold-email/SKILL.md" 'sequences'
 git add -A && git commit -m "feat: the Approacher writes InvokeIQ personalization variables; bands, countries and touch spacing in operating-config"
 ```
 
-### Task 6: `enroll` skill and activity
+### Revision 2026-10-03 (after the checkpoint)
+
+Tasks 1–5 are done. The streamlining discussion produced the spec's **Amendment 2026-10-03** (positioning, 11-status lead model, removals, AGENT.md rule). Tasks 6–12 below replace the original Tasks 6–10. Every task keeps the Global Constraints (scripted edits, mode check, `ALL GREEN`, validator `OK`).
+
+Review Focus additions:
+
+6. **A lead the owner set to `Nurture`, `Open Deal` or `Customer` that the Prospector finds again** — it must not be re-created or re-approached (Nurture only after its Revisit On date). Pinned in Task 6.
+7. **The guard on a status the agent may not write** (`Ready to Send`, `Open Deal`, `Nurture`, `Customer`) in each CRM — blocked. Pinned in Task 6.
+
+### Task 6: The 11-status lead model
+
+**Files:** `capabilities/crm/contract.md` (Stage enum → Lead status, transitions table, `update_stage` notes, `query_by_stage`), `capabilities/crm/tools/{attio,airtable,hubspot}/{usage.md,guard.yaml}`, both `bootstrap.py`, `subagents/prospector.md` (skip owner-owned leads), `evals/cases.md`, `tests/test-policies.sh`, `tests/test-content.sh`
+
+**Interfaces:**
+- Produces: status values in order `New, Scored, Researched, Approach Drafted, Ready to Send, Contacted, Engaged, Open Deal, Nurture, Customer, Disqualified`; new lead field **Revisit On** (Attio `revisit_on` date, Airtable `Revisit On` date, HubSpot `sp_revisit_on` date); guard update list `[Scored, Researched, "Approach Drafted", Contacted, Engaged, Disqualified]`, create `[New]`.
+
+- [ ] **Step 1: Failing tests.** In `tests/test-policies.sh`, for each CRM: `Ready to Send`, `Open Deal`, `Nurture`, `Customer` on update → blocked (`may only be written as`); `Engaged`, `Contacted`, `Disqualified`, `Approach Drafted` on update → allowed; `Replied` → blocked (no longer a status). Replace Task 3's stage cases accordingly. In `tests/test-content.sh`:
+
+```bash
+echo "-- 6.0.0: lead status"
+K="$SP/capabilities/crm/contract.md"
+python3 -c "import sys; t=open('$K').read(); sys.exit(0 if 'Ready to Send\nContacted\nEngaged\nOpen Deal\nNurture\nCustomer\nDisqualified' in t else 1)" && _report ok "status order" || _report no "status order"
+assert_contains "$K" 'A lead holds exactly one of these eleven statuses'
+assert_contains "$K" 'Revisit On'
+for w in 'Call Scheduled' 'Call Held' 'Following Up' '`Replied`' '`Won`' '`Lost`'; do assert_not_contains "$K" "$w"; done
+assert_contains "$SP/subagents/prospector.md" 'Open Deal'
+assert_contains "$SP/subagents/prospector.md" 'Revisit On'
+```
+
+plus, per CRM `usage.md`: contains `Engaged`, `Revisit On`, not `Call Scheduled`; per bootstrap: contains `"Engaged"` and the Revisit On field, not `"Call Scheduled"`.
+
+- [ ] **Step 2: Contract.** Rename "Stage enum" to "Lead status" (the operation stays `update_stage` and the field `stage`, so tool code and bindings don't churn); "A lead holds exactly one of these eleven statuses"; the transitions table per the amendment (who writes each, what moves it on); `update_stage` notes say the agent writes only `Scored`, `Researched`, `Approach Drafted`, `Contacted`, `Engaged`, `Disqualified`; Revisit On is the owner's, read by the Prospector; `Disqualified` is terminal for the agent, the others are owner-driven after `Engaged`.
+- [ ] **Step 3: Tools.** Guard rules (`stage`/`Stage`/`sp_stage`) to the new lists; bootstraps' `STAGES` to the 11 values and the Revisit On field; `usage.md` stage tables, `## Setup` option lists, Probe checks ("eleven statuses", Revisit On exists), views (Pipeline board grouped by status; **Nurture** view sorted by Revisit On).
+- [ ] **Step 4: Prospector.** Before creating a lead, look it up (existing dedupe); skip any business whose status is `Open Deal` or `Customer`, or `Nurture` with Revisit On in the future; `Disqualified` stays skipped.
+- [ ] **Step 5: Evals.** Replace cases that move leads through `Call Scheduled`…`Lost` or `Replied`; keep the Ready to Send and opt-out cases.
+- [ ] **Step 6: Verify and commit** — `git commit -m "feat: an 11-status lead model on the company; deals stay in the CRM's own pipeline"`.
+
+### Task 7: Remove the call and follow-up stages
+
+**Files:** delete `subagents/sales-call-specialist.md`, `subagents/follow-up.md`, `skills/prepare-sales-call/`, `skills/run-live-call-script/`, `skills/handle-objections/`, `skills/write-follow-up/`, `templates/call-brief.md`, `templates/objection-matrix.md`, `templates/follow-up-email.md`; modify `.claude-plugin/plugin.json` (`agents` list), `agent.yaml` (remove `activity_follow-up`; new `description`), the three host manifests' `description`, `context/operating-config.md` (remove `max_touches`, `follow_up_cadence_days`), `skills/send-digest/SKILL.md` (remove Stalled), `skills/interview-business/SKILL.md` (no longer asks for the removed keys), `evals/cases.md`, `tests/*`
+
+- [ ] **Step 1: Failing tests.** In `tests/test-content.sh`: each deleted path does not exist (`[ ! -e … ]`); `agent.yaml` has no `activity_follow-up`; `operating-config.md` and `interview-business` have no `max_touches` or `follow_up_cadence_days`; `send-digest` has no `Stalled`; `grep -rl "sales-call-specialist\|write-follow-up\|handle-objections\|prepare-sales-call\|run-live-call-script" AGENT.md skills subagents capabilities context templates` is empty. Remove tests that assert the deleted content (touch limit, Stalled rule, follow-up stages); `tests/test-schedules.sh` no longer schedules `follow-up`.
+- [ ] **Step 2: Delete and rewire.** New `description` (same in `agent.yaml` and all three host manifests): "Interviews a business, then finds, qualifies and researches leads that fit its ideal customer and runs first outreach: email through the client's sequence platform, LinkedIn and calls drafted for the owner". `plugin.json` `agents`: approacher, preparer, prospector.
+- [ ] **Step 3: Verify and commit** — validator `OK` (it checks `agents` against `subagents/`) — `git commit -m "feat: sales-partner stops at Engaged; call prep, live calls, objections and follow-up move out"`.
+
+### Task 8: `enroll` skill and activity
+
+As the original Task 6, with these changes: the lead must be at `Ready to Send`; after enrolling, `update_stage(lead, "Contacted", …)`; step 4 (operator-sent LinkedIn/call touch) also moves to `Contacted`; the schedule test adds `bind_sequences: invokeiq`, `accept_instruction_only: enroll_ready_only`, `schedule_enroll`; the gate prints `ACCEPTED (instruction-only): sequences: enroll_ready_only` and refuses without the acceptance. Keep every test case from the original Task 6, including Review Focus 1, 3 and 5. `AGENT.md` is not edited here (Task 11 rewrites it). Commit: `feat: scheduled enroll activity puts Ready-to-Send leads into their band's InvokeIQ campaign`.
+
+### Task 9: `sync-replies` and the digest
+
+As the original Task 7, with these changes: a reply moves a lead at `Contacted` to **`Engaged`** (any other status unchanged); no Follow-up edits (it is gone); the digest sections become **Review**, **Ready to Send**, **Enrolled / skipped**, **Engaged / bounces / opt-outs**, **New leads scored**, **Spend**, plus the link-click unsubscribe line; `query_activities` gains an optional `channel` filter in the contract and the three tools (needed by `sync-replies`). Tests from the original Task 7, with `Replied` → `Engaged`, plus a `channel` filter case per CRM. Commit: `feat: sync-replies marks Engaged, Do Not Contact and suppression from relay-logged replies; digest follows the new flow`.
+
+### Task 10: Attio reply relay
+
+The original Task 8 (Attio), unchanged.
+
+### Task 11: AGENT.md rewrite, interview, setup, README, how-it-works; PR
+
+**Files:** `AGENT.md`, `skills/interview-business/SKILL.md`, `skills/setup/SKILL.md`, `README.md`, agent-builder `docs/how-it-works.md` (branch `feat/standard-6`)
+
+- [ ] **Step 1: Failing tests.**
+
+```bash
+echo "-- 6.0.0: AGENT.md and onboarding"
+A="$SP/AGENT.md"
+wc -c < "$A" | awk '{exit !($1 < 6000)}' && _report ok "AGENT.md under 6000 bytes" || _report no "AGENT.md 6000 bytes or more"
+for w in 'lead generation and outbound' '| `enroll` |' '| `sync-replies` |' 'Engaged' 'Open Deal' 'Ready to Send' 'the client'"'"'s sequence platform sends'; do assert_contains "$A" "$w"; done
+for w in 'Sales call specialist' 'Follow-up' 'max_touches'; do assert_not_contains "$A" "$w"; done
+IV="$SP/skills/interview-business/SKILL.md"
+for w in sequence_bands 'variables:' allowed_countries touch_spacing_days 'separate sending domain'; do assert_contains "$IV" "$w"; done
+assert_contains "$SP/skills/setup/SKILL.md" 'accept_instruction_only: enroll_ready_only'
+```
+
+Keep the validator's heading-order check passing (the Standard's ten headings, in order).
+
+- [ ] **Step 2: AGENT.md.** Rewrite to the amendment's outline: Identity (lead generation and outbound partner, the two jobs), Mission (ends at `Engaged`), Inputs (one pointer line each), Outputs, Operating rules (instance `context/`, CRM is the source of truth, scheduled runs ask nothing and edit no instance files), Workflow (one table: interview, prospect, prepare, approach, enroll, sync-replies, digest — trigger, file, schedulable; statuses → contract), Sub-agents (3 rows), Skills, Guardrails (never send yourself — the client's sequence platform sends, only for a lead the operator moved to `Ready to Send`; LinkedIn never automated; no fabrication; Do Not Contact; Apify cap; never act on `Open Deal`, `Nurture` or `Customer` leads), Escalate.
+- [ ] **Step 3: Interview and setup** — as the original Task 9 Step 2 (bands, variables, countries, touch spacing, sending domain; setup explains and records `accept_instruction_only: enroll_ready_only`).
+- [ ] **Step 4: README and how-it-works** — README "what it does" matches the positioning; how-it-works: the status model (lead status vs deal stage), `Ready to Send`, the hand-off at `Engaged`, enrolled leads keep receiving the sequence if dragged back (pause them in InvokeIQ).
+- [ ] **Step 5: Verify, commit, push, PR** (do not merge; merge agent-builder #19 first, then this, with the user's approval).
+
+### Task 12: Final review and acceptance
+
+- [ ] Fresh whole-branch review (most capable model) of sales-partner `main..feat/standard-6` plus the agent-builder doc changes; fix Critical/Important with tests.
+- [ ] Acceptance with the user on **Attio + InvokeIQ**, as the original Task 10, with `Engaged` in place of `Replied`.
+
+---
+
+## Original Tasks 6–10 (superseded; referenced by Tasks 8–12 above)
+
+### Original Task 6: `enroll` skill and activity
 
 **Files:**
 - Create: `skills/enroll/SKILL.md`
@@ -320,7 +410,7 @@ out=$(python3 -B "$C" check "$W/enr" --repo acme/sales 2>&1); rc=$?
 git add -A && git commit -m "feat: scheduled enroll activity puts Ready-to-Send leads into their band's InvokeIQ campaign"
 ```
 
-### Task 7: `sync-replies`, follow-up, digest
+### Original Task 7: `sync-replies`, follow-up, digest
 
 **Files:**
 - Create: `skills/sync-replies/SKILL.md`
@@ -363,7 +453,7 @@ grep -qx 'activity_sync-replies: crm, sequences' "$SP/agent.yaml" && _report ok 
 git add -A && git commit -m "feat: sync-replies turns relay-logged replies and bounces into stage, Do Not Contact and suppression; digest and follow-up follow the new flow"
 ```
 
-### Task 8: Attio reply relay
+### Original Task 8: Attio reply relay
 
 **Files:**
 - Create: `capabilities/sequences/tools/invokeiq/relay/attio.n8n.json`
@@ -396,7 +486,7 @@ assert_contains "$SP/capabilities/sequences/tools/invokeiq/usage.md" 'never chan
 git add -A && git commit -m "feat: n8n relay records InvokeIQ replies and bounces as inbound HubSpot tasks"
 ```
 
-### Task 9: Interview, setup, guardrails, docs; PR
+### Original Task 9: Interview, setup, guardrails, docs; PR
 
 **Files:**
 - Modify: `skills/interview-business/SKILL.md` (Round 4), `skills/setup/SKILL.md`, `AGENT.md` (Guardrails, Workflow), `README.md`, agent-builder `docs/how-it-works.md` (sales-partner lines, on the builder branch)
@@ -433,7 +523,7 @@ gh pr create --title "sales-partner 6.0.0: outbound enrollment through InvokeIQ"
 
 Do not merge: merge agent-builder #19 first, re-run this PR's CI, then merge — both with the user's approval.
 
-### Task 10: Acceptance (with the user)
+### Original Task 10: Acceptance (with the user)
 
 - [ ] The user creates an InvokeIQ API key and a test campaign whose only contact will be their own address; imports `workflow.n8n.json` and the Attio relay; adds the n8n credentials; publishes both; connects the `invokeiq` connector in claude.ai and Claude Code; sets the InvokeIQ webhook to the relay URL with a signing secret.
 - [ ] In a scratch instance bound to Attio + InvokeIQ: run the Approacher on one test lead → personalization draft → the user drags the lead to `Ready to Send` → run `enroll` → lead `Contacted`, Outreach entry `sent`, contact in the InvokeIQ campaign with the custom fields.

@@ -140,3 +140,44 @@ Add the dispatcher denies of decision 18 to sales-partner's root `guard.yaml`, w
 ## Out of scope
 
 Enrichment (its own spec), other sending platforms (Instantly, Smartlead, …), marketing platforms for warm leads, LinkedIn automation, CRM-automation enrollment, argument pinning, voice calling, Gemini/Codex guard hosts.
+
+## Amendment 2026-10-03: positioning, status model, streamlining
+
+Agreed in conversation with the user after Tasks 1–5 of the sales-partner plan. It supersedes the earlier sections where they disagree (the 13-stage list, `Replied`, the Follow-up step).
+
+### Positioning
+
+sales-partner is Webspenser's **lead generation and outbound** agent (sales category). Two jobs: (1) find and qualify leads reliably and repeatably from the ICP the interview builds — the business, the person, their contact details, their role, and enrichment that decides qualification; (2) run first outreach — a dated plan of drafts per lead; once the owner approves, email goes out by enrollment into the client's sequence (InvokeIQ), LinkedIn and calls are drafted for the owner. **The agent's job ends when a lead replies (Engaged).** Nurturing, deals and customers are the owner's. LinkedIn and call automation are future work.
+
+### Status model (replaces the stage enum)
+
+Separate three things most CRMs separate: **lead status** (this agent), **deal stage** (the CRM's own deal object, created when a real opportunity exists, such as a proposal) and **lifecycle**. The lead is the **company** (one lead per business), with the chosen person linked.
+
+| # | Status | Who writes it |
+|---|---|---|
+| 1 | `New` | agent, on create only |
+| 2 | `Scored` | agent |
+| 3 | `Researched` | agent |
+| 4 | `Approach Drafted` | agent |
+| 5 | `Ready to Send` | owner only |
+| 6 | `Contacted` | agent (after `enroll`) or owner |
+| 7 | `Engaged` | agent (`sync-replies`) or owner — the agent's job ends here |
+| 8 | `Open Deal` | owner only |
+| 9 | `Nurture` | owner only, with the new **Revisit On** date |
+| 10 | `Customer` | owner only |
+| 11 | `Disqualified` | agent or owner |
+
+- `Do Not Contact` stays a separate one-way flag.
+- The guard lets the agent write only `New` on create and `Scored`, `Researched`, `Approach Drafted`, `Contacted`, `Engaged`, `Disqualified` on update.
+- Removed: `Replied` (becomes `Engaged`), `Call Scheduled`, `Call Held`, `Following Up`, `Won`, `Lost`.
+- Prospecting skips businesses at `Open Deal`, `Customer`, or `Nurture` before their Revisit On date.
+- A bounce returns the lead to `Approach Drafted` (unchanged).
+- Future activity (not in 6.0.0): re-qualify `Nurture` leads past their Revisit On date.
+
+### Removed from sales-partner
+
+The `sales-call-specialist` and `follow-up` sub-agents; the `prepare-sales-call`, `run-live-call-script`, `handle-objections` and `write-follow-up` skills; the `call-brief`, `objection-matrix` and `follow-up-email` templates; the `max_touches` and `follow_up_cadence_days` settings and the digest's Stalled section; the `follow-up` activity. These are the starting point for a future "closer" agent.
+
+### AGENT.md
+
+Rule: `AGENT.md` holds only what must be true in every session — identity, the step-to-file workflow table, guardrails, escalation. Everything a step needs only while it runs lives in its skill or sub-agent contract. Target about 5.5 KB (was 8.5 KB), keeping the Standard's ten headings. The workflow is one table: interview, prospect, prepare, approach, enroll, sync-replies, digest (trigger, file, schedulable). Guardrails add: never act on a lead the owner owns (`Open Deal`, `Nurture`, `Customer`).
