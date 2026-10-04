@@ -44,7 +44,7 @@ with `python3`.
 
    If the system has no MCP server at all, offer to wrap it in n8n (the
    Agent Standard's "Wrapped tools"): an n8n workflow whose MCP Server
-   Trigger requires Bearer or Header auth and exposes one snake_case tool
+   Trigger requires n8n OAuth2 (or Bearer or Header auth) and exposes one snake_case tool
    node per call `usage.md` needs, each a fixed call to the system (never
    a URL or method the caller sets). The system's key goes into an n8n
    credential, never into the agent or the instance. Save the workflow

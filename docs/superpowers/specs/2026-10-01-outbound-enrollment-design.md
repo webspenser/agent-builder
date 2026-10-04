@@ -28,7 +28,7 @@ LinkedIn and call touches keep today's model: the agent drafts them, the owner d
 
 ## n8n facts this design relies on
 
-- **Per-workflow MCP Server Trigger:** exposes only the tools attached to that workflow; supports None, Bearer or Header auth.
+- **Per-workflow MCP Server Trigger:** exposes only the tools attached to that workflow; supports None, n8n OAuth2, Bearer or Header auth (internal values `none`, `n8nOAuth2`, `bearerAuth`, `headerAuth`, confirmed from n8n's node types on 2026-10-03).
 - **Instance-level n8n MCP** (one connection per instance) exposes generic tools such as `execute_workflow` (runs any enabled workflow) and, from n8n 2.13, workflow create/update tools. Under the guard these are dispatchers.
 
 ## Decisions
@@ -68,7 +68,7 @@ LinkedIn and call touches keep today's model: the agent drafts them, the owner d
 - A tool folder for a service without an MCP server may ship `workflow.n8n.json`: an n8n workflow whose **MCP Server Trigger** exposes exactly the tools its `usage.md` maps, each a thin call to the service. No tool takes a URL, a method or a free-form request.
 - `identity.yaml` gains `wrapper: n8n`. `server_match` is the name the user gives the connector (setup tells them which name to use, for example `invokeiq`).
 - The service's secrets are n8n credentials. The agent package and the instance hold none.
-- The trigger requires Bearer or Header auth. Setup records how the host connects (Claude Code: an `Authorization` header in the MCP config; claude.ai custom connector for cloud routines: confirmed at acceptance, with an unguessable trigger path as the fallback).
+- The trigger requires authentication: **n8n OAuth2** (recommended; verified 2026-10-03 that a claude.ai custom connector — used by cloud routines — connects through it and calls the tools), or Bearer/Header auth for header-sending hosts such as Claude Code (also verified). Setup warns that n8n changes go live only after Publish, and that a new credential must be created rather than an auto-assigned existing one.
 - `tool_check.py`: a `wrapper: n8n` tool must ship `workflow.n8n.json`, and the tool names of its MCP Server Trigger's attached tool nodes must equal the names mapped in `usage.md`.
 - Guidance (STANDARD.md, writing-an-agent): one service per workflow; per-workflow trigger only, never instance-level MCP; the agent guard policy denies dispatcher tools (`*execute_workflow*`, `*create_workflow*`, `*update_workflow*`, `*archive_workflow*`, `*publish_workflow*`, `*test_workflow*`, `*restore_workflow*`).
 
@@ -101,7 +101,7 @@ Invariants: `no_send` (no operation sends; enrollment hands the lead to a campai
 
 `capabilities/sequences/tools/invokeiq/`:
 - `identity.yaml`: `capability: sequences`, `provider: invokeiq`, `server_match: invokeiq`, `wrapper: n8n`.
-- `workflow.n8n.json`: MCP Server Trigger (Bearer auth) with four tool nodes calling `GET /me`, `GET /campaigns` (filtered to the band campaigns), `POST /contacts` (band → campaign ID from a map set in the workflow; `variables` → `customFields`) and `POST /suppression`. An unknown band errors.
+- `workflow.n8n.json`: MCP Server Trigger (n8n OAuth2) with four tool nodes calling `GET /me`, `GET /campaigns` (filtered to the band campaigns), `POST /contacts` (band → campaign ID from a map set in the workflow; `variables` → `customFields`) and `POST /suppression`. An unknown band errors.
 - `usage.md`: operation mapping; `## Probe`: `get_workspace` (records `workspace`), `get_campaigns` (shows each band's campaign and warns if one is not active); `## Setup`: import the workflow, add the InvokeIQ credential in n8n, set the band map, activate, connect the trigger URL as a connector named `invokeiq`, and the reply relay (B6).
 - `guard.yaml`: `covers: [no_send, campaigns_bound_only, no_campaign_control]`, `allow` the four tools.
 - `bindings/sequences.md` holds `workspace` and `variables: <name>, <name>` (the campaigns' custom fields), recorded by the interview.

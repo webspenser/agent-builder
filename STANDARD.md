@@ -429,9 +429,13 @@ Rules, each checked by `tool_check.py`:
 - Exactly one MCP Server Trigger node
   (`@n8n/n8n-nodes-langchain.mcpTrigger`): `needs exactly one MCP Server
   Trigger node`.
-- The trigger requires Bearer or Header auth (`authentication` is
-  `bearerAuth` or `headerAuth`): `the MCP Server Trigger must require
-  Bearer or Header auth`.
+- The trigger requires authentication (`authentication` is `n8nOAuth2`,
+  `bearerAuth` or `headerAuth`): `the MCP Server Trigger must require n8n
+  OAuth2, Bearer or Header auth`. Use **n8n OAuth2**: claude.ai
+  connectors (which scheduled runs use) log in to n8n through it, and no
+  shared secret exists to store or rotate. Bearer or Header auth works
+  for hosts that send a header (Claude Code), with a new credential made
+  only for this trigger.
 - The exposed tools are the nodes connected to the trigger by an
   `ai_tool` connection. At least one: `exposes no tools`. Each is named
   in snake_case, because the node name is the MCP tool name: `tool node
@@ -460,9 +464,11 @@ whose bound tool (an instance's custom tool included) is wrapped while
 the agent guard policy misses one: `the <provider> tool is wrapped in
 n8n, so the agent guard policy must deny <tool>`.
 
-The host connects to the trigger's URL with its secret: Claude Code
-sends it as a header in the MCP config; for a claude.ai connector used
-by scheduled runs, setup records the method the user's host supports.
+The host connects to the trigger's Production URL as an MCP connector.
+Two n8n behaviours trip setup up: saving a change to the trigger does not
+change the live workflow until it is **published** again, and n8n
+silently attaches an existing credential of the right type to a new
+trigger, so create a new one for it (or switch to n8n OAuth2).
 
 ### The add-tool skill
 

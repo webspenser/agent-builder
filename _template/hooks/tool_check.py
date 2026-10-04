@@ -34,7 +34,7 @@ OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
 ACCEPTABLE = re.compile(r"^[-*]\s+`([^`]+)`\s+\(acceptable\)")
 N8N_TRIGGER = "@n8n/n8n-nodes-langchain.mcpTrigger"
-N8N_AUTH = ("bearerAuth", "headerAuth")
+N8N_AUTH = ("n8nOAuth2", "bearerAuth", "headerAuth")
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 N8N_DISPATCHER_TOOLS = ("execute_workflow", "create_workflow_from_code", "update_workflow", "archive_workflow",
                         "publish_workflow", "unpublish_workflow", "test_workflow", "restore_workflow_version")
@@ -176,7 +176,7 @@ def check_workflow(folder, label, server_match, usage_text):
     params = trigger.get("parameters")
     auth = params.get("authentication") if isinstance(params, dict) else None
     if auth not in N8N_AUTH:
-        fails.append(f"{rel}: the MCP Server Trigger must require Bearer or Header auth (authentication is {auth!r})")
+        fails.append(f"{rel}: the MCP Server Trigger must require n8n OAuth2, Bearer or Header auth (authentication is {auth!r})")
     tools = set()
     for source, outputs in conns.items():
         groups = outputs.get("ai_tool", []) if isinstance(outputs, dict) else []

@@ -124,7 +124,9 @@ wrapped; run "$T" "$C/contract.md";                       expect 0 "wrapped tool
 fresh; printf '%s\n' 'wrapper: zapier' >> "$T/identity.yaml"; run "$T" "$C/contract.md"; expect 1 "unknown wrapper" "wrapper must be n8n"
 wrapped; rm "$T/workflow.n8n.json"; run "$T" "$C/contract.md"; expect 1 "missing workflow" "missing $T/workflow.n8n.json"
 wrapped; printf '{not json' > "$T/workflow.n8n.json"; run "$T" "$C/contract.md"; expect 1 "bad JSON" "not valid JSON"
-wrapped; wf "$T" none create get whoami; run "$T" "$C/contract.md"; expect 1 "trigger without auth" "must require Bearer or Header auth"
+wrapped; wf "$T" none create get whoami; run "$T" "$C/contract.md"; expect 1 "trigger without auth" "must require n8n OAuth2, Bearer or Header auth"
+wrapped; wf "$T" n8nOAuth2 create get whoami; run "$T" "$C/contract.md"; expect 0 "trigger with n8n OAuth2 passes" "OK: "
+wrapped; wf "$T" headerAuth create get whoami; run "$T" "$C/contract.md"; expect 0 "trigger with header auth passes" "OK: "
 wrapped; wf "$T" bearerAuth create get whoami extra; run "$T" "$C/contract.md"; expect 1 "tool not in usage" "tool extra is not mapped in usage.md as demo:extra"
 wrapped; wf "$T" bearerAuth create whoami; run "$T" "$C/contract.md"; expect 1 "usage names a missing tool" '`demo:get` is not a tool of the workflow'
 wrapped; wf "$T" bearerAuth "Create Lead" get whoami; run "$T" "$C/contract.md"; expect 1 "tool name not snake_case" "must be named in snake_case"

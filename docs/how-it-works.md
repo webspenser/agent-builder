@@ -507,8 +507,10 @@ wrapped in an **n8n workflow**:
   tool takes a URL or an HTTP method from the caller.
 - The API key is an **n8n credential**. The agent package and the
   client's instance never hold it.
-- The trigger requires Bearer or Header auth, and the client connects its
-  URL as a connector. Calls show up as `mcp__<connector>__<tool>`, so the
+- The trigger requires authentication, normally **n8n OAuth2**: the
+  client adds the trigger's URL as a connector and approves an n8n login,
+  so no secret is pasted anywhere. (Tested 2026-10-03: a claude.ai
+  connector, which scheduled runs use, reaches the tools this way.) Calls show up as `mcp__<connector>__<tool>`, so the
   tool's guard policy applies like any other.
 - The tool folder ships the workflow as `workflow.n8n.json` with
   `wrapper: n8n` in `identity.yaml`. `tool_check.py` checks that the
