@@ -29,7 +29,7 @@ Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
 | Repository | Role |
 |---|---|
 | [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@main`, and the `new-agent` wizard. |
-| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: a five-stage sales pipeline over a CRM. |
+| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: lead generation and outbound — it finds, qualifies and researches leads, then runs first outreach (email enrolled into the client's InvokeIQ sequence, LinkedIn and calls drafted). Its job ends when a lead replies. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
 The builder's version and the standard's version move together. The standard is in active development, so there are no version tags yet. An agent's CI uses `validate@main` and always checks against the latest standard. Tags come with the first official release. There is no migration machinery: a change to the standard is made directly in the agents.
@@ -135,14 +135,23 @@ home of each record differs.
 | **Contact** | A People record | A row in the Contacts table | A Contact, linked to its company |
 | **Research** | An entry in the list `sales_partner_research` | A row in the Research table | A Note on the company |
 | **Activity (a draft or logged interaction)** | An entry in the list `sales_partner_outreach` | A row in the Activities table | A Task on the company (and contact) |
-| **Where draft / approved / sent / voided lives** | The `status` field on the entry | The `Status` field on the row | HubSpot's built-in task status: Not started = draft, In progress or Waiting = approved, Completed = sent, Deferred = voided |
+| **Where draft / sent / voided lives** | The `status` field on the entry | The `Status` field on the row | HubSpot's built-in task status: Not started = draft, Completed = sent, Deferred = voided |
 | **Outbound or inbound** | The `direction` field | The `Direction` field | The built-in task priority: High = outbound, None = inbound |
-| **Approval queue** | The view "Awaiting Approval" on the outreach list: status is draft and direction is outbound | The view "Awaiting Approval" on Activities: Status is draft and Direction is outbound | A Tasks view: status is Not started and priority is High |
-| **What setup needs** | An API key, to run `bootstrap.py` (or create the lists and fields by hand) | Create the four tables by hand. No script. Setup's probe records two field IDs | 16 custom fields on Companies and Contacts (none on Tasks). Run `bootstrap.py` with a private-app token, or create them by hand |
+| **Review (the approval queue)** | Pipeline entries at `Approach Drafted`, with their draft Outreach entries | Leads at `Approach Drafted`, with their linked Activities | Companies at `Approach Drafted`, with their Not started Tasks |
+| **What setup needs** | An API key, to run `bootstrap.py` (or create the lists and fields by hand) | Create the four tables by hand. No script. Setup's probe records every field ID | 16 custom fields on Companies and Contacts (none on Tasks). Run `bootstrap.py` with a private-app token, or create them by hand |
 | **Guard blocks, on top of the shared rules** | Attribute keys given as IDs | Writes with no recorded field IDs | Writing a pipeline stage, pipeline or completion date on a Task |
 
-In every tool, the agent can only create a draft or void one. Approving
-and sending are done by a person, in the CRM. The operator creates the
+**Lead status vs deal stage.** The lead (the company) has one status:
+New, Scored, Researched, Approach Drafted (the agent's work) → Ready to
+Send (the owner approves the whole plan by moving the lead) → Contacted
+→ Engaged (they replied; the agent's job ends) → Open Deal, Nurture
+(with a Revisit On date) or Customer (the owner's), or Disqualified.
+Deals, with their own stages, live on the CRM's deal object. In every
+tool the guard stops the agent writing Ready to Send, Open Deal, Nurture
+or Customer, so those stay the owner's by mechanism. The agent creates
+drafts and marks a touch `sent` once it went out; it never rewrites a
+draft after create. Once a lead is enrolled, moving it back does not
+stop InvokeIQ's sequence: pause the contact in InvokeIQ. The operator creates the
 saved views by hand, because none of the connectors can create views.
 
 In HubSpot, a lead's location uses HubSpot's own city, state and country
@@ -375,9 +384,10 @@ touches these capabilities."* For sales-partner:
 ```yaml
 activity_prospect: crm
 activity_prepare: crm
-activity_approach: crm, email_drafts
-activity_follow-up: crm, email_drafts
+activity_approach: crm
 activity_digest: crm, email_drafts
+activity_enroll: crm, sequences
+activity_sync-replies: crm, sequences
 ```
 
 - **The author** declares which steps can be scheduled. Undeclared steps can
