@@ -23,7 +23,7 @@ for d in */; do  # _template/ is matched here
 done
 
 echo "== template standard"
-if ! grep -q '^standard: "5.0"' _template/agent.yaml; then echo "FAIL: _template is not 5.0"; STATUS=1; fi
+if ! grep -q '^standard: "6.0"' _template/agent.yaml; then echo "FAIL: _template is not 6.0"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/tools/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi

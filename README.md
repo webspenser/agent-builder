@@ -83,7 +83,7 @@ In CI, from any agent repo:
 
 ## Agents built with this
 
-- [Sales Partner](https://github.com/webspenser/sales-partner) — interviews a business, then runs a five-stage lead pipeline over a CRM.
+- [Sales Partner](https://github.com/webspenser/sales-partner) — interviews a business, then finds, scores and researches fresh leads and prepares each first touch over a CRM.
 
 ## Developing the builder
 

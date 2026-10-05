@@ -83,6 +83,13 @@ the package root: an agent guard policy with `covers: [no_send]` and a
 an instance, whatever the server. Check each glob against the read
 tools of the connectors your users will have, so no read is denied.
 
+Mark an invariant `(acceptable)` only when no guard can check it by
+design (it depends on state in another system); an instance may then
+accept it as instruction-only. If a system has no MCP server, wrap it in
+an n8n workflow (`wrapper: n8n` and a `workflow.n8n.json`, see "Wrapped
+tools" in the Agent Standard), and deny n8n's dispatcher tools in the
+root `guard.yaml`.
+
 The user binds each capability to their own system in `instance.yaml`
 (`bind_crm: attio`) during setup. `STANDARD.md` has the details.
 

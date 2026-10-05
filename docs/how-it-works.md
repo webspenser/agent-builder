@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 5.0. Agent Builder 5.0.0, sales-partner 5.0.0.
+Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
 
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
@@ -20,6 +20,8 @@ Current: standard 5.0. Agent Builder 5.0.0, sales-partner 5.0.0.
 - [Custom tools: bringing your own tool](#custom-tools-bringing-your-own-tool)
 - [Activities, in detail](#activities-in-detail)
 - [Field names and IDs, in detail](#field-names-and-ids-in-detail)
+- [Accepted risks](#accepted-risks)
+- [Wrapping a service in n8n](#wrapping-a-service-in-n8n)
 - [Known limits and open questions](#known-limits-and-open-questions)
 
 ## The three repositories
@@ -27,7 +29,7 @@ Current: standard 5.0. Agent Builder 5.0.0, sales-partner 5.0.0.
 | Repository | Role |
 |---|---|
 | [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@main`, and the `new-agent` wizard. |
-| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: a five-stage sales pipeline over a CRM. |
+| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: lead generation and personalization — it finds, scores and researches fresh leads, then prepares each first touch (a recommended channel with a full draft, plus personalized statements for email, LinkedIn and calls). It never sends: once the owner approves a lead, the owner's CRM automations take over. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
 The builder's version and the standard's version move together. The standard is in active development, so there are no version tags yet. An agent's CI uses `validate@main` and always checks against the latest standard. Tags come with the first official release. There is no migration machinery: a change to the standard is made directly in the agents.
@@ -133,15 +135,24 @@ home of each record differs.
 | **Contact** | A People record | A row in the Contacts table | A Contact, linked to its company |
 | **Research** | An entry in the list `sales_partner_research` | A row in the Research table | A Note on the company |
 | **Activity (a draft or logged interaction)** | An entry in the list `sales_partner_outreach` | A row in the Activities table | A Task on the company (and contact) |
-| **Where draft / approved / sent / voided lives** | The `status` field on the entry | The `Status` field on the row | HubSpot's built-in task status: Not started = draft, In progress or Waiting = approved, Completed = sent, Deferred = voided |
+| **Where draft / sent / voided lives** | The `status` field on the entry | The `Status` field on the row | HubSpot's built-in task status: Not started = draft, Completed = sent, Deferred = voided |
 | **Outbound or inbound** | The `direction` field | The `Direction` field | The built-in task priority: High = outbound, None = inbound |
-| **Approval queue** | The view "Awaiting Approval" on the outreach list: status is draft and direction is outbound | The view "Awaiting Approval" on Activities: Status is draft and Direction is outbound | A Tasks view: status is Not started and priority is High |
-| **What setup needs** | An API key, to run `bootstrap.py` (or create the lists and fields by hand) | Create the four tables by hand. No script. Setup's probe records two field IDs | 16 custom fields on Companies and Contacts (none on Tasks). Run `bootstrap.py` with a private-app token, or create them by hand |
+| **Review (the approval queue)** | Pipeline entries at `Approach Drafted`, with their draft Outreach entries | Leads at `Approach Drafted`, with their linked Activities | Companies at `Approach Drafted`, with their Not started Tasks |
+| **What setup needs** | An API key, to run `bootstrap.py` (or create the lists and fields by hand) | Create the four tables by hand. No script. Setup's probe records every field ID | 16 custom fields on Companies and Contacts (none on Tasks). Run `bootstrap.py` with a private-app token, or create them by hand |
 | **Guard blocks, on top of the shared rules** | Attribute keys given as IDs | Writes with no recorded field IDs | Writing a pipeline stage, pipeline or completion date on a Task |
 
-In every tool, the agent can only create a draft or void one. Approving
-and sending are done by a person, in the CRM. The operator creates the
-saved views by hand, because none of the connectors can create views.
+**Lead status vs deal stage.** The lead (the company) has one status:
+New, Scored, Researched, Approach Drafted (the agent's work; it stops
+here) → Ready to Send (the owner approves the lead by moving it; the
+owner's automations, systems or agents take over) → Contacted → Engaged
+→ Open Deal, Nurture (with a Revisit On date) or Customer, or
+Disqualified. Deals, with their own stages, live on the CRM's deal
+object. In every tool the guard stops the agent writing anything past
+Approach Drafted (except Disqualified), so those statuses stay the
+owner's by mechanism. The agent creates drafts and may only void them;
+`sent` is the owner's or their automation's, and no draft is rewritten
+after create. The operator creates the saved views by hand, because
+none of the connectors can create views.
 
 In HubSpot, a lead's location uses HubSpot's own city, state and country
 fields, so it needs no custom field. HubSpot's Tasks work on the free
@@ -373,8 +384,7 @@ touches these capabilities."* For sales-partner:
 ```yaml
 activity_prospect: crm
 activity_prepare: crm
-activity_approach: crm, email_drafts
-activity_follow-up: crm, email_drafts
+activity_approach: crm
 activity_digest: crm, email_drafts
 ```
 
@@ -468,6 +478,60 @@ real harm if broken:
 - never send email (`no_send`).
 
 Everything else is left to the agent's instructions.
+
+## Accepted risks
+
+Some rules can't be checked by the guard at all, because the guard sees
+one tool call at a time and never reads another system. For example,
+"enroll only leads the owner moved to Ready to Send", in an agent that
+enrolls leads into an email sequence, depends on the lead's stage in the
+CRM, which the call to the sending platform doesn't carry. A contract marks such an invariant `(acceptable)`.
+
+Normally an activity can't be scheduled while any invariant is held only
+by instructions. For an acceptable one, setup explains in plain words
+what isn't enforced and what could go wrong, and only if the owner
+agrees writes it to `accept_instruction_only:` in `instance.yaml`. The
+schedule check then passes and prints the risk under the entry, every
+time:
+
+```
+PASS  outreach-agent: enroll (acme)
+  …
+  ACCEPTED (instruction-only): sequences: enroll_ready_only
+```
+
+`no_send` can never be accepted, and an invariant the contract doesn't
+mark can't be either: the check fails.
+
+## Wrapping a service in n8n
+
+Some systems (InvokeIQ, for example) have an API but no MCP server. The
+agent must not call such an API from the shell: the guard only sees MCP
+calls, so a `curl` would bypass every policy. Instead the system is
+wrapped in an **n8n workflow**:
+
+- The workflow's **MCP Server Trigger** exposes a few named tools, each a
+  fixed call to the API (for example `enroll_contact`, `suppress`). No
+  tool takes a URL or an HTTP method from the caller.
+- The API key is an **n8n credential**. The agent package and the
+  client's instance never hold it.
+- The trigger requires authentication, normally **n8n OAuth2**: the
+  client adds the trigger's URL as a connector and approves an n8n login,
+  so no secret is pasted anywhere. (Tested 2026-10-03: a claude.ai
+  connector, which scheduled runs use, reaches the tools this way.) Calls show up as `mcp__<connector>__<tool>`, so the
+  tool's guard policy applies like any other.
+- The tool folder ships the workflow as `workflow.n8n.json` with
+  `wrapper: n8n` in `identity.yaml`. `tool_check.py` checks that the
+  workflow's tools and `usage.md` agree, that auth is on, and that no
+  token is pasted into the workflow.
+
+n8n also offers instance-level MCP access, which exposes generic tools
+that run, test, build or restore *any* workflow (`execute_workflow`,
+`test_workflow`, `create_workflow_from_code`, `restore_workflow_version`,
+…). Those would route around every tool policy, so an agent with a
+wrapped tool must deny them in its root `guard.yaml`. The validator
+checks it for shipped tools, and the schedule check for any bound
+wrapped tool, a client's own custom tool included.
 
 ## Known limits and open questions
 
