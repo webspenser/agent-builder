@@ -6,6 +6,34 @@ changes one of these parts, update the page in the same pull request.
 
 Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
 
+## In plain words
+
+For a business owner, here is the whole picture in five points. The
+rest of this page is the technical reference behind them.
+
+1. **An agent does one repeating job for your business.** Sales Partner,
+   for example, finds and researches new leads every week and prepares
+   a first message for each one.
+2. **It works in your own tools.** It reads and writes your CRM and
+   creates drafts in your mailbox. Your records stay where they are.
+3. **It has rules it can't break.** Each agent lists what it must never
+   do, such as sending a message, deleting a record, or contacting
+   someone marked Do Not Contact. A guard checks every single action
+   against those rules before it happens, so they hold even if the
+   agent gets something wrong.
+4. **It runs on a schedule only when that's safe.** Before an agent is
+   allowed to work unattended, a check confirms that every rule it
+   depends on is enforced by the guard, not just written in its
+   instructions. If one isn't, it waits for you.
+5. **You stay in charge.** Your business details live in your own
+   private folder, nothing goes out without your approval, and
+   passwords and keys never go into the agent. Updates to the agent
+   never touch your folder.
+
+Want this set up for you? [Webspenser](https://www.webspenser.com/lp/agent-builder)
+offers done-for-you setup and ongoing managed services.
+
+- [In plain words](#in-plain-words)
 - [The three repositories](#the-three-repositories)
 - [Vocabulary](#vocabulary)
 - [What an agent package holds](#what-an-agent-package-holds)

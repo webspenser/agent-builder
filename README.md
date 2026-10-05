@@ -2,6 +2,35 @@
 
 # Agent Builder
 
+**AI agents that take real work off your plate, and that you can trust
+to run on their own.**
+
+An agent is a helper that does a repeating job in your business: finding
+leads, keeping your CRM up to date, preparing reports. Agent Builder is
+how Webspenser builds them, and how you can build your own. Every agent
+built here follows the **Webspenser Agent Standard**, which means:
+
+- **It works in the tools you already use.** Your CRM, your mailbox, your
+  spreadsheets. Nothing to migrate.
+- **It has rules it can't break.** Each agent spells out what it must
+  never do (send an email, delete a record, contact someone who said
+  no), and those rules are checked on every action, not just written in
+  its instructions.
+- **It only runs on its own when that's safe.** An agent can work on a
+  schedule only when every rule it depends on is enforced. If one isn't,
+  it waits for you.
+- **Your data stays yours.** Your business details live in your own
+  private folder, your records stay in your own systems, and passwords
+  never go into the agent.
+- **You can see what it does.** Everything it knows and every instruction
+  it follows is plain text you can read and change.
+
+**Want an agent built for your business?** [Webspenser](https://www.webspenser.com/lp/agent-builder)
+designs, builds and sets up agents like these for small businesses, and
+can run them for you as part of our AI managed services.
+
+## For builders
+
 Build your own AI agent on the **Webspenser Agent Standard** — a guided
 wizard, a template, and a validator, packaged as a plugin.
 
@@ -85,7 +114,7 @@ In CI, from any agent repo:
 
 ## Agents built with this
 
-- [Sales Partner](https://github.com/webspenser/sales-partner) — interviews a business, then finds, scores and researches fresh leads and prepares each first touch over a CRM.
+- [Sales Partner](https://github.com/webspenser/sales-partner) — fresh, researched leads every week, each with its first touch ready for you to approve. It never sends.
 
 ## Developing the builder
 
