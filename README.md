@@ -1,3 +1,5 @@
+![Webspenser Agent Builder — defines the Agent Standard: contracts, tools, guards and scheduled activities, with a validator](assets/banner.png)
+
 # Agent Builder
 
 Build your own AI agent on the **Webspenser Agent Standard** — a guided
