@@ -353,6 +353,33 @@ Keep the validator's heading-order check passing (the Standard's ten headings, i
 - [ ] Fresh whole-branch review (most capable model) of sales-partner `main..feat/standard-6` plus the agent-builder doc changes; fix Critical/Important with tests.
 - [ ] Acceptance with the user on **Attio + InvokeIQ**, as the original Task 10, with `Engaged` in place of `Replied`.
 
+### Revision 2026-10-04 (scope: lead generation and personalization)
+
+The spec's **Amendment 2026-10-04** cuts sending and enrollment out of sales-partner. Tasks 13–17 replace the remaining work (Task 12's live acceptance becomes Task 17). Same Global Constraints; commits only when `tests/run-all.sh` prints ALL GREEN.
+
+### Task 13: Remove sequences, enroll, sync-replies, relay
+- Tests first: the removed paths (`capabilities/sequences`, `skills/enroll`, `skills/sync-replies`) don't exist; `agent.yaml` has no `sequences` capability and no `activity_enroll` / `activity_sync-replies`; operating-config has none of the five removed keys; interview and setup don't mention them or `accept_instruction_only`; the digest and its template have no Enrolled or Replies sections; no file mentions InvokeIQ, `enroll_contact`, `sync-replies` or `sequence_bands` (outside docs history). Remove the now-obsolete 6.0 tests for those pieces; the schedule test drops `enroll`.
+- Delete and rewire; root `guard.yaml` keeps its denies (the n8n dispatcher denies stay harmless). Validator OK.
+- Commit: `feat: sales-partner stops at Approach Drafted — sequences, enroll, sync-replies and the relay leave`.
+
+### Task 14: Guard and contract for the shorter flow
+- Tests first: per CRM, `Contacted` and `Engaged` on update are now blocked; `Scored`, `Researched`, `Approach Drafted`, `Disqualified` pass; Activity status `sent` on update is blocked, `voided` passes (HubSpot `COMPLETED` blocked, `DEFERRED` passes). Contract and usage text: the agent writes up to `Approach Drafted`; `update_activity` accepts `voided` only.
+- Update the three guard.yaml, contract (Lead status, transitions, Approval invariant, `update_activity`), the three usage.md, evals.
+- Commit: `feat: the agent writes statuses up to Approach Drafted and only voids drafts`.
+
+### Task 15: Approacher — recommendation, statements, full draft
+- Tests first: approacher.md names `recommended: <one-line reason>`, `statements`, the `opener:`/`relevance:`/`proof:`/`ask:` block, one draft Activity per enabled channel, full draft only for the recommended channel; each write-* skill describes the statements block; templates show it; an eval case checks the shape.
+- Rewrite approacher.md outputs/stop conditions; update write-cold-email, write-linkedin-touch, write-call-opener (drop the sequences variables section); templates.
+- Commit: `feat: the Approacher recommends a channel and prepares personalized statements for each`.
+
+### Task 16: AGENT.md, README, how-it-works, opt-out instruction
+- Tests first: AGENT.md < 6000 bytes, says "lead generation and personalization", stops at `Approach Drafted`, no `enroll`/`sync-replies`/sequence platform; README and how-it-works match; contract states the opt-out instruction.
+- Commit, push PR #15 and the builder doc change (#19).
+
+### Task 17: Final review and acceptance
+- Fresh whole-branch review; fix Critical/Important with tests.
+- Acceptance with the user on Attio: prospect → research → plan (recommended channel + statements + full draft) → the user moves the lead to `Ready to Send`.
+
 ---
 
 ## Original Tasks 6–10 (superseded; referenced by Tasks 8–12 above)

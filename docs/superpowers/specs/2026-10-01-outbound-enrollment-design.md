@@ -181,3 +181,23 @@ The `sales-call-specialist` and `follow-up` sub-agents; the `prepare-sales-call`
 ### AGENT.md
 
 Rule: `AGENT.md` holds only what must be true in every session — identity, the step-to-file workflow table, guardrails, escalation. Everything a step needs only while it runs lives in its skill or sub-agent contract. Target about 5.5 KB (was 8.5 KB), keeping the Standard's ten headings. The workflow is one table: interview, prospect, prepare, approach, enroll, sync-replies, digest (trigger, file, schedulable). Guardrails add: never act on a lead the owner owns (`Open Deal`, `Nurture`, `Customer`).
+
+## Amendment 2026-10-04: lead generation and personalization only
+
+Agreed with the user after the final review of sales-partner 6.0.0. It supersedes every earlier section where they disagree.
+
+**Scope.** sales-partner generates fresh leads on a recurring basis, researches and scores them, and prepares the first touch. **It stops at `Approach Drafted`.** When the owner approves a lead (`Ready to Send`), the owner's own CRM automations, other systems or other agents take over. It may be renamed later.
+
+**Removed from sales-partner:** the `sequences` capability, the InvokeIQ tool, its n8n workflow and reply relay; the `enroll` and `sync-replies` skills and activities; `accept_instruction_only: enroll_ready_only`; the settings `sequence_bands`, `allowed_countries`, `eu_uk_legitimate_interest`, `canada_consent_basis`, `touch_spacing_days`; the related interview and setup steps; the digest's Enrolled and Replies sections. (Agent-builder 6.0's wrapped tools and accepted invariants stay in the Standard as general features.)
+
+**Status model.** The 11 statuses stay. The agent writes `New` on create and only `Scored`, `Researched`, `Approach Drafted`, `Disqualified` on update. `Ready to Send`, `Contacted`, `Engaged`, `Open Deal`, `Nurture`, `Customer` are written by the owner or the owner's automations; every CRM guard refuses them to the agent.
+
+**Activities.** The agent creates Activities at `draft` and may only void them (`update_activity` accepts `voided` only). `sent` is the owner's or the automation's.
+
+**First-touch output (Approacher).** For each lead, draft Activities:
+- the **recommended channel** (email, LinkedIn or call): summary `recommended: <one-line reason>`; body = the full draft, then a **Personalized statements** block;
+- each **other enabled channel**: summary `statements`; body = the Personalized statements block only.
+
+The Personalized statements block is 2–4 labelled lines (`opener:`, `relevance:`, `proof:`, `ask:`), each traced to research or `business-profile.md`, ready to merge into the owner's templates.
+
+**Opt-outs.** No skill reads replies any more. When the owner (or their automation) logs an inbound opt-out, the agent, whenever it next touches the lead, sets `Do Not Contact` and voids its pending drafts; the owner's sending system handles its own suppression.
