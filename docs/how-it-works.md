@@ -29,7 +29,7 @@ Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
 | Repository | Role |
 |---|---|
 | [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@main`, and the `new-agent` wizard. |
-| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: lead generation and outbound — it finds, qualifies and researches leads, then runs first outreach (email enrolled into the client's InvokeIQ sequence, LinkedIn and calls drafted). Its job ends when a lead replies. |
+| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: lead generation and personalization — it finds, scores and researches fresh leads, then prepares each first touch (a recommended channel with a full draft, plus personalized statements for email, LinkedIn and calls). It never sends: once the owner approves a lead, the owner's CRM automations take over. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
 The builder's version and the standard's version move together. The standard is in active development, so there are no version tags yet. An agent's CI uses `validate@main` and always checks against the latest standard. Tags come with the first official release. There is no migration machinery: a change to the standard is made directly in the agents.
@@ -142,17 +142,17 @@ home of each record differs.
 | **Guard blocks, on top of the shared rules** | Attribute keys given as IDs | Writes with no recorded field IDs | Writing a pipeline stage, pipeline or completion date on a Task |
 
 **Lead status vs deal stage.** The lead (the company) has one status:
-New, Scored, Researched, Approach Drafted (the agent's work) → Ready to
-Send (the owner approves the whole plan by moving the lead) → Contacted
-→ Engaged (they replied; the agent's job ends) → Open Deal, Nurture
-(with a Revisit On date) or Customer (the owner's), or Disqualified.
-Deals, with their own stages, live on the CRM's deal object. In every
-tool the guard stops the agent writing Ready to Send, Open Deal, Nurture
-or Customer, so those stay the owner's by mechanism. The agent creates
-drafts and marks a touch `sent` once it went out; it never rewrites a
-draft after create. Once a lead is enrolled, moving it back does not
-stop InvokeIQ's sequence: pause the contact in InvokeIQ. The operator creates the
-saved views by hand, because none of the connectors can create views.
+New, Scored, Researched, Approach Drafted (the agent's work; it stops
+here) → Ready to Send (the owner approves the lead by moving it; the
+owner's automations, systems or agents take over) → Contacted → Engaged
+→ Open Deal, Nurture (with a Revisit On date) or Customer, or
+Disqualified. Deals, with their own stages, live on the CRM's deal
+object. In every tool the guard stops the agent writing anything past
+Approach Drafted (except Disqualified), so those statuses stay the
+owner's by mechanism. The agent creates drafts and may only void them;
+`sent` is the owner's or their automation's, and no draft is rewritten
+after create. The operator creates the saved views by hand, because
+none of the connectors can create views.
 
 In HubSpot, a lead's location uses HubSpot's own city, state and country
 fields, so it needs no custom field. HubSpot's Tasks work on the free
@@ -386,8 +386,6 @@ activity_prospect: crm
 activity_prepare: crm
 activity_approach: crm
 activity_digest: crm, email_drafts
-activity_enroll: crm, sequences
-activity_sync-replies: crm, sequences
 ```
 
 - **The author** declares which steps can be scheduled. Undeclared steps can
@@ -485,9 +483,9 @@ Everything else is left to the agent's instructions.
 
 Some rules can't be checked by the guard at all, because the guard sees
 one tool call at a time and never reads another system. For example,
-"enroll only leads the owner moved to Ready to Send" depends on the
-lead's stage in the CRM, which the call to the sending platform doesn't
-carry. A contract marks such an invariant `(acceptable)`.
+"enroll only leads the owner moved to Ready to Send", in an agent that
+enrolls leads into an email sequence, depends on the lead's stage in the
+CRM, which the call to the sending platform doesn't carry. A contract marks such an invariant `(acceptable)`.
 
 Normally an activity can't be scheduled while any invariant is held only
 by instructions. For an acceptable one, setup explains in plain words
@@ -497,7 +495,7 @@ schedule check then passes and prints the risk under the entry, every
 time:
 
 ```
-PASS  sales-partner: enroll (acme)
+PASS  outreach-agent: enroll (acme)
   …
   ACCEPTED (instruction-only): sequences: enroll_ready_only
 ```
