@@ -65,8 +65,6 @@ def field_spec(name, ftype, options):
         spec["options"] = dict(DATE_TIME)
     elif ftype == "date":
         spec["options"] = {"dateFormat": {"name": "iso"}}
-    elif ftype == "createdTime":
-        spec["options"] = {"result": {"type": "dateTime", "options": dict(DATE_TIME)}}
     return spec
 
 

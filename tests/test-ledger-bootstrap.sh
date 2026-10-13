@@ -18,6 +18,8 @@ py "print(b.field_spec('Key', 'formula', ('{Run ID} & \"#\" & {Seq}',)))";      
 py "print(b.field_spec('Seq', 'number', ()))";                                expect 0 "number precision 0" "'precision': 0"
 py "print(b.field_spec('Cost USD', 'currency', ()))";                         expect 0 "currency" "'symbol': '\$'"
 py "print(b.field_spec('At', 'dateTime', ()))";                               expect 0 "dateTime UTC" "'timeZone': 'utc'"
+py "print(b.field_spec('Recorded At', 'createdTime', ()))";                   expect 0 "createdTime has no options" "{'name': 'Recorded At', 'type': 'createdTime'}"
+py "print(b.field_spec('Recorded At', 'createdTime', ()))";                   printf '%s' "$OUT" | grep -q options && _report no "createdTime sends options" || _report ok "createdTime sends no options key"
 
 echo "-- plan"
 py "w = b.wanted('.', events_only=True); a, e = b.plan({}, w)
