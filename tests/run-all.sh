@@ -50,6 +50,15 @@ echo "== setup and guard text"
 for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup' 'read -rs <VAR> && export <VAR>'; do
   grep -qF -- "$want" _template/skills/setup/SKILL.md || { echo "FAIL: setup does not say: $want"; STATUS=1; }
 done
+# Owner sends need the bindings pushed, so the test notification waits for version control.
+S=_template/skills/setup/SKILL.md
+tools_step=$(awk '/^9\. \*\*Tools\.\*\*/,/^10\. \*\*Version control/' "$S")
+after_tools=$(awk '/^10\. \*\*Version control/,0' "$S")
+printf '%s' "$tools_step" | grep -qF 'offer one test notification' && { echo "FAIL: setup offers the test notification before version control"; STATUS=1; }
+printf '%s' "$tools_step" | grep -qF 'step 10' || { echo "FAIL: setup's tools step does not point at step 10 for the push"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'git push -u' || { echo "FAIL: setup's version control step does not push"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'offer one test notification' || { echo "FAIL: setup does not offer the test notification after version control"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'opened in the instance folder' || { echo "FAIL: setup does not keep the test notification to a guarded session"; STATUS=1; }
 if grep -rniE 'paste (the|your) (api )?key|give us your (api )?key' _template/skills skills | grep -vi 'never' | grep -q .; then echo "FAIL: a skill asks for a key in chat"; STATUS=1; fi
 if grep -rnE 'create_tools|update_tools|values_at' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
   echo "FAIL: old guard keys still mentioned"; STATUS=1; fi
