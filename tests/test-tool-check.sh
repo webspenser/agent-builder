@@ -204,4 +204,51 @@ pin_with() { good_notify; printf '%s\n' 'covers: [owner_only_send]' 'allow: [sen
 pin_with '"send-*"'; expect 0 "recipients glob pins send-email" "OK: "
 pin_with 'Send-Email'; expect 0 "recipients match is case-insensitive" "OK: "
 pin_with 'send_email'; expect 1 "send_email does not pin send-email" "send-email is allowed but no recipients entry pins it"
+echo "-- ledger: tables.md"
+pt() { # pt <file>: schema, table names, problems from parse_tables
+  OUT=$(python3 -B -c 'import sys; sys.path.insert(0, "_template/hooks"); import tool_check as t
+s, tb, p = t.parse_tables(open(sys.argv[1], encoding="utf-8").read())
+print("schema", s); print("tables", ",".join(tb)); print("\n".join(p))' "$1" 2>&1); RC=$?; }
+LT="$W/tables.md"
+printf '%s\n' '# Ledger tables' '' 'ledger_schema: 2' '' '## Cells' '' 'key: Cell' '' '| Field | Type | Options |' '|---|---|---|' \
+  '| Cell | singleLineText | |' '| Last Run | dateTime | |' '| Status | singleSelect | open, done |' > "$LT"
+pt "$LT"; expect 0 "valid tables.md: schema" "schema 2"
+expect 0 "valid tables.md: tables" "tables Cells"
+printf '%s\n' 'ledger_schema: 1' > "$LT"; pt "$LT"; expect 0 "Events only" "schema 1"
+printf '%s\n' '## Cells' 'key: Cell' '| Cell | singleLineText | |' > "$LT"; pt "$LT"; expect 0 "missing schema" "missing ledger_schema: <n>"
+printf '%s\n' 'ledger_schema: 0' > "$LT"; pt "$LT"; expect 0 "schema 0" "ledger_schema must be a positive integer"
+printf '%s\n' 'ledger_schema: 1' '## Events' 'key: X' '| X | singleLineText | |' > "$LT"; pt "$LT"; expect 0 "Events declared" "Events is the standard table"
+printf '%s\n' 'ledger_schema: 1' '## Cells' '| Cell | singleLineText | |' > "$LT"; pt "$LT"; expect 0 "no key" "table Cells has no key: line"
+printf '%s\n' 'ledger_schema: 1' '## Cells' 'key: Nope' '| Cell | singleLineText | |' > "$LT"; pt "$LT"; expect 0 "key not a field" "table Cells: key Nope is not one of its fields"
+printf '%s\n' 'ledger_schema: 1' '## Cells' 'key: Cell' '| Cell | rainbow | |' > "$LT"; pt "$LT"; expect 0 "bad type" "Cells.Cell: type rainbow is not one of"
+printf '%s\n' 'ledger_schema: 1' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Mode | singleSelect | |' > "$LT"; pt "$LT"; expect 0 "select without options" "Cells.Mode: a singleSelect field needs options"
+printf '%s\n' 'ledger_schema: 1' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Cell | number | |' > "$LT"; pt "$LT"; expect 0 "duplicate field" "Cells.Cell is declared twice"
+printf '%s\n' 'ledger_schema: 1' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Run-ID | singleLineText | |' > "$LT"; pt "$LT"
+expect 0 "collision by spelling" "Cells.Run-ID has the same name as the Events field Run ID"
+printf '%s\n' 'ledger_schema: 1' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '## Cells' 'key: Cell' '| Cell | singleLineText | |' > "$LT"; pt "$LT"; expect 0 "duplicate table" "table Cells is declared twice"
+
+echo "-- ledger: guard checks"
+L="$W/pkg/capabilities/ledger"; LT2="$L/tools/demo"; mkdir -p "$LT2"
+printf '%s\n' '# Ledger' '' '## Operations' '' '| `append_events` | x |' '' '## Invariants' '' \
+  '- `append_only_events` — x' '- `no_delete` — y' '- `no_schema_change` — z' > "$L/contract.md"
+good_ledger() {
+  printf '%s\n' 'capability: ledger' 'provider: demo' 'server_match: demo' > "$LT2/identity.yaml"
+  printf '%s\n' '# Demo' '' '- `append_events` — demo:create' '' '## Probe' '' 'Call demo:tables.' > "$LT2/usage.md"
+  { printf '%s\n' 'covers: [append_only_events, no_delete, no_schema_change]' 'allow: [create_records, update_records]' 'deny: ["*delete*"]' \
+      'refuse_args: [typecast, interfaceContext]' 'writes:' '  - kind: create' '    tools: [create_records]' '    at: ["records[].fields"]' \
+      '  - kind: update' '    tools: [update_records]' '    at: ["records[].fields"]' 'unknown_writes: block' 'bound_keys_only: true' 'rules:'
+    for f in "At" "Run ID" "Seq" "Activity" "Trigger" "Event" "Subject" "Outcome" "Items In" "Items Out" "Cost USD" "Duration s" "Detail" "Agent Version" "Backfilled"; do
+      printf '  - field: %s\n    forbid: update\n' "$f"; done; } > "$LT2/guard.yaml"
+}
+good_ledger; run "$LT2" "$L/contract.md"; expect 0 "complete ledger guard passes" "OK: "
+good_ledger; sed -i.bak '/^bound_keys_only/d' "$LT2/guard.yaml"; run "$LT2" "$L/contract.md"
+expect 1 "append_only_events needs bound_keys_only" "append_only_events needs bound_keys_only: true"
+good_ledger; python3 - "$LT2/guard.yaml" <<'PY'
+import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("  - field: Detail\n    forbid: update\n",""))
+PY
+run "$LT2" "$L/contract.md"; expect 1 "missing forbid rule" "append_only_events needs a forbid: update rule for Detail"
+good_ledger; sed -i.bak 's/^refuse_args: .*/refuse_args: [interfaceContext]/' "$LT2/guard.yaml"; run "$LT2" "$L/contract.md"
+expect 1 "no_schema_change needs typecast refused" "no_schema_change needs refuse_args to include typecast"
+good_ledger; sed -i.bak 's/^covers: .*/covers: [no_delete]/' "$LT2/guard.yaml"; sed -i.bak '/^bound_keys_only/d' "$LT2/guard.yaml"; run "$LT2" "$L/contract.md"
+expect 0 "uncovered ledger invariants are not checked here (the gate refuses them)"
 finish

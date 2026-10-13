@@ -42,6 +42,35 @@ N8N_DISPATCHER_TOOLS = ("execute_workflow", "create_workflow_from_code", "update
 CALLER_SET = re.compile(r"(?i)\$fromai")
 PLACEHOLDER = re.compile(r"(?<!\{)\{[A-Za-z_][A-Za-z0-9_]*\}(?!\})")
 LITERAL_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
+LEDGER_INVARIANTS = ("append_only_events", "no_schema_change")
+# The standard ledger Events table (STANDARD.md, "Ledger"): (name, Airtable type, options).
+# A formula's options hold its expression. Key and Recorded At are computed by Airtable.
+LEDGER_EVENTS = (
+    ("Key", "formula", ('{Run ID} & "#" & {Seq}',)),
+    ("At", "dateTime", ()),
+    ("Recorded At", "createdTime", ()),
+    ("Run ID", "singleLineText", ()),
+    ("Seq", "number", ()),
+    ("Activity", "singleLineText", ()),
+    ("Trigger", "singleSelect", ("scheduled", "interactive")),
+    ("Event", "singleSelect", ("run_started", "step", "stop_condition", "notify_sent", "error", "run_finished")),
+    ("Subject", "singleLineText", ()),
+    ("Outcome", "singleSelect", ("ok", "partial", "failed", "skipped", "dry_run")),
+    ("Items In", "number", ()),
+    ("Items Out", "number", ()),
+    ("Cost USD", "currency", ()),
+    ("Duration s", "number", ()),
+    ("Detail", "multilineText", ()),
+    ("Agent Version", "singleLineText", ()),
+    ("Backfilled", "checkbox", ()),
+)
+LEDGER_COMPUTED = ("Key", "Recorded At")
+LEDGER_TYPES = ("singleLineText", "multilineText", "number", "currency", "checkbox", "date",
+                "dateTime", "singleSelect", "multipleSelects", "url", "email", "phoneNumber")
+LEDGER_SELECTS = ("singleSelect", "multipleSelects")
+TABLE_ROW = re.compile(r"^\|(.*)\|$")
+SCHEMA_LINE = re.compile(r"^ledger_schema:\s*(\S+)$")
+KEY_LINE = re.compile(r"^key:\s*(.+)$")
 
 
 class ToolError(Exception):
@@ -79,6 +108,99 @@ def read_contract(path):
 def acceptable(text):
     """Invariant ids under ## Invariants marked (acceptable): an instance may accept them as instruction-only."""
     return {m.group(1) for line in section(text, "Invariants") or [] for m in [ACCEPTABLE.match(line)] if m}
+
+
+def norm_field(name):
+    """A field name the way the guard engine matches rule fields: lowercase, spaces and hyphens to _."""
+    return re.sub(r"[\s-]+", "_", str(name).strip().lower())
+
+
+def ledger_writable():
+    """The Events fields the agent writes; computed fields excluded."""
+    return [name for name, _, _ in LEDGER_EVENTS if name not in LEDGER_COMPUTED]
+
+
+def parse_tables(text):
+    """(schema, tables, problems) from a ledger tables.md.
+
+    schema is the ledger_schema integer or None; tables maps each declared
+    table, in file order, to {"key": field or None, "fields": {field: (type, options)}};
+    problems holds one message per error and is empty for a valid file."""
+    problems, tables, schema, current = [], {}, None, None
+    events = {norm_field(name): name for name, _, _ in LEDGER_EVENTS}
+    for raw in text.splitlines():
+        line = raw.strip()
+        m = SCHEMA_LINE.match(line)
+        if m:
+            if schema is not None:
+                problems.append("ledger_schema appears more than once")
+            elif not re.fullmatch(r"[1-9][0-9]*", m.group(1)):
+                problems.append(f"ledger_schema must be a positive integer, got {m.group(1)!r}")
+            else:
+                schema = int(m.group(1))
+            continue
+        if line.startswith("## "):
+            name = line[3:].strip()
+            if norm_field(name) == "events":
+                problems.append("Events is the standard table; an agent may not declare it")
+            if name in tables:
+                problems.append(f"table {name} is declared twice")
+            tables[name] = {"key": None, "fields": {}}
+            current = name
+            continue
+        if current is None:
+            continue
+        m = KEY_LINE.match(line)
+        if m:
+            tables[current]["key"] = m.group(1).strip()
+            continue
+        m = TABLE_ROW.match(line)
+        if not m:
+            continue
+        cells = [c.strip() for c in m.group(1).split("|")]
+        if len(cells) < 2 or cells[0] in ("", "Field") or set(cells[0]) <= set("-: "):
+            continue
+        field, ftype = cells[0], cells[1]
+        options = tuple(o.strip() for o in cells[2].split(",") if o.strip()) if len(cells) > 2 else ()
+        where = f"{current}.{field}"
+        if field in tables[current]["fields"]:
+            problems.append(f"{where} is declared twice")
+        if ftype not in LEDGER_TYPES:
+            problems.append(f"{where}: type {ftype} is not one of {', '.join(LEDGER_TYPES)}")
+        if ftype in LEDGER_SELECTS and not options:
+            problems.append(f"{where}: a {ftype} field needs options")
+        if norm_field(field) in events:
+            problems.append(f"{where} has the same name as the Events field {events[norm_field(field)]}; "
+                            "the guard matches rules by name, so rename it")
+        tables[current]["fields"][field] = (ftype, options)
+    if schema is None:
+        problems.append("missing ledger_schema: <n>")
+    for name, table in tables.items():
+        if table["key"] is None:
+            problems.append(f"table {name} has no key: line")
+        elif table["key"] not in table["fields"]:
+            problems.append(f"table {name}: key {table['key']} is not one of its fields")
+        if not table["fields"]:
+            problems.append(f"table {name} declares no fields")
+    return schema, tables, problems
+
+
+def check_ledger_guard(parsed, invariants, label):
+    """append_only_events: bound_keys_only plus a forbid: update rule for every writable Events field.
+    no_schema_change: refuse_args includes typecast. Only for invariants the guard covers."""
+    fails = []
+    if "append_only_events" in invariants:
+        if parsed.get("bound_keys_only") != "true":
+            fails.append(f"{label}/guard.yaml: append_only_events needs bound_keys_only: true")
+        forbidden = {norm_field(r["field"]) for r in parsed.get("rules", []) if r.get("forbid") in ("update", "true")}
+        for name in ledger_writable():
+            if norm_field(name) not in forbidden:
+                fails.append(f"{label}/guard.yaml: append_only_events needs a forbid: update rule for {name}")
+    if "no_schema_change" in invariants:
+        refused = {re.sub(r"[_-]", "", a).lower() for a in parsed.get("refuse_args", [])}
+        if "typecast" not in refused:
+            fails.append(f"{label}/guard.yaml: no_schema_change needs refuse_args to include typecast")
+    return fails
 
 
 def _scalar(raw):
@@ -300,6 +422,9 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
             fails.append(f"{label}/guard.yaml: covers must include {inv}")
     if "owner_only_send" in invariants and parsed:
         fails.extend(check_owner_only(parsed, folder, label))
+    ledger_covered = [inv for inv in LEDGER_INVARIANTS if inv in invariants and inv in (covers or [])]
+    if ledger_covered and parsed:
+        fails.extend(check_ledger_guard(parsed, ledger_covered, label))
     return fails, identity
 
 
