@@ -405,6 +405,19 @@ policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '  
 policy 'covers: [x]' 'limits:';                                                                    parses 1 "empty limits"
 policy 'covers: [x]' 'limits: [a]';                                                                parses 1 "limits given a list"
 policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: r' '    kind: max'; parses 1 "recipients entry has no kind"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    required: true'; parses 0 "limits required: true"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    required: yes'; parses 1 "limits required: yes"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    required: false'; parses 1 "limits required: false"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: r' '    required: true'; parses 1 "recipients has no required"
+policy 'covers: [pinned_inputs]' 'allow: [crawl]' 'limits:' '  - tools: [crawl]' '    at: [startUrls]' '    bound: max_sites' '    kind: count' '    required: true'
+run 2 "required: an absent path blocks" $C '{}' "crawl names no startUrls" "$LB2"
+run 2 "required: a null path blocks" $C '{"startUrls":null}' "crawl names no startUrls" "$LB2"
+run 0 "required: a present path passes" $C '{"startUrls":[{"url":"a"}]}' "" "$LB2"
+run 0 "required: an empty list is present" $C '{"startUrls":[]}' "" "$LB2"
+run 2 "required: a variant spelling counts as the path" $C '{"start_urls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites at startUrls (3 > 2)" "$LB2"
+run 2 "required: an over-bound list still blocks" $C '{"startUrls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites" "$LB2"
+policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: [a, b]' '    bound: max_sites' '    kind: max' '    required: true'
+run 2 "required: every path is required" $C '{"a":1}' "crawl names no b" "$LB2"
 policy 'covers: [x]' 'refuse_args: ["a.b"]'
 run 2 "tool_input that is not an object blocks a nested refuse path" mcp__apify__run '[1]' "cannot check this call" -
 
@@ -414,13 +427,15 @@ policy 'covers: [pinned_inputs]' 'allow: [crawl, list-actors]' 'only_keys:' '  -
 parses 0 "only_keys parses"
 run 0 "root keys allowed" $C '{"startUrls":[],"maxRequests":3}' "" -
 run 2 "root key not listed" $C '{"startUrls":[],"proxyConfig":{}}' "crawl may not use proxyConfig" -
-run 0 "root keys folded" $C '{"StartURLs":[]}' "" -
-run 0 "root keys folded, snake case" $C '{"max_requests":3}' "" -
+run 2 "root keys are exact: other case blocks" $C '{"StartUrls":[]}' "crawl may not use StartUrls" -
+run 2 "root keys are exact: snake case blocks" $C '{"start_urls":[]}' "crawl may not use start_urls" -
+run 2 "root keys are exact: snake maxRequests blocks" $C '{"max_requests":3}' "crawl may not use max_requests" -
+run 0 "root key spelled exactly passes" $C '{"startUrls":[]}' "" -
 run 0 "empty input passes" $C '{}' "" -
 run 2 "root key with a null value is still not listed" $C '{"proxyConfig":null}' "may not use proxyConfig" -
 run 2 "tool_input that is not an object blocks" $C '[1]' "cannot check this call" -
 run 0 "item keys allowed" $C '{"startUrls":[{"url":"a"}]}' "" -
-run 0 "item key folded" $C '{"startUrls":[{"URL":"a"}]}' "" -
+run 2 "item keys are exact: other case blocks" $C '{"startUrls":[{"URL":"a"}]}' "crawl may not use startUrls[].URL" -
 run 2 "requestsFromUrl refused" $C '{"startUrls":[{"url":"a","requestsFromUrl":"b"}]}' "crawl may not use startUrls[].requestsFromUrl" -
 run 2 "headers refused" $C '{"startUrls":[{"url":"a","headers":{}}]}' "crawl may not use startUrls[].headers" -
 run 2 "userData null still refused" $C '{"startUrls":[{"url":"a","userData":null}]}' "may not use startUrls[].userData" -
@@ -429,6 +444,10 @@ run 2 "scalar item is not an object" $C '{"startUrls":["a"]}' "startUrls[]: expe
 run 2 "string where the list is expected" $C '{"startUrls":"a"}' "startUrls[]: unexpected shape" -
 run 0 "null startUrls passes" $C '{"startUrls":null}' "" -
 run 0 "a tool outside the entry is not checked" mcp__apify__list-actors '{"proxyConfig":{}}' "" -
+policy 'covers: [x]' 'allow: [crawl]' 'only_keys:' '  - tools: [crawl]' '    at: [opts]' '    keys: [inner]' '  - tools: [crawl]' '    at: [opts.inner]' '    keys: [k]'
+run 0 "exact dotted path passes" $C '{"opts":{"inner":{"k":1}}}' "" -
+run 2 "exact dotted path: a variant parent key blocks" $C '{"opts":{"Inner":{"zzz":1}}}' "crawl may not use opts.Inner" -
+run 2 "exact dotted path: a bad inner key blocks" $C '{"opts":{"inner":{"zzz":1}}}' "crawl may not use opts.inner.zzz" -
 policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a.b]' '    keys: [k]'; parses 0 "only_keys dotted path"
 policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]';                      parses 1 "only_keys without keys"
 policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    keys: [k]';                    parses 1 "only_keys without at"

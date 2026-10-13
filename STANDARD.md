@@ -597,6 +597,7 @@ limits:
     at: [startUrls]
     bound: max_sites
     kind: count
+    required: true
   - tools: [crawl]
     at: [maxRequests]
     bound: max_requests
@@ -607,7 +608,8 @@ An allowlist (`only_keys`) is the recommended way to restrict arguments:
 a deny list (`refuse_args`) only stops the keys it names, so any other
 key the vendor accepts (a `requestsFromUrl` that loads a whole URL list,
 `headers`, `userData`) passes. Use `refuse_args` for a value that must
-never appear in an argument the tool otherwise takes.
+never appear in an argument the tool otherwise takes. A cap that must
+not be skipped by leaving the argument out takes `required: true`.
 
 ### Grammar
 
@@ -636,7 +638,7 @@ validation error and, at runtime, a block.
   `update` or `any`. A `writes` item holds `kind:`, `tools:`
   and `at:`, the last two as flow lists. A `recipients` item
   holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A `limits` item
-  holds the same and `kind:`, a scalar (`count` or `max`). An `only_keys` item
+  holds the same and `kind:`, a scalar (`count` or `max`), and optionally `required: true`. An `only_keys` item
   holds `tools:`, `at:` and `keys:`, all flow lists. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
@@ -657,8 +659,8 @@ validation error and, at runtime, a block.
 | `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
 | `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Pins argument values (text or numbers) to values recorded in bindings: every value at those paths must equal a `<bound>: <value>` line |
-| `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed |
-| `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, compared as `refuse_args` names are. Recommended over `refuse_args` for restricting arguments |
+| `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required; `required` may only be `true`). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed, unless the entry says `required: true`, which makes a path that is absent or `null` block |
+| `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, spelled exactly (no case, `_` or `-` folding; the path is walked with exact names too). Recommended over `refuse_args` for restricting arguments |
 | `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
 
 ### Semantics
@@ -701,11 +703,14 @@ validation error and, at runtime, a block.
    paths are walked as for nested `refuse_args`; an absent path is
    skipped, and so is `null`). Each must be an object, else block:
    `<path>: expected an object`; a wrong shape on the way blocks:
-   `<path>: unexpected shape`. Every key of the object, compared with
-   the entry's `keys` after lowercasing and removing `_` and `-`, must
-   equal one of them, whatever its value (a `null` value does not
-   excuse it); otherwise block: `<tool> may not use <path>.<key>`, or
-   `<tool> may not use <key>` for `$`, with `<key>` as the call sent it.
+   `<path>: unexpected shape`. Every key of the object must equal one
+   of the entry's `keys` exactly, whatever its value (a `null` value
+   does not excuse it); otherwise block: `<tool> may not use
+   <path>.<key>`, or `<tool> may not use <key>` for `$`, with `<key>` as
+   the call sent it. The comparison is exact on purpose: a folded one
+   would let `start_urls` or `StartUrls` pass an allowlist for
+   `startUrls` while `recipients` and `writes` paths, which match keys
+   exactly, never see its value.
 
    *Recipients.* For each `recipients` entry whose `tools` match the
    call (suffix matching as in step 1; a matching call whose input is
@@ -750,8 +755,11 @@ validation error and, at runtime, a block.
       more than one distinct number, or a value that is not a number,
       blocks: `<bound> must be one number`.
    2. Collect the values at every `at` path, with segments compared as
-      for nested `refuse_args`. `null` is skipped, and so is a path the
-      call does not have: limits cap, they do not require. A wrong shape
+      for nested `refuse_args` (folded, which only makes a cap stricter).
+      `null` is skipped, and so is a path the call does not have: limits
+      cap, they do not require, unless the entry has `required: true`,
+      in which case a path with no value other than `null` blocks:
+      `<tool> names no <path>`. A wrong shape
       on the way (a scalar where an object or list is expected) blocks as
       `cannot check this call`.
    3. Kind `count`: the value must be a list, else block: `<path>:
@@ -846,7 +854,8 @@ Each is an invalid policy, and fails closed.
 - A `limits` entry is invalid in the same ways as a `recipients` entry
   (unknown key, no `bound`, a `bound` that is not `snake_case`, a missing
   or empty `tools` or `at`, a bad `at` path), or has no `kind`, or a
-  `kind` other than `count` or `max`; or `limits:` has no items.
+  `kind` other than `count` or `max`, or a `required` other than `true`;
+  or `limits:` has no items.
 - An `only_keys` entry has an unknown key, a missing or empty `tools`,
   `at` or `keys`, an `at` that is neither `$` nor a valid path, or a
   `keys` item that is not a plain argument name; or `only_keys:` has no

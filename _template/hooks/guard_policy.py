@@ -19,9 +19,11 @@ every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset (a `writes:` list says where values
 sit; `rules:` constrain them; `recipients:` pins argument values (text or numbers) to values recorded
 in bindings; `limits:` caps a list's length (kind count) or a number (kind max) at a value recorded in
-bindings; `only_keys:` allows an object at a path only the keys it lists; `refuse_args:` refuses an
-argument, or a nested value at a path like "startUrls[].payload"; an only_keys allowlist is the
-recommended way to restrict arguments); see STANDARD.md "Guard policy".
+bindings (`required: true` also blocks a call that leaves the path out); `only_keys:` allows an object
+at a path only the keys it lists, spelled exactly (no case or `_`/`-` folding, so it agrees with the
+exact-key `recipients` paths); `refuse_args:` refuses an argument, or a nested value at a path like
+"startUrls[].payload" (names there are folded, which only makes it stricter); an only_keys allowlist is
+the recommended way to restrict arguments); see STANDARD.md "Guard policy".
 """
 import decimal
 import fnmatch
@@ -39,7 +41,7 @@ ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
 RECIPIENT_KEYS = ("tools", "at", "bound")
-LIMIT_KEYS = ("tools", "at", "bound", "kind")
+LIMIT_KEYS = ("tools", "at", "bound", "kind", "required")
 ONLY_KEYS_KEYS = ("tools", "at", "keys")
 LIMIT_KINDS = ("count", "max")
 ROOT = "$"  # an only_keys path naming the whole tool input
@@ -212,6 +214,8 @@ def _validate(policy):
         for entry in policy.get(name, []):
             if name == "limits" and entry.get("kind") not in LIMIT_KINDS:
                 raise PolicyError("limits: kind must be count or max")
+            if name == "limits" and "required" in entry and entry["required"] != "true":
+                raise PolicyError("limits: required may only be true")
             for k in ("tools", "at"):
                 if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
                     raise PolicyError(f"{name}: each entry needs a non-empty {k} list")
@@ -386,14 +390,16 @@ def _walk(obj, path):
     return nodes
 
 
-def _walk_folded(obj, path):
+def _walk_folded(obj, path, exact=False):
     """(nodes at path, shape mismatch). Each segment matches the way refuse_args names do (_arg_key), and
-    every key that matches counts. A null where an object or list is expected holds nothing; any other
+    every key that matches counts; with exact, a segment matches only the identical key. A null where an object or list is expected holds nothing; any other
     wrong shape sets the mismatch flag (the caller decides what that means) and is never an exception."""
     nodes, mismatch = [obj], False
     for part in path.split("."):
         many = part.endswith("[]")
-        want = _arg_key(part[:-2] if many else part)
+        want = part[:-2] if many else part
+        if not exact:
+            want = _arg_key(want)
         nxt = []
         for node in nodes:
             if node is None:
@@ -402,7 +408,7 @@ def _walk_folded(obj, path):
                 mismatch = True
                 continue
             for key, value in node.items():
-                if _arg_key(key) != want:
+                if (key if exact else _arg_key(key)) != want:
                     continue
                 if many and value is None:
                     continue
@@ -466,14 +472,15 @@ def _refused_at(obj, path):
 
 
 def _only_keys_problems(shown, entry, args):
-    """only_keys: every object at the paths holds only the listed keys (compared with _arg_key)."""
-    allowed = {_arg_key(name) for name in entry["keys"]}
+    """only_keys: every object at the paths holds only the listed keys, spelled exactly (a folded match
+    would let a variant spelling past the exact-key checks of recipients and writes)."""
+    allowed = set(entry["keys"])
     found = []
     for path in entry["at"]:
         if path == ROOT:
             nodes, mismatch = [args], False
         else:
-            nodes, mismatch = _walk_folded(args, path)
+            nodes, mismatch = _walk_folded(args, path, exact=True)
         if mismatch:
             found.append(f"{path}: unexpected shape")
         for node in nodes:
@@ -483,7 +490,7 @@ def _only_keys_problems(shown, entry, args):
                 found.append(f"{path}: expected an object")
                 continue
             for key in node:
-                if _arg_key(key) not in allowed:
+                if key not in allowed:
                     found.append(f"{shown} may not use {key}" if path == ROOT else f"{shown} may not use {path}.{key}")
     return found
 
@@ -504,6 +511,8 @@ def _limit_problems(shown, entry, args, bindings):
         nodes, mismatch = _walk_folded(args, path)
         if mismatch:
             raise PolicyError(f"{path}: unexpected shape")
+        if entry.get("required") and all(node is None for node in nodes):
+            found.append(f"{shown} names no {path}")
         for node in nodes:
             if node is None:
                 continue
