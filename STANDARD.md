@@ -424,8 +424,8 @@ exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
   `guard.yaml` exists and covers it; a contract with `no_send` fails
   (`no_send was renamed no_external_send`), and one with both send
   invariants fails;
-- when the contract has `owner_only_send` or `pinned_inputs` (and the
-  policy covers it), `guard.yaml` also has an
+- when the contract has `owner_only_send` or `pinned_inputs` and the
+  policy covers it, `guard.yaml` also has an
   `allow` list and at least one `recipients` entry. Each `allow` entry
   is an exact tool name (no `*`, `?` or `[`), and is either pinned by a
   `recipients` entry (the engine's case-insensitive match over its
@@ -966,7 +966,11 @@ runs `--pins` on that copy; a `--pins` that fails blocks the call. When
 the policy pins values, the engine then reads a private copy of the
 verified upstream bindings blob, not the working-tree file, so the bytes
 that were checked are the bytes that decide. A policy that pins nothing
-needs no pushed bindings. `git` runs with every transport refused, lazy fetch
+needs no pushed bindings. On this path the block is prefixed `Blocked by
+<agent> guard policy (<capability>/<provider>):`, not the agent-policy
+prefix of the exempt path.
+
+In both paths `git` runs with every transport refused, lazy fetch
 off, replace objects off, system config ignored, fsmonitor off, stdin from
 `/dev/null` and its output discarded, and the upstream blob's bytes are read
 directly, so no diff driver or clean filter runs.
@@ -1149,8 +1153,8 @@ lines for it.
 An entry may be scheduled only if it passes the gate. For the entry's
 activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
-bound tool's `guard.yaml` `covers`. Two rules apply to the send
-invariants:
+bound tool's `guard.yaml` `covers`. These further rules apply to
+the send and pinning invariants:
 
 - A `no_external_send` invariant must also be in the agent guard policy's
   `covers`.
@@ -1165,8 +1169,8 @@ invariants:
   list <capability> in exempt`). A `pinned_inputs` capability needs no
   exemption.
 
-  The gate does not check that the bindings file is pushed; the guard
-  does that on every call that depends on it.
+The gate does not check that the bindings file is pushed; the guard
+does that on every call that depends on it.
 
 An invariant the contract marks
 `(acceptable)` and `instance.yaml` lists in `accept_instruction_only`
@@ -1275,10 +1279,13 @@ The validator checks:
   passes `tool_check.py` (the validator loads the template's copy): the
   identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
   and `guard.yaml` rules in Tools above, and
-  `guard.yaml` covering `no_external_send`, `owner_only_send` or
-  `pinned_inputs` when the contract has it, with the extra
-  `owner_only_send` and `pinned_inputs` rules (an exact `allow` list,
-  `recipients`).
+  `guard.yaml` covering `no_external_send` or `owner_only_send` when the
+  contract has it. When a policy covers `owner_only_send` or
+  `pinned_inputs`, the extra pin rules apply (an exact `allow` list,
+  `recipients`). A contract's `pinned_inputs` need not be covered for
+  the package to validate, but an uncovered one fails the unattended
+  gate, which requires every contract invariant to be covered or
+  accepted.
 - A `guard.yaml` at the package root parses as an agent guard policy.
   When any contract has `no_external_send`, it must exist and its `covers` must
   include `no_external_send`. Each name in its `exempt` must be a listed
