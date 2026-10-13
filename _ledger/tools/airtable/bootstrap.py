@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Create or upgrade the ledger base that usage.md describes.
 
-Additive and idempotent: every table, field and select option is created
-only if missing, so re-running after a partial failure is safe. Nothing
-is ever deleted, renamed or retyped; a field of the wrong type stops the
-script.
+Additive and idempotent: every table and field is created only if
+missing, so re-running after a partial failure is safe. A missing select
+option, or a field of the wrong type, stops the script with an error
+naming what to fix by hand. Nothing is ever deleted, renamed or retyped.
 
 Reads AIRTABLE_TOKEN from the environment (set it in your shell with
 `read -rs AIRTABLE_TOKEN && export AIRTABLE_TOKEN`; never write it to a

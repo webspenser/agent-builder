@@ -258,9 +258,9 @@ them by hand.
 - With `--workspace <id>` it creates the base; with `--base <id>` it
   adopts an existing empty base or one it created earlier.
 - Creates `Events` and every table in `tables.md`, then adds any missing
-  field and select option. It never deletes, renames or retypes
-  anything. A field whose type differs from the declared one stops the
-  script with an error.
+  field. A missing select option, or a field whose type differs from the
+  declared one, stops the script with an error naming the fix to make by
+  hand. It never deletes, renames or retypes anything.
 - Prints the `base_id` and the schema version it built. The probe, not
   the script, records them.
 
