@@ -394,10 +394,24 @@ run 0 "list of equal numbers"     mcp__apify__run-maps '{"maxPlaces":[60, 60.0]}
 run 2 "missing argument blocks"   mcp__apify__run-maps '{}'                  "run-maps names no pinned value at maxPlaces" "$PB"
 printf '%s\n' 'max_places: sixty' > "$W/pinsx.md"
 run 2 "non-numeric binding never equals a number" mcp__apify__run-maps '{"maxPlaces":60}' "60 is not a pinned value (max_places)" "$W/pinsx.md"
+run 2 "scientific string blocks"  mcp__apify__run-maps '{"maxPlaces":"6e1"}' "6e1 is not a pinned value (max_places)" "$PB"
+run 2 "underscore string blocks"  mcp__apify__run-maps '{"maxPlaces":"6_0"}' "6_0 is not a pinned value (max_places)" "$PB"
+run 0 "signed string passes"      mcp__apify__run-maps '{"maxPlaces":"+60"}' "" "$PB"
+run 2 "Arabic-Indic digits block" mcp__apify__run-maps '{"maxPlaces":"٦٠"}'  "is not a pinned value (max_places)" "$PB"
+run 2 "list with a larger number blocks" mcp__apify__run-maps '{"maxPlaces":[60, 5000]}' "5000 is not a pinned value" "$PB"
+run 2 "NaN blocks"                mcp__apify__run-maps '{"maxPlaces":NaN}'   "is not a pinned value (max_places)" "$PB"
+run 2 "Infinity blocks"           mcp__apify__run-maps '{"maxPlaces":Infinity}' "is not a pinned value (max_places)" "$PB"
+printf '%s\n' 'max_places: 9007199254740992' > "$W/pinsbig.md"
+run 2 "distinct large integers stay distinct" mcp__apify__run-maps '{"maxPlaces":9007199254740993}' "9007199254740993 is not a pinned value" "$W/pinsbig.md"
+run 0 "equal large integer passes" mcp__apify__run-maps '{"maxPlaces":9007199254740992}' "" "$W/pinsbig.md"
+HUGE=$(python3 -c 'print("9"*400)')
+run 2 "400-digit integer blocks"  mcp__apify__run-maps "{\"maxPlaces\":$HUGE}" "is not a pinned value (max_places)" "$PB"
 echo "-- --pins"
 OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); [ "$OUT" = "max_places" ] && _report ok "--pins prints the bound key" || _report no "--pins: $OUT"
 policy 'covers: [x]' 'deny: ["*a*"]'
 OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins prints nothing without recipients" || _report no "--pins empty (rc=$rc): $OUT"
+policy 'covers: [x]' 'recipients:' '  - tools: [a]' '    at: [p]' '    bound: max_places' '  - tools: [b]' '    at: [q]' '    bound: max_places'
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); [ "$OUT" = "max_places" ] && _report ok "--pins prints a shared bound key once" || _report no "--pins shared: $OUT"
 printf 'covers: [x\n' > "$W/guard.yaml"
 OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 1 ] && printf '%s' "$OUT" | grep -q '^FAIL:' && _report ok "--pins on a bad policy fails" || _report no "--pins bad (rc=$rc): $OUT"
 

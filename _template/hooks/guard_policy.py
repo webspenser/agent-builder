@@ -20,8 +20,10 @@ The policy format is a strict YAML subset (a `writes:` list says where values
 sit; `rules:` constrain them; `recipients:` pins argument values (text or numbers) to values recorded
 in bindings); see STANDARD.md "Guard policy".
 """
+import decimal
 import fnmatch
 import json
+import math
 import re
 import sys
 import unicodedata
@@ -44,6 +46,7 @@ PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\]
 BINDING_LINE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(\S.*?)\s*$")
 BARE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 BARE_VALUE = re.compile(r"^[^\s<>\"',;]+$")
+NUMERIC = re.compile(r"^[+-]?[0-9]+(\.[0-9]+)?$", re.ASCII)
 
 
 class PolicyError(Exception):
@@ -389,15 +392,17 @@ def _pinned_at(obj, path):
 
 
 def _as_number(value):
-    """value as a float when it is a number or a numeric string, else None."""
+    """value as an exact Decimal when it is a number or a plain decimal string, else None."""
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(str(value).strip())
-    except ValueError:
-        return None
+    if isinstance(value, int):
+        return decimal.Decimal(value)
+    if isinstance(value, float):
+        return decimal.Decimal(repr(value)) if math.isfinite(value) else None
+    if isinstance(value, str):
+        text = value.strip()
+        return decimal.Decimal(text) if NUMERIC.match(text) else None
+    return None
 
 
 def _leaves(value, unwrap):
@@ -608,7 +613,8 @@ def main(argv):
         for entry in policy.get("recipients", []):
             if entry["bound"] not in seen:
                 seen.append(entry["bound"])
-        print("\n".join(seen)) if seen else None
+        if seen:
+            print("\n".join(seen))
         return 0
     if len(argv) == 3 and argv[0] == "--check" and argv[1] == "--agent":
         try:
