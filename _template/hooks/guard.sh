@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Agent Standard guard hook — identical in every agent.
 # PreToolUse hook for MCP tools. Inside an instance of this agent, the agent
-# guard policy (package-root guard.yaml, deny-only) applies to every MCP call;
-# then every bound tool whose server_match appears in the tool name gets its
+# guard policy (package-root guard.yaml, deny-only) applies to every MCP call
+# (it may exempt the server of one owner_only_send capability, which its own
+# tool policy then still enforces); then every bound tool whose server_match appears in the tool name gets its
 # guard policy (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the
 # call and shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -53,13 +54,27 @@ rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match o
 
 # The agent guard policy (package-root guard.yaml) applies to every MCP call,
 # whatever the server. A dangling symlink or a directory still reaches the
-# engine, which fails closed on it.
+# engine, which fails closed on it. A capability the policy lists in exempt:
+# lifts its deny for the bound tool's server, but only while that tool's own
+# guard.yaml covers owner_only_send; the bind_ loop below still enforces it.
 apolicy="$root/guard.yaml"
 if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
   engine="$root/hooks/guard_policy.py"
   [ -f "$engine" ] || ablock "the guard policy engine is missing from $name"
   command -v python3 >/dev/null 2>&1 || ablock "python3 is required to run the guard policy"
-  printf '%s' "$input" | python3 "$engine" --agent "$apolicy" "$name agent guard policy"; rc=$?
+  set -- --agent "$apolicy" "$name agent guard policy"
+  for ecap in $(python3 "$engine" --exempt-caps "$apolicy" 2>/dev/null); do
+    case "$ecap" in ''|*[!a-z0-9_]*) continue ;; esac
+    eprov=$(lower "$(yaml_get "$instance/instance.yaml" "bind_$ecap")")
+    case "$eprov" in ''|*[!a-z0-9-]*) continue ;; esac
+    if [ "$eprov" = custom ]; then etdir="$instance/custom-tools/$ecap"; else etdir="$root/capabilities/$ecap/tools/$eprov"; fi
+    ematch=$(lower "$(yaml_get "$etdir/identity.yaml" server_match)")
+    case "$ematch" in ''|*[!a-z0-9_-]*) continue ;; esac
+    [ -f "$etdir/guard.yaml" ] && [ ! -L "$etdir/guard.yaml" ] || continue
+    python3 "$engine" --covers "$etdir/guard.yaml" 2>/dev/null | grep -qx owner_only_send || continue
+    case "$rest_lc" in *"$ematch"*) set -- "$@" --exempt "$ematch" ;; esac
+  done
+  printf '%s' "$input" | python3 "$engine" "$@"; rc=$?
   if [ "$rc" -ne 0 ]; then
     [ "$rc" -eq 2 ] && exit 2
     ablock "the guard policy engine failed (exit $rc)"
