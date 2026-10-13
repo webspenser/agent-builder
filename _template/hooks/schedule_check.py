@@ -405,7 +405,11 @@ def expected(instance, repo=None):
                                 entry["problems"].append(
                                     f"{cap}: bindings/{cap}.md has no {key} line (the {provider} tool pins "
                                     "recipients to it); re-run setup's tools step")
-                    except (OSError, CheckError, guard_policy.PolicyError) as err:
+                            elif not all(guard_policy.BARE_VALUE.match(v) for v in have[key]):
+                                entry["problems"].append(
+                                    f"{cap}: bindings/{cap}.md {key} must be a bare value (the {provider} tool "
+                                    "pins recipients to it); re-run setup's tools step")
+                    except (OSError, UnicodeDecodeError, CheckError, guard_policy.PolicyError) as err:
                         entry["problems"].append(f"{cap}: {err}")
                 if ay.get("wrapper") == "n8n":
                     try:
