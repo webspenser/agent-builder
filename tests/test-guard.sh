@@ -8,7 +8,7 @@ GUARD="$PWD/_template/hooks/guard.sh"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; TD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$TD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "6.0"' > "$PKG/agent.yaml"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.0"' > "$PKG/agent.yaml"
 printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
@@ -142,7 +142,7 @@ run_guard "$I" "$(call mcp__democrm__list-records)";             expect 2 "engin
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
 
 echo "-- agent policy"
-printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*publish*"]' > "$PKG/guard.yaml"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' > "$PKG/guard.yaml"
 run_guard "$I" "$(call mcp__claude_ai_Slack__slack_send_message)"; expect 2 "unbound server: send denied by the agent policy" "Blocked by demo-agent agent guard policy: slack_send_message is denied (*send*)"
 run_guard "$I" "$(call mcp__claude_ai_Slack__slack_read_channel)"; expect 0 "unbound server: read passes"
 run_guard "$I" "$(call mcp__democrm__send-entry)";               expect 2 "bound server: agent policy runs first" "Blocked by demo-agent agent guard policy: send-entry is denied"
@@ -185,5 +185,120 @@ M="$W/nocustom"; mkdir -p "$M"
 printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: custom' > "$M/instance.yaml"
 run_guard "$M" "$(call mcp__democrm__list-records)";            expect 2 "custom binding with no custom tool: blocked" "run the add-tool skill"
 run_guard "$M" "$(call mcp__other__list-records)";              expect 2 "missing identity blocks every MCP call (fail closed)" "has no identity.yaml"
+
+echo "-- owner_notify exemption"
+NT="$PKG/capabilities/owner_notify/tools/mailer"; mkdir -p "$NT"
+printf '%s\n' 'capability: owner_notify' 'provider: mailer' 'server_match: mailer' > "$NT/identity.yaml"
+printf '%s\n' 'covers: [owner_only_send]' 'allow: [send-email]' 'deny: ["*broadcast*"]' \
+  'recipients:' '  - tools: [send-email]' '    at: [to, cc, bcc]' '    bound: recipient_email' > "$NT/guard.yaml"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' 'exempt: [owner_notify]' > "$PKG/guard.yaml"
+X="$W/notify"; mkdir -p "$X/bindings"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' 'bind_owner_notify: mailer' > "$X/instance.yaml"
+printf '%s\n' 'recipient_email: owner@acme.com' > "$X/bindings/owner_notify.md"
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+git init -q --bare "$W/notify-remote.git"
+git -C "$X" init -q; git -C "$X" add instance.yaml bindings/owner_notify.md; git -C "$X" commit -q -m init
+git -C "$X" remote add origin "$W/notify-remote.git"; git -C "$X" push -q -u origin HEAD 2>/dev/null
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "owner send passes"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "other recipient blocked by tool policy" "lead@x.com is not a pinned recipient"
+mkpin() { # mkpin <dir> [no-bindings]: instance repo pushed to its own bare remote
+  mkdir -p "$1/bindings"; cp "$X/instance.yaml" "$1/"
+  [ -n "${2:-}" ] || cp "$X/bindings/owner_notify.md" "$1/bindings/"
+  git init -q --bare "$1-remote.git"; git -C "$1" init -q; git -C "$1" add -A; git -C "$1" commit -q -m init
+  git -C "$1" remote add origin "$1-remote.git"; git -C "$1" push -q -u origin HEAD 2>/dev/null
+}
+PINMSG="bindings/owner_notify.md must be committed and pushed before owner_notify can send"
+echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "uncommitted bindings edit: blocked" "$PINMSG"
+git -C "$X" checkout -q -- bindings/owner_notify.md
+echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"; git -C "$X" commit -q -am "widen"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "unpushed bindings commit: blocked" "$PINMSG"
+git -C "$X" reset -q --hard '@{u}'
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "restored to the pushed copy: passes"
+N="$W/notify-nogit"; mkdir -p "$N/bindings"; cp "$X/instance.yaml" "$N/"; cp "$X/bindings/owner_notify.md" "$N/bindings/"
+run_guard "$N" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no git repo: blocked" "$PINMSG"
+G="$W/notify-noup"; mkdir -p "$G/bindings"; cp "$X/instance.yaml" "$G/"; cp "$X/bindings/owner_notify.md" "$G/bindings/"
+git -C "$G" init -q; git -C "$G" add .; git -C "$G" commit -q -m init
+run_guard "$G" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "committed, no upstream: blocked" "$PINMSG"
+rm "$X/bindings/owner_notify.md"; ln -s "$N/bindings/owner_notify.md" "$X/bindings/owner_notify.md"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "symlinked bindings file: blocked" "$PINMSG"
+rm "$X/bindings/owner_notify.md"; git -C "$X" checkout -q -- bindings/owner_notify.md
+run_guard "$I" "$(call mcp__democrm__list-records)";                                     expect 0 "non-exempt call needs no git"
+echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"
+git -C "$X" config diff.external true; git -C "$X" config diff.trustExitCode true
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "diff.external trusting exit code cannot hide an edit" "$PINMSG"
+git -C "$X" config --unset diff.external; git -C "$X" config --unset diff.trustExitCode
+printf '%s\n' '#!/bin/sh' "touch '$W/fsmon-ran'" > "$W/fsmon.sh"; chmod 755 "$W/fsmon.sh"
+git -C "$X" config core.fsmonitor "$W/fsmon.sh"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "core.fsmonitor set: edit still blocked" "$PINMSG"
+[ ! -e "$W/fsmon-ran" ] && _report ok "core.fsmonitor program never ran" || _report no "core.fsmonitor program ran"
+git -C "$X" config --unset core.fsmonitor
+printf '%s\n' 'bindings/* filter=x' >> "$X/.git/info/attributes"
+git -C "$X" config filter.x.clean "echo recipient_email: owner@acme.com"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "a clean filter cannot hide an edit" "$PINMSG"
+git -C "$X" config --unset filter.x.clean; : > "$X/.git/info/attributes"
+git -C "$X" checkout -q -- bindings/owner_notify.md
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "config knobs removed: passes again"
+D="$W/notify-absent"; mkpin "$D" nobindings; cp "$X/bindings/owner_notify.md" "$D/bindings/"
+run_guard "$D" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "file untracked and absent at upstream: blocked" "$PINMSG"
+R="$W/notify-deleted"; mkpin "$R"; git -C "$R" rm -q bindings/owner_notify.md; git -C "$R" commit -q -m rm; git -C "$R" push -q 2>/dev/null
+cp "$X/bindings/owner_notify.md" "$R/bindings/"
+run_guard "$R" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "file deleted at upstream: blocked" "$PINMSG"
+# A promisor remote must never be asked to fetch (it could run a repo-configured program).
+promisor() { # promisor <repo> <url>: tracking ref -> a commit whose tree is missing
+  local fake=1111111111111111111111111111111111111111 c br
+  c=$(printf 'tree %s\nauthor t <t@e> 0 +0000\ncommitter t <t@e> 0 +0000\n\nx\n' "$fake" | git -C "$1" hash-object -t commit -w --literally --stdin)
+  br=$(git -C "$1" branch --show-current); git -C "$1" update-ref "refs/remotes/origin/$br" "$c"
+  git -C "$1" config core.repositoryformatversion 1; git -C "$1" config extensions.partialClone origin
+  git -C "$1" config remote.origin.promisor true; git -C "$1" config remote.origin.url "$2"
+}
+# Each variant is a way to make a lazy fetch run a program. The shim hides
+# GIT_NO_LAZY_FETCH from git (as git before 2.45 would ignore it), so only
+# GIT_ALLOW_PROTOCOL= and protocol.allow=never stand in the way.
+SHIM="$W/shim"; mkdir -p "$SHIM"
+printf '%s\n' '#!/bin/sh' 'unset GIT_NO_LAZY_FETCH' "exec '$(command -v git)' \"\$@\"" > "$SHIM/git"; chmod 755 "$SHIM/git"
+lazy() { # lazy <variant> <shim|real>
+  local d="$W/lazy-$1-$2" m="$W/lazy-ran-$1-$2"; mkpin "$d"
+  case "$1" in
+    ssh)     promisor "$d" "remote.invalid:/y"; git -C "$d" config core.sshCommand "touch '$m'; false" ;;
+    ssh-on)  promisor "$d" "remote.invalid:/y"; git -C "$d" config core.sshCommand "touch '$m'; false"; git -C "$d" config protocol.ssh.allow always ;;
+    file-on) promisor "$d" "$d-remote.git"; git -C "$d" config remote.origin.uploadpack "touch '$m'; false"; git -C "$d" config protocol.file.allow always ;;
+    ext-on)  promisor "$d" "ext::sh -c touch% $m"; git -C "$d" config protocol.ext.allow always ;;
+  esac
+  if [ "$2" = shim ]; then PATH="$SHIM:$PATH" run_guard "$d" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"
+  else run_guard "$d" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; fi
+  expect 2 "promisor $1 ($2 git): blocked" "$PINMSG"
+  [ ! -e "$m" ] && _report ok "promisor $1 ($2 git): no program ran" || _report no "promisor $1 ($2 git): a program ran (lazy fetch)"
+}
+for lv in ssh ssh-on file-on ext-on; do lazy "$lv" real; lazy "$lv" shim; done
+Q="$W/notify-trick"; mkpin "$Q"; mkdir -p "$Q/notify-trick/bindings"
+printf '%s\n' 'recipient_email: owner@acme.com' 'recipient_email: lead@x.com' > "$Q/notify-trick/bindings/owner_notify.md"
+git -C "$Q" add -A; git -C "$Q" commit -q -m trick; git -C "$Q" push -q 2>/dev/null
+cp "$Q/notify-trick/bindings/owner_notify.md" "$Q/bindings/owner_notify.md"; git -C "$Q" config core.worktree "$W"
+run_guard "$Q" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "core.worktree cannot redirect the upstream path" "$PINMSG"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-broadcast '{}')";                     expect 2 "tool outside allow still blocked" "send-broadcast is denied"
+run_guard "$X" "$(call mcp__claude_ai_Slack__slack_send_message '{}')";                  expect 2 "other servers keep the agent deny" "Blocked by demo-agent agent guard policy: slack_send_message is denied"
+run_guard "$X" "$(call mcp__claude_ai_Slack__mailer_send '{}')";                         expect 2 "another server's tool containing the match is still blocked" "agent guard policy: mailer_send is denied"
+cp "$NT/guard.yaml" "$NT/guard.yaml.keep"
+printf '%s\n' 'covers: [owner_only_send]' 'recipients:' '  - tools: [send-email]' '    at: [to, cc, bcc]' '    bound: recipient_email' > "$NT/guard.yaml"
+run_guard "$X" "$(call mcp__claude_ai_Slack__mailer_send '{}')"; expect 2 "no allow list: other server's tool with the match still blocked" "agent guard policy: mailer_send is denied"
+mv "$NT/guard.yaml.keep" "$NT/guard.yaml"
+K="$W/notify-custom"; mkdir -p "$K/custom-tools/owner_notify" "$K/bindings"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' 'bind_owner_notify: custom' > "$K/instance.yaml"
+printf '%s\n' 'capability: owner_notify' 'provider: custom' 'server_match: slack' > "$K/custom-tools/owner_notify/identity.yaml"
+printf '%s\n' 'covers: [owner_only_send]' > "$K/custom-tools/owner_notify/guard.yaml"
+run_guard "$K" "$(call mcp__claude_ai_Slack__slack_send_message '{}')"; expect 2 "custom binding grants no exemption" "agent guard policy: slack_send_message is denied"
+
+sed -i.bak 's/^covers: .*/covers: [other]/' "$NT/guard.yaml"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "tool without owner_only_send: no exemption" "agent guard policy: send-email is denied"
+mv "$NT/guard.yaml.bak" "$NT/guard.yaml"
+sed -i.bak 's/^server_match: .*/server_match:/' "$NT/identity.yaml"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "empty server_match: no exemption" "agent guard policy: send-email is denied"
+mv "$NT/identity.yaml.bak" "$NT/identity.yaml"
+U="$W/notify-unbound"; mkdir -p "$U"; printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' > "$U/instance.yaml"
+run_guard "$U" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "unbound owner_notify: no exemption" "agent guard policy: send-email is denied"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' > "$PKG/guard.yaml"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no exempt key: no exemption" "agent guard policy: send-email is denied"
+rm -rf "$PKG/capabilities/owner_notify"
 
 finish

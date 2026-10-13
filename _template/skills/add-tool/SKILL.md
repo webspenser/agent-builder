@@ -82,8 +82,10 @@ with `python3`.
    Put every enforced invariant in `covers`. Tell the user plainly which
    invariants stay instruction-only (not in `covers`), and that a
    capability with any instruction-only invariant cannot run on a
-   schedule. If the contract has `no_send`, do not continue until
-   `guard.yaml` covers it. The policy format is in the Agent Standard
+   schedule. If the contract has `no_external_send` or `owner_only_send`,
+   do not continue until `guard.yaml` covers it; for `owner_only_send` it
+   also needs an `allow` list and a `recipients` entry pinning every send
+   tool. The policy format is in the Agent Standard
    ("Guard policy").
 7. **Check.** Run `python3 <checker> <tool folder> <package>/capabilities/<cap>/contract.md`
    (add `--custom` for the instance target). Fix every `FAIL` line and run

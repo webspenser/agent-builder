@@ -23,7 +23,7 @@ for d in */; do  # _template/ is matched here
 done
 
 echo "== template standard"
-if ! grep -q '^standard: "6.0"' _template/agent.yaml; then echo "FAIL: _template is not 6.0"; STATUS=1; fi
+if ! grep -q '^standard: "7.0"' _template/agent.yaml; then echo "FAIL: _template is not 7.0"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/tools/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
@@ -41,7 +41,7 @@ echo "== tool naming"
 if grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
   echo "FAIL: 'adapter' still used:"; grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | head; STATUS=1
 fi
-for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'server_match' 'lowercase' 'no_send' 'tool_check.py'; do
+for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'server_match' 'lowercase' 'no_external_send' 'tool_check.py'; do
   grep -qF -- "$want" _template/skills/add-tool/SKILL.md || { echo "FAIL: add-tool skill does not mention $want"; STATUS=1; }
 done
 grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }
@@ -50,6 +50,15 @@ echo "== setup and guard text"
 for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup' 'read -rs <VAR> && export <VAR>'; do
   grep -qF -- "$want" _template/skills/setup/SKILL.md || { echo "FAIL: setup does not say: $want"; STATUS=1; }
 done
+# Owner sends need the bindings pushed, so the test notification waits for version control.
+S=_template/skills/setup/SKILL.md
+tools_step=$(awk '/^9\. \*\*Tools\.\*\*/,/^10\. \*\*Version control/' "$S")
+after_tools=$(awk '/^10\. \*\*Version control/,0' "$S")
+printf '%s' "$tools_step" | grep -qF 'offer one test notification' && { echo "FAIL: setup offers the test notification before version control"; STATUS=1; }
+printf '%s' "$tools_step" | grep -qF 'step 10' || { echo "FAIL: setup's tools step does not point at step 10 for the push"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'git push -u' || { echo "FAIL: setup's version control step does not push"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'offer one test notification' || { echo "FAIL: setup does not offer the test notification after version control"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'opened in the instance folder' || { echo "FAIL: setup does not keep the test notification to a guarded session"; STATUS=1; }
 if grep -rniE 'paste (the|your) (api )?key|give us your (api )?key' _template/skills skills | grep -vi 'never' | grep -q .; then echo "FAIL: a skill asks for a key in chat"; STATUS=1; fi
 if grep -rnE 'create_tools|update_tools|values_at' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
   echo "FAIL: old guard keys still mentioned"; STATUS=1; fi

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Agent Standard guard hook — identical in every agent.
 # PreToolUse hook for MCP tools. Inside an instance of this agent, the agent
-# guard policy (package-root guard.yaml, deny-only) applies to every MCP call;
-# then every bound tool whose server_match appears in the tool name gets its
+# guard policy (package-root guard.yaml, deny-only) applies to every MCP call
+# (it may exempt the server of one owner_only_send capability, which its own
+# tool policy then still enforces); then every bound tool whose server_match appears in the tool name gets its
 # guard policy (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the
 # call and shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -53,13 +54,50 @@ rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match o
 
 # The agent guard policy (package-root guard.yaml) applies to every MCP call,
 # whatever the server. A dangling symlink or a directory still reaches the
-# engine, which fails closed on it.
+# engine, which fails closed on it. A capability the policy lists in exempt:
+# lifts its deny for the bound tool's server, but only while that tool's own
+# guard.yaml covers owner_only_send and its pinned bindings file matches the
+# pushed copy; the bind_ loop below still enforces the tool policy.
 apolicy="$root/guard.yaml"
 if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
   engine="$root/hooks/guard_policy.py"
   [ -f "$engine" ] || ablock "the guard policy engine is missing from $name"
   command -v python3 >/dev/null 2>&1 || ablock "python3 is required to run the guard policy"
-  printf '%s' "$input" | python3 "$engine" --agent "$apolicy" "$name agent guard policy"; rc=$?
+  set -- --agent "$apolicy" "$name agent guard policy"
+  for ecap in $(python3 "$engine" --exempt-caps "$apolicy" 2>/dev/null); do
+    case "$ecap" in ''|*[!a-z0-9_]*) continue ;; esac
+    eprov=$(lower "$(yaml_get "$instance/instance.yaml" "bind_$ecap")")
+    case "$eprov" in ''|*[!a-z0-9-]*) continue ;; esac
+    # Only a tool shipped in the package can lift the deny: custom-tools/ is
+    # instance content the agent can write, so a custom binding grants nothing.
+    [ "$eprov" != custom ] || continue
+    etdir="$root/capabilities/$ecap/tools/$eprov"
+    ematch=$(lower "$(yaml_get "$etdir/identity.yaml" server_match)")
+    case "$ematch" in ''|*[!a-z0-9_-]*) continue ;; esac
+    [ -f "$etdir/guard.yaml" ] && [ ! -L "$etdir/guard.yaml" ] || continue
+    python3 "$engine" --covers "$etdir/guard.yaml" 2>/dev/null | grep -qx owner_only_send || continue
+    case "$rest_lc" in *"$ematch"*) ;; *) continue ;; esac
+    # The agent can write bindings/, so the pinned values the tool policy
+    # trusts must equal the upstream (pushed) copy: this stops edits and
+    # unpushed commits. Git runs with system config off, replace objects off,
+    # fsmonitor off, lazy fetch off and every transport refused (an empty
+    # GIT_ALLOW_PROTOCOL overrides every protocol.* config key, on any git
+    # version), and reads the upstream blob's bytes directly (no diff drivers
+    # or clean filters). It does not stop an agent that edits .git itself:
+    # rewriting tracking refs or the branch's upstream/remote config,
+    # core.worktree, a .git gitfile pointing elsewhere, or
+    # objects/info/alternates can still defeat it.
+    bpath="bindings/$ecap.md"
+    bmsg="$bpath must be committed and pushed before $ecap can send (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"
+    [ -f "$instance/$bpath" ] && [ ! -L "$instance/$bpath" ] || ablock "$bmsg"
+    command -v git >/dev/null 2>&1 || ablock "$bmsg"
+    ugit() { GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false -c protocol.allow=never "$@" </dev/null; }
+    ugit rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 || ablock "$bmsg"
+    ugit cat-file -e "@{u}:$bpath" >/dev/null 2>&1 || ablock "$bmsg"
+    ugit cat-file blob "@{u}:$bpath" 2>/dev/null | cmp -s - "$instance/$bpath" || ablock "$bmsg"
+    set -- "$@" --exempt "$ematch"
+  done
+  printf '%s' "$input" | python3 "$engine" "$@"; rc=$?
   if [ "$rc" -ne 0 ]; then
     [ "$rc" -eq 2 ] && exit 2
     ablock "the guard policy engine failed (exit $rc)"

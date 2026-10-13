@@ -3,7 +3,9 @@
 
 Usage:
   guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]   hook input JSON on stdin
-  guard_policy.py --agent <guard.yaml> [label]                              agent policy; hook input on stdin
+  guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]... agent policy; hook input on stdin
+  guard_policy.py --exempt-caps <agent guard.yaml>                          print each exempt capability
+  guard_policy.py --covers <tool guard.yaml>                                print each covers id
   guard_policy.py --check [--agent] <guard.yaml>                            parse only
 
 Decides one PreToolUse call against one tool's guard policy (or, with
@@ -14,7 +16,8 @@ With server_match, `allow` only counts a tool-name suffix whose server segment
 "mcp__attio__purge__get-x" cannot ride on `allow: [get-*]`; `deny` still checks
 every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset (a `writes:` list says where values
-sit; `rules:` constrain them); see STANDARD.md "Guard policy".
+sit; `rules:` constrain them; `recipients:` pins send arguments to values recorded
+in bindings); see STANDARD.md "Guard policy".
 """
 import fnmatch
 import json
@@ -22,19 +25,24 @@ import re
 import sys
 import unicodedata
 
-KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only", "rules")
-AGENT_KEYS = ("covers", "deny")
-LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
+KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
+        "rules", "recipients", "refuse_args")
+AGENT_KEYS = ("covers", "deny", "exempt")
+LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys", "refuse_args")
+ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
+RECIPIENT_KEYS = ("tools", "at", "bound")
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
 }
 KEY_LINE = re.compile(r"^([a-z_]+):(?: (.*))?$")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
+SERVER_MATCH = re.compile(r"^[a-z0-9_-]+$")
 PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\])?)*$")
 BINDING_LINE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(\S.*?)\s*$")
 BARE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+BARE_VALUE = re.compile(r"^[^\s<>\"',;]+$")
 
 
 class PolicyError(Exception):
@@ -189,6 +197,21 @@ def _validate(policy):
         for path in entry["at"]:
             if not PATH.match(path):
                 raise PolicyError(f"writes: {path} is not a path like values or \"records[].fields\"")
+    for entry in policy.get("recipients", []):
+        for k in ("tools", "at"):
+            if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
+                raise PolicyError(f"recipients: each entry needs a non-empty {k} list")
+        for path in entry["at"]:
+            if not PATH.match(path):
+                raise PolicyError(f"recipients: {path} is not a path like to or \"message.to\"")
+        if not isinstance(entry.get("bound"), str) or not SNAKE.match(entry["bound"]):
+            raise PolicyError("recipients: bound must be a snake_case binding key")
+    if "refuse_args" in policy:
+        if not policy["refuse_args"]:
+            raise PolicyError("refuse_args must name at least one argument")
+        for name in policy["refuse_args"]:
+            if not ARG_NAME.match(name):
+                raise PolicyError(f"refuse_args: '{name}' is not an argument name")
     if ("rules" in policy or "refuse_keys" in policy or "bound_keys_only" in policy) and not policy.get("writes"):
         raise PolicyError("writes is required when rules, refuse_keys or bound_keys_only are present")
     if "rules" in policy:
@@ -228,6 +251,13 @@ def parse_agent(text):
     for inv in covers:
         if not SNAKE.match(inv):
             raise PolicyError(f"covers: '{inv}' is not a snake_case invariant id")
+    exempt = policy.get("exempt")
+    if exempt is not None:
+        if not isinstance(exempt, list) or not exempt:
+            raise PolicyError("exempt must be a non-empty list of capability names")
+        for cap in exempt:
+            if not SNAKE.match(cap):
+                raise PolicyError(f"exempt: '{cap}' is not a snake_case capability name")
     return policy
 
 
@@ -252,10 +282,11 @@ def _read(text, keys):
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
         i += 1
-        if key in ("rules", "writes"):
+        if key in ("rules", "writes", "recipients"):
             if value:
                 raise PolicyError(f"line {lineno}: {key}: takes '  - ...' items on the following lines")
-            policy[key], i = _parse_items(lines, i, key, RULE_KEYS if key == "rules" else WRITE_KEYS)
+            allowed = {"rules": RULE_KEYS, "writes": WRITE_KEYS, "recipients": RECIPIENT_KEYS}[key]
+            policy[key], i = _parse_items(lines, i, key, allowed)
             continue
         if not value:
             raise PolicyError(f"line {lineno}: {key} has no value")
@@ -281,6 +312,11 @@ def _norm(name):
     return re.sub(r"[\s-]+", "_", str(name).strip().lower())
 
 
+def _arg_key(name):
+    # draftId, draft_id, DRAFT-ID and draftid are one argument to a protobuf-JSON server.
+    return re.sub(r"[_-]", "", name).lower()
+
+
 def _candidates(tool_name):
     """(suffix, server segment) for every suffix after a '__'; the server
     segment is the text between the previous '__' and this one."""
@@ -303,7 +339,7 @@ def _matches(candidates, patterns):
     return any(fnmatch.fnmatchcase(c, p.lower()) for c in candidates for p in patterns)
 
 
-def _maps_at(obj, path):
+def _walk(obj, path):
     nodes = [obj]
     for part in path.split("."):
         many = part.endswith("[]")
@@ -322,10 +358,30 @@ def _maps_at(obj, path):
             else:
                 nxt.append(value)
         nodes = nxt
+    return nodes
+
+
+def _maps_at(obj, path):
+    nodes = _walk(obj, path)
     for node in nodes:
         if not isinstance(node, dict):
             raise PolicyError(f"{path}: attribute values are not an object")
     return nodes
+
+
+def _addresses_at(obj, path):
+    """Recipient strings at path: a string is one, a list of strings is its items, null is absent."""
+    out = []
+    for node in _walk(obj, path):
+        if node is None:
+            continue
+        if isinstance(node, str):
+            out.append(node)
+        elif isinstance(node, list) and all(isinstance(x, str) for x in node):
+            out.extend(node)
+        else:
+            raise PolicyError(f"{path}: a recipient must be a string or a list of strings")
+    return out
 
 
 def _leaves(value, unwrap):
@@ -346,6 +402,7 @@ def _leaves(value, unwrap):
 
 
 def read_bindings(path):
+    """Every `key: value` line, each key mapped to the set of its values (a key may repeat)."""
     if path == "-":
         return {}
     data = {}
@@ -355,16 +412,32 @@ def read_bindings(path):
             if not m:
                 continue
             key, value = m.group(1), m.group(2)
-            if key.startswith("field_"):
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "`'\"":
-                    value = value[1:-1]
-                if not BARE_ID.match(value):
-                    shown = "".join(c for c in m.group(2) if c.isprintable())[:60]
-                    raise PolicyError(f"bindings: {key} must be a bare ID, got {shown}")
-                data.setdefault(key, set()).add(value)
-                continue
-            data[key] = value
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "`'\"":
+                value = value[1:-1]
+            if key.startswith("field_") and not BARE_ID.match(value):
+                shown = "".join(c for c in m.group(2) if c.isprintable())[:60]
+                raise PolicyError(f"bindings: {key} must be a bare ID, got {shown}")
+            data.setdefault(key, set()).add(value)
     return data
+
+
+def _printable(value):
+    return "".join(c for c in str(value) if c.isprintable())[:80]
+
+
+def _recipient_problems(shown, entry, args, bindings):
+    values = [v for path in entry["at"] for v in _addresses_at(args, path)]
+    if not values:
+        return [f"{shown} names no recipient at {', '.join(entry['at'])}"]
+    bound = entry["bound"]
+    pinned = bindings.get(bound) or set()
+    if not pinned:
+        return [f"no {bound} line in bindings; re-run setup's tools step"]
+    if not all(BARE_VALUE.match(p) for p in pinned):
+        return [f"{bound} must be a bare value"]
+    allowed = {p.strip().lower() for p in pinned}
+    return [f"{_printable(v)} is not a pinned recipient ({bound})"
+            for v in values if v.strip().lower() not in allowed]
 
 
 def problems(policy, event, bindings, server_match=None):
@@ -382,6 +455,21 @@ def problems(policy, event, bindings, server_match=None):
             return [f"{shown} is denied ({pattern})"]
     if "allow" in policy and not _matches(allow_names, policy["allow"]):
         return [f"{shown} is not in the allow list"]
+    args = event.get("tool_input")
+    early = []
+    if isinstance(args, dict):
+        refused = {_arg_key(name) for name in policy.get("refuse_args", [])}
+        for key, value in args.items():
+            if _arg_key(key) in refused and value not in (None, ""):
+                early.append(f"{shown} may not use {key}")
+    for entry in policy.get("recipients", []):
+        if not _matches(names, entry["tools"]):
+            continue
+        if not isinstance(args, dict):
+            raise PolicyError("tool_input is not an object")
+        early.extend(_recipient_problems(shown, entry, args, bindings))
+    if early:
+        return early
     rules = policy.get("rules", [])
     refuse = [REFUSE_PRESETS[p] for p in policy.get("refuse_keys", [])]
     keyed = policy.get("bound_keys_only") == "true"
@@ -389,7 +477,6 @@ def problems(policy, event, bindings, server_match=None):
         return []
     writes = policy.get("writes", [])
     matched = [w for w in writes if _matches(names, w["tools"])]
-    args = event.get("tool_input")
     if not isinstance(args, dict):
         if matched:
             raise PolicyError("tool_input is not an object")
@@ -452,16 +539,41 @@ def problems(policy, event, bindings, server_match=None):
     return found
 
 
-def agent_problems(policy, event):
-    """The agent policy: deny patterns over every suffix, whatever the server."""
-    names = [suffix for suffix, _ in _candidates(event.get("tool_name"))]
+def agent_problems(policy, event, exempt=()):
+    """The agent policy: deny patterns over every suffix, whatever the server,
+    except on a server exempted for an owner_only_send capability (guard.sh decides which;
+    the match must be in a server segment of the name)."""
+    tool_name = event.get("tool_name")
+    pairs = _candidates(tool_name)
+    names = [suffix for suffix, _ in pairs]
+    for match in exempt:
+        if not SERVER_MATCH.match(match):
+            raise PolicyError(f"exempt server_match {match!r} is not [a-z0-9_-]+")
+    # Same rule as allow: the match must sit in a server segment, not in the tool name.
+    if any(match in server for match in exempt for _, server in pairs):
+        return []
     for pattern in policy["deny"]:
         if _matches(names, [pattern]):
             return [f"{names[0]} is denied ({pattern})"]
     return []
 
 
+def _print_list(path, parser, key):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            values = parser(fh.read()).get(key, [])
+    except Exception:  # never a traceback; the caller treats failure as "none"
+        return 1
+    for value in values:
+        print(value)
+    return 0
+
+
 def main(argv):
+    if len(argv) == 2 and argv[0] == "--exempt-caps":
+        return _print_list(argv[1], parse_agent, "exempt")
+    if len(argv) == 2 and argv[0] == "--covers":
+        return _print_list(argv[1], parse, "covers")
     if len(argv) == 3 and argv[0] == "--check" and argv[1] == "--agent":
         try:
             with open(argv[2], encoding="utf-8") as fh:
@@ -471,17 +583,25 @@ def main(argv):
             return 1
         return 0
     if argv and argv[0] == "--agent":
-        if len(argv) not in (2, 3):
-            print("usage: guard_policy.py --agent <guard.yaml> [label]", file=sys.stderr)
+        rest, exempt = list(argv[1:]), []
+        while "--exempt" in rest:
+            at = rest.index("--exempt")
+            if at + 1 >= len(rest):
+                print("usage: guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]...", file=sys.stderr)
+                return 2
+            exempt.append(rest[at + 1])
+            del rest[at:at + 2]
+        if len(rest) not in (1, 2):
+            print("usage: guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]...", file=sys.stderr)
             return 2
-        label = argv[2] if len(argv) == 3 else "agent guard policy"
+        label = rest[1] if len(rest) == 2 else "agent guard policy"
         try:
-            with open(argv[1], encoding="utf-8") as fh:
+            with open(rest[0], encoding="utf-8") as fh:
                 policy = parse_agent(fh.read())
             event = json.load(sys.stdin)
             if not isinstance(event, dict):
                 raise PolicyError("hook input is not an object")
-            found = agent_problems(policy, event)
+            found = agent_problems(policy, event, exempt)
         except Exception as err:  # fail closed
             print(f"Blocked by {label}: cannot check this call ({type(err).__name__}: {err})", file=sys.stderr)
             return 2

@@ -102,10 +102,18 @@ skill, if this agent has one.
       line, `field_<name>: <ID>`, with nothing else on it: no bullet, no
       backticks or quotes, no trailing note. Anything else blocks the
       guarded call.
-   4. If the contract has a `no_send` invariant and the tool's
-      `guard.yaml` does not list it in `covers`, refuse to bind it and
-      say why. If the tool leaves an invariant uncovered that the
-      contract marks `(acceptable)`, explain in plain words what the
+   4. If the contract has a `no_external_send` or `owner_only_send`
+      invariant and the tool's `guard.yaml` does not list it in
+      `covers`, refuse to bind it and say why. For `owner_only_send`,
+      ask the user for each pinned value the tool's `usage.md`
+      `## Setup` lists (for example `recipient_email`), repeat each
+      back, and write them as plain `<key>: <value>` lines to
+      `bindings/<capability>.md` only after the user confirms. Owner
+      sends are refused until that file matches the pushed copy: on a
+      first setup step 10 commits and pushes it, and step 11 offers the
+      test notification. On a re-run, when the instance already has a
+      git upstream, commit and push the file now. If the tool leaves an
+      invariant uncovered that the contract marks `(acceptable)`, explain in plain words what the
       guard will not enforce and what could happen, and add it to
       `accept_instruction_only:` in `instance.yaml` only after the user
       agrees. Never add an invariant the contract does not mark.
@@ -122,14 +130,24 @@ skill, if this agent has one.
    8. If the agent declares activities (`activity_*` in `agent.yaml`)
       and the interview wrote `schedule_*` lines to `schedules.yaml`,
       offer to run the `schedule` skill next.
-10. **Version control.** Offer `git init` and a first commit, in a
-   private repository. Remind the user that credentials belong in the
+10. **Version control.** Offer `git init`, a first commit, and a
+   private GitHub repository for the instance, pushed with
+   `git push -u origin <branch>`. Scheduled runs clone that repository,
+   and a capability with `owner_only_send` cannot send until its
+   `bindings/<capability>.md` is pushed; if the user declines, say both.
+   Remind the user that credentials belong in the
    host (connectors, MCP settings, environment variables), never in
    these files.
 11. **Open.** If step 3 created a subfolder, tell the user: "Open your
    host in <folder> — the agent loads there." The CRM and email guards
    apply only in sessions opened in the instance folder, so the user
    should open the host there before running the agent.
+   If step 9 bound a capability with `owner_only_send` and step 10
+   pushed its bindings, offer one test notification to the pinned
+   recipients; send it only after the user says yes, and only from a
+   session opened in the instance folder. If this session is not
+   (step 3 created a subfolder), tell the user to ask the agent for
+   the test notification once the host is open there.
 
 Never invent the user's facts; what they don't supply stays as the
 package's bracketed prompt.

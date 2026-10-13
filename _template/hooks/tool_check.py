@@ -33,6 +33,7 @@ CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # C0 controls and DEL
 OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
 ACCEPTABLE = re.compile(r"^[-*]\s+`([^`]+)`\s+\(acceptable\)")
+SEND_INVARIANTS = {"no_external_send", "owner_only_send"}
 N8N_TRIGGER = "@n8n/n8n-nodes-langchain.mcpTrigger"
 N8N_AUTH = ("n8nOAuth2", "bearerAuth", "headerAuth")
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -271,29 +272,64 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
 
     policy = folder / "guard.yaml"
     has_policy = policy.exists() or policy.is_symlink()
-    covers = None
+    parsed = None
     if has_policy:
         if guard_policy is None:
             fails.append("cannot load guard_policy.py beside tool_check.py")
         else:
             try:
-                covers = guard_policy.parse(read(policy))["covers"]
+                parsed = guard_policy.parse(read(policy))
             except (ToolError, guard_policy.PolicyError) as err:
-                err_str = str(err)
-                # Special case: if error is about empty covers and contract has no_send, report no_send error instead
-                if "covers must name at least one invariant" in err_str and "no_send" in invariants:
-                    fails.append(f"{label}/guard.yaml: covers must include no_send")
+                if "covers must name at least one invariant" in str(err) and SEND_INVARIANTS & set(invariants):
+                    fails.append(f"{label}/guard.yaml: covers must include "
+                                 + " and ".join(sorted(SEND_INVARIANTS & set(invariants))))
                 else:
                     fails.append(f"{label}/guard.yaml: {err}")
+    covers = parsed["covers"] if parsed else None
     for inv in covers or []:
         if inv not in invariants:
             fails.append(f"{label}/guard.yaml: covers names {inv}, which is not an invariant of the contract")
     if "no_send" in invariants:
+        fails.append(f"{label}: no_send was renamed no_external_send; update the contract")
+    if SEND_INVARIANTS <= set(invariants):
+        fails.append(f"{label}: a contract may not list both no_external_send and owner_only_send")
+    for inv in sorted(SEND_INVARIANTS & set(invariants)):
         if not has_policy:
-            fails.append(f"{label}: the contract has no_send, so guard.yaml must cover it")
-        elif covers is not None and "no_send" not in covers:
-            fails.append(f"{label}/guard.yaml: covers must include no_send")
+            fails.append(f"{label}: the contract has {inv}, so guard.yaml must cover it")
+        elif covers is not None and inv not in covers:
+            fails.append(f"{label}/guard.yaml: covers must include {inv}")
+    if "owner_only_send" in invariants and parsed:
+        fails.extend(check_owner_only(parsed, folder, label))
     return fails, identity
+
+
+def check_owner_only(parsed, folder, label):
+    """owner_only_send: an allow list of exact tool names (no wildcards), at least one recipients
+    entry, and every allowed name either pinned by a recipients entry or named as a whole token
+    in usage.md's ## Probe as a read."""
+    fails = []
+    if "allow" not in parsed:
+        fails.append(f"{label}/guard.yaml: guard.yaml must have an allow list for owner_only_send")
+    if not parsed.get("recipients"):
+        fails.append(f"{label}/guard.yaml: guard.yaml must pin recipients (a recipients entry) for owner_only_send")
+    if fails:
+        return fails
+    # the engine's own test (guard_policy._matches): case-insensitive fnmatch of the name against an entry's tools
+    def pins(name):
+        return any(guard_policy._matches([name.lower()], entry["tools"]) for entry in parsed["recipients"])
+    try:
+        probe = "\n".join(section(read(folder / "usage.md"), "Probe") or [])
+    except ToolError:
+        probe = ""  # reported by the usage check
+    for pattern in parsed["allow"]:
+        if any(ch in pattern for ch in "*?["):
+            fails.append(f"{label}/guard.yaml: {pattern} must be an exact tool name for owner_only_send (no wildcards)")
+            continue
+        if pins(pattern) or re.search(r"(?<![\w-])" + re.escape(pattern) + r"(?![\w-])", probe):
+            continue
+        fails.append(f"{label}/guard.yaml: {pattern} is allowed but no recipients entry pins it "
+                     "(list it under recipients, or name it in usage.md ## Probe as a read)")
+    return fails
 
 
 def main(argv):

@@ -168,15 +168,15 @@ arun() { # arun <rc> <label> <tool_name> [text]
   if [ "$rc" -eq "$1" ] && { [ -z "${4:-}" ] || printf '%s\n' "$out" | grep -qF -- "$4"; } && ! printf '%s' "$out" | grep -q Traceback; then
     _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
 }
-policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'; aparses 0 "agent policy parses"
+policy 'covers: [no_external_send]' 'deny: ["*send*", "*reply*"]'; aparses 0 "agent policy parses"
 policy 'deny: ["*send*"]';                         aparses 0 "covers is optional"
-policy 'covers: [no_send]';                        aparses 1 "deny is required"
+policy 'covers: [no_external_send]';                        aparses 1 "deny is required"
 policy 'deny: []';                                 aparses 1 "deny may not be empty"
 policy 'deny: ["*send*"]' 'allow: [x]';            aparses 1 "allow is not an agent policy key"
 policy 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; aparses 1 "writes is not an agent policy key"
 policy 'covers: [Bad]' 'deny: ["*send*"]';         aparses 1 "covers ids are snake_case"
 : > "$W/guard.yaml";                               aparses 1 "empty agent policy"
-policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'
+policy 'covers: [no_external_send]' 'deny: ["*send*", "*reply*"]'
 arun 2 "deny matches on any server" mcp__claude_ai_Slack__slack_send_message "Blocked by demo agent guard policy: slack_send_message is denied (*send*)"
 arun 2 "deny matches a suffix after __ in the server" mcp__x__gmail__reply "denied (*reply*)"
 arun 0 "replies is not reply" mcp__claude_ai_Attio__list-comment-replies
@@ -281,5 +281,79 @@ run 0 "forbid: update allows the field on create" mcp__a__c '{"v":{"hs_pipeline_
 run 2 "forbid: update blocks the field on update" mcp__a__u '{"v":{"hs_pipeline_stage":"done"}}' "hs_pipeline_stage may not be changed after create"
 run 2 "forbid: update blocks on an unknown write checked as update" mcp__a__other '{"v":{"hs_pipeline_stage":"done"}}' "may not be changed after create"
 run 2 "forbid: update blocks a bound ID on update" mcp__a__u '{"v":{"stageprop1":"x"}}' "may not be changed after create" "$W/fb.md"
+
+echo "-- recipients"
+policy 'covers: [owner_only_send]' 'allow: [send-email, list-domains]' \
+  'recipients:' '  - tools: [send-email]' '    at: [to, cc, bcc]' '    bound: recipient_email' \
+  '  - tools: [send-email]' '    at: [from]' '    bound: sender_email'
+parses 0 "recipients block parses"
+printf '%s\n' 'recipient_email: owner@acme.com' 'recipient_email: `ops@acme.com`' "sender_email: 'no-reply@acme.com'" > "$W/b.md"
+run 0 "pinned to and from" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "case and spaces ignored" mcp__resend__send-email '{"to":[" Owner@ACME.com "],"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "string to, not a list" mcp__resend__send-email '{"to":"ops@acme.com","from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "null cc counts as absent" mcp__resend__send-email '{"to":["owner@acme.com"],"cc":null,"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "backtick-quoted binding matches" mcp__resend__send-email '{"to":["ops@acme.com"],"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 2 "other recipient blocked" mcp__resend__send-email '{"to":["lead@prospect.com"],"from":"no-reply@acme.com"}' "lead@prospect.com is not a pinned recipient (recipient_email)" "$W/b.md"
+run 2 "extra bcc blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"bcc":["lead@prospect.com"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
+run 2 "display-name form blocked" mcp__resend__send-email '{"to":["Owner <owner@acme.com>"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
+run 2 "other sender blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"me@acme.com"}' "me@acme.com is not a pinned recipient (sender_email)" "$W/b.md"
+run 2 "no recipient blocked" mcp__resend__send-email '{"from":"no-reply@acme.com"}' "send-email names no recipient at to, cc, bcc" "$W/b.md"
+run 2 "object recipient blocked" mcp__resend__send-email '{"to":{"email":"owner@acme.com"},"from":"no-reply@acme.com"}' "cannot check this call" "$W/b.md"
+run 2 "no binding line blocks" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "no recipient_email line in bindings" -
+printf '%s\n' 'recipient_email: Owner <owner@acme.com>' 'sender_email: no-reply@acme.com' > "$W/b2.md"
+run 2 "non-bare binding blocks" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "recipient_email must be a bare value" "$W/b2.md"
+run 0 "a tool outside recipients tools is not checked" mcp__resend__list-domains '{}' "" "$W/b.md"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]';                         parses 1 "recipients entry without bound"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: Bad-Key';    parses 1 "bound not snake_case"
+policy 'covers: [x]' 'recipients:' '  - at: [to]' '    bound: r';                          parses 1 "recipients entry without tools"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: ["bad path!"]' '    bound: r'; parses 1 "recipients bad path"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: r' '    kind: create'; parses 1 "unknown recipients key"
+printf '%s\n' 'field_status: fldAAAAAAAAAAAAAA' 'field_status: "fldBBBBBBBBBBBBBB"' > "$W/f.md"
+policy 'covers: [x]' 'writes:' '  - kind: update' '    tools: [u]' '    at: [values]' 'rules:' '  - field: status' '    forbid: update'
+run 2 "repeated field_ lines still both match" mcp__crm__u '{"values":{"fldBBBBBBBBBBBBBB":"x"}}' "may not be changed after create" "$W/f.md"
+
+echo "-- refuse_args"
+policy 'covers: [owner_only_send]' 'allow: [send_message]' 'refuse_args: [draftId, replyThreadId]' \
+  'recipients:' '  - tools: [send_message]' '    at: [to]' '    bound: recipient_email'
+parses 0 "refuse_args parses"
+printf '%s\n' 'recipient_email: owner@acme.com' > "$W/r.md"
+run 2 "draftId refused even with a pinned to" mcp__gmail__send_message '{"draftId":"r-1","to":["owner@acme.com"]}' "send_message may not use draftId" "$W/r.md"
+run 2 "draftId alone refused" mcp__gmail__send_message '{"draftId":"r-1"}' "may not use draftId" "$W/r.md"
+run 0 "null refused arg passes" mcp__gmail__send_message '{"draftId":null,"to":["owner@acme.com"]}' "" "$W/r.md"
+run 0 "empty refused arg passes" mcp__gmail__send_message '{"replyThreadId":"","to":["owner@acme.com"]}' "" "$W/r.md"
+run 2 "snake_case draft_id refused" mcp__gmail__send_message '{"draft_id":"r-1","to":["owner@acme.com"]}' "send_message may not use draft_id" "$W/r.md"
+run 2 "lowercase draftid refused" mcp__gmail__send_message '{"draftid":"r-1","to":["owner@acme.com"]}' "send_message may not use draftid" "$W/r.md"
+run 2 "upper-case dashed DRAFT-ID refused" mcp__gmail__send_message '{"DRAFT-ID":"r-1","to":["owner@acme.com"]}' "send_message may not use DRAFT-ID" "$W/r.md"
+run 2 "snake_case reply_thread_id refused" mcp__gmail__send_message '{"reply_thread_id":"t-1","to":["owner@acme.com"]}' "send_message may not use reply_thread_id" "$W/r.md"
+run 0 "snake_case draft_id null passes" mcp__gmail__send_message '{"draft_id":null,"to":["owner@acme.com"]}' "" "$W/r.md"
+run 2 "numeric zero refused arg blocked" mcp__gmail__send_message '{"draftId":0,"to":["owner@acme.com"]}' "send_message may not use draftId" "$W/r.md"
+run 2 "boolean false refused arg blocked" mcp__gmail__send_message '{"draftId":false,"to":["owner@acme.com"]}' "send_message may not use draftId" "$W/r.md"
+policy 'covers: [x]' 'refuse_args: []';        parses 1 "empty refuse_args"
+policy 'covers: [x]' 'refuse_args: [a.b]';     parses 1 "refuse_args entry is not a plain name"
+policy 'covers: [x]' 'refuse_args: draftId';   parses 1 "refuse_args given a scalar"
+
+echo "-- agent exempt"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'; aparses 0 "exempt parses"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [Owner-Notify]'; aparses 1 "exempt not snake_case"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: []'; aparses 1 "empty exempt"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'
+arun() { # arun <rc> <label> <tool_name> [exempt server_match...]
+  local rc out want="$1" lbl="$2" t="$3"; shift 3
+  local extra=(); for m in "$@"; do extra+=(--exempt "$m"); done
+  out=$(printf '{"tool_name":"%s","tool_input":{}}' "$t" | python3 "$E" --agent "$W/guard.yaml" "demo agent guard policy" ${extra[@]+"${extra[@]}"} 2>&1); rc=$?
+  if [ "$rc" -eq "$want" ] && ! printf '%s' "$out" | grep -q Traceback; then _report ok "$lbl"; else _report no "$lbl (rc=$rc): $out"; fi
+}
+arun 2 "send denied without exemption" mcp__claude_ai_Resend__send-email
+arun 0 "send on exempt server skips deny" mcp__claude_ai_Resend__send-email resend
+arun 2 "exemption is per server" mcp__claude_ai_Slack__slack_send_message resend
+arun 2 "exempt match in another server's tool name is still denied" mcp__claude_ai_Slack__resend_message resend
+arun 0 "exempt match in a server segment containing __" mcp__x__Resend__send resend
+arun 2 "bad exempt value blocks" mcp__claude_ai_Resend__send-email 'Re send'
+out=$(python3 "$E" --exempt-caps "$W/guard.yaml"); [ "$out" = owner_notify ] && _report ok "--exempt-caps lists capabilities" || _report no "--exempt-caps: $out"
+policy 'covers: [owner_only_send, other]' 'allow: [a]'
+out=$(python3 "$E" --covers "$W/guard.yaml" | tr '\n' ' '); [ "$out" = "owner_only_send other " ] && _report ok "--covers lists covers" || _report no "--covers: $out"
+policy 'deny: ['
+python3 "$E" --exempt-caps "$W/guard.yaml" >/dev/null 2>&1 && _report no "--exempt-caps bad policy should fail" || _report ok "--exempt-caps bad policy exits non-zero"
+python3 "$E" --covers "$W/guard.yaml" >/dev/null 2>&1 && _report no "--covers bad policy should fail" || _report ok "--covers bad policy exits non-zero"
 
 finish

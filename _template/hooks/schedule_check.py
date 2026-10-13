@@ -8,7 +8,9 @@ Usage:
 check  — for every schedule_<activity> in the instance's schedules.yaml:
          applies the unattended gate (every capability its activities use is
          bound, every contract invariant is in the bound tool's guard.yaml
-         covers, and no_send is also in the agent guard policy's covers;
+         covers, no_external_send is also in the agent guard policy's covers,
+         and owner_only_send needs the capability in the agent policy's exempt
+         plus a line in bindings/<cap>.md for each key the tool pins recipients to;
          an invariant the contract marks (acceptable) and instance.yaml
          lists in accept_instruction_only counts as covered and is shown as
          ACCEPTED)
@@ -240,6 +242,29 @@ def agent_covers():
         raise CheckError(f"guard.yaml: {err}")
 
 
+def agent_exempt():
+    """exempt capabilities of the agent guard policy, or [] when there is none."""
+    policy = ROOT / "guard.yaml"
+    if not (policy.exists() or policy.is_symlink()):
+        return []
+    try:
+        return guard_policy.parse_agent(policy.read_text(encoding="utf-8")).get("exempt", [])
+    except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
+        raise CheckError(f"guard.yaml: {err}")
+
+
+def recipient_keys(folder):
+    """The bound keys a tool's guard.yaml pins recipients to."""
+    policy = folder / "guard.yaml"
+    if not policy.is_file():
+        return []
+    try:
+        parsed = guard_policy.parse(policy.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
+        raise CheckError(f"{folder.name}/guard.yaml: {err}")
+    return sorted({entry["bound"] for entry in parsed.get("recipients", [])})
+
+
 def utc_cron(when, tz):
     """UTC cron for `<day|daily> HH:MM` in tz, taken at the next occurrence."""
     m = WHEN.match(when.strip())
@@ -341,11 +366,18 @@ def expected(instance, repo=None):
             if len(providers) > 1:
                 entry["problems"].append(f"{cap} is bound more than once; the guard applies every binding")
             invs = invariants(cap)
-            if "no_send" in invs:
+            if "no_external_send" in invs:
                 try:
-                    if "no_send" not in agent_covers():
+                    if "no_external_send" not in agent_covers():
                         entry["problems"].append(
-                            f"{cap}: invariant no_send is not covered by the agent guard policy (guard.yaml at the package root)")
+                            f"{cap}: invariant no_external_send is not covered by the agent guard policy (guard.yaml at the package root)")
+                except CheckError as err:
+                    entry["problems"].append(f"{cap}: {err}")
+            if "owner_only_send" in invs:
+                try:
+                    if cap not in agent_exempt():
+                        entry["problems"].append(
+                            f"{cap}: owner_only_send needs the agent guard policy to list {cap} in exempt")
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
             try:
@@ -364,6 +396,21 @@ def expected(instance, repo=None):
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
                     continue
+                if "owner_only_send" in invs:
+                    bfile = pathlib.Path(instance) / "bindings" / f"{cap}.md"
+                    try:
+                        have = guard_policy.read_bindings(str(bfile)) if bfile.is_file() else {}
+                        for key in recipient_keys(folder):
+                            if not have.get(key):
+                                entry["problems"].append(
+                                    f"{cap}: bindings/{cap}.md has no {key} line (the {provider} tool pins "
+                                    "recipients to it); re-run setup's tools step")
+                            elif not all(guard_policy.BARE_VALUE.match(v) for v in have[key]):
+                                entry["problems"].append(
+                                    f"{cap}: bindings/{cap}.md {key} must be a bare value (the {provider} tool "
+                                    "pins recipients to it); re-run setup's tools step")
+                    except (OSError, UnicodeDecodeError, CheckError, guard_policy.PolicyError) as err:
+                        entry["problems"].append(f"{cap}: {err}")
                 if ay.get("wrapper") == "n8n":
                     try:
                         missing = tool_check.dispatchers_not_denied(agent_deny())

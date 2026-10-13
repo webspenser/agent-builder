@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
+Current: standard 7.0. Agent Builder 7.0.0, sales-partner 6.0.2 (7.0.0 in progress).
 
 ## In plain words
 
@@ -69,7 +69,7 @@ The builder's version and the standard's version move together. The standard is 
 | **Agent (package)** | What gets installed: instructions, skills, subagents, capabilities, hooks. | The agent's repository |
 | **Instance** | One client's copy of the agent's state: their bindings, business context and schedules. It never holds agent code. | The client's own private repository |
 | **Capability** | A kind of tool the agent needs, e.g. `crm`, `email_drafts`. | `capabilities/<cap>/` |
-| **Contract** | The capability's operations plus its **invariants**, the rules that must always hold (e.g. `no_send`: never send email). | `capabilities/<cap>/contract.md` |
+| **Contract** | The capability's operations plus its **invariants**, the rules that must always hold (e.g. `no_external_send`: never send email). | `capabilities/<cap>/contract.md` |
 | **Tool** | How the contract maps onto one specific system (Attio, Airtable, HubSpot, Gmail). | `capabilities/<cap>/tools/<tool>/` |
 | **Guard policy** | The tool's enforcement rules: which tool calls are allowed, which are denied, which field values may be written, and which fields may never be written at all. Its `covers` list names the invariants it enforces. | `…/tools/<tool>/guard.yaml` |
 | **Binding** | The instance's choice of tool for a capability. | `bind_<cap>: <tool>` in `instance.yaml` |
@@ -90,7 +90,7 @@ capabilities/<cap>/
   tools/<tool>/
     usage.md                how the agent uses this tool, for the model to read
     identity.yaml           capability, provider, server_match, for the hooks to read
-    guard.yaml              enforcement rules (optional, but required for no_send)
+    guard.yaml              enforcement rules (optional, but required for no_external_send and owner_only_send)
     bootstrap.py            optional one-time field setup, run by the person with their own API key
 hooks/                      identical in every agent (copied from the builder)
   hooks.json                wires the two hooks below into Claude Code
@@ -206,7 +206,7 @@ different moment.
 flowchart TD
   S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
   V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>skill and subagent format"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 5.0<br/>four host manifests agree"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 7.0<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
@@ -215,7 +215,7 @@ flowchart TD
   TL --> T2["hooks are byte-identical<br/>to the builder's _template/hooks"]
   TL --> T3["each capability: contract has<br/>Operations and Invariants"]
   TL --> T4["each tool passes tool_check.py:<br/>usage.md maps every operation and has a Probe,<br/>and a Setup section when bootstrap.py exists;<br/>identity.yaml keys valid;<br/>server_match is a-z 0-9 _ -"]
-  TL --> T5["guard.yaml parses, rules valid (forbid, writes);<br/>covers only names real invariants;<br/>no_send must be covered"]
+  TL --> T5["guard.yaml parses, rules valid (forbid, writes);<br/>covers only names real invariants;<br/>no_external_send and owner_only_send must be covered"]
   TL --> T6["add-tool skill present and<br/>byte-identical to the builder's"]
   AC --> A1["activity names kebab-case, not repeated"]
   AC --> A2["capabilities exist; none is not mixed with others"]
@@ -384,7 +384,7 @@ From then on, the guard and the schedule checker treat `custom` exactly
 like a shipped tool. They read its `identity.yaml` and `guard.yaml` from
 `custom-tools/<cap>/`. If its `guard.yaml` doesn't cover every invariant,
 the capability isn't unattended-safe, so its activities can't be scheduled.
-For email, setup and `add-tool` refuse to bind it unless `no_send` is
+For email, setup and `add-tool` refuse to bind it unless `no_external_send` is
 covered. At call time the agent guard policy's deny list (the
 package-root `guard.yaml`) covers a custom email tool too, whatever its
 own files say. If a
@@ -488,9 +488,16 @@ package root: a deny-only list (sales-partner: `*send*`, `*reply*`,
 applies to every MCP call in the instance, whatever the server. So a
 Slack or social connector the client happens to have connected can't
 send for the agent either, and a hand-made custom tool is covered too.
-Any agent with a `no_send` capability must ship it. It matches tool
+Any agent with a `no_external_send` capability must ship it. It matches tool
 names, not what a tool does, so the list is checked against the read
 tools of common connectors.
+
+An agent can message its own business owner and nobody else. The owner's
+address is recorded once, at setup, with the owner confirming it. The
+guard checks every send against that record before it leaves, so neither
+a mistake nor text the agent reads on a website can add a recipient. An
+agent that tampers with its own repository's git data is outside what
+this check can stop.
 
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a
@@ -503,7 +510,7 @@ real harm if broken:
 - never approve or send outreach (`draft_only`);
 - never clear Do Not Contact (`dnc_one_way`);
 - never delete or merge (`no_delete`);
-- never send email (`no_send`).
+- never send email (`no_external_send`).
 
 Everything else is left to the agent's instructions.
 
@@ -528,7 +535,7 @@ PASS  outreach-agent: enroll (acme)
   ACCEPTED (instruction-only): sequences: enroll_ready_only
 ```
 
-`no_send` can never be accepted, and an invariant the contract doesn't
+`no_external_send` can never be accepted, and an invariant the contract doesn't
 mark can't be either: the check fails.
 
 ## Wrapping a service in n8n
@@ -593,9 +600,9 @@ These are still open. Everything else that used to be on this list is done.
   `bootstrap.py` and the person's own API key, because the connectors
   can't create fields or views. If connectors gain that ability, setup
   could do it without an API key.
-- **The custom `no_send` tool gap.** `add-tool`, `tool_check.py` and the
+- **The custom `no_external_send` tool gap.** `add-tool`, `tool_check.py` and the
   schedule gate refuse a custom email tool whose guard doesn't cover
-  `no_send`. The guard itself can't see the contract, so a hand-edited
+  `no_external_send`. The guard itself can't see the contract, so a hand-edited
   instance that skips this isn't blocked at call time.
 - **Guard support on Gemini and Codex.** The guard's hook wiring
   (`hooks/hooks.json`) is Claude Code's. The Gemini and Codex manifests

@@ -41,7 +41,7 @@ describe it as a capability in two layers.
 
 - The **contract** (`capabilities/<name>/contract.md`) lists the
   operations the agent thinks in and the invariants any system must
-  uphold, such as `no_send`.
+  uphold, such as `no_external_send`.
 - A **tool** (one folder per system, `capabilities/<name>/tools/<tool>/`)
   maps each operation to that system's MCP tools. Its `usage.md` is
   the mapping the model reads, its `identity.yaml` is what the hooks
@@ -57,14 +57,14 @@ for a new one in the package.
 A guard policy is a short file:
 
 ```yaml
-covers: [no_send]
+covers: [no_external_send]
 allow: [create_draft, list_drafts, get_draft, search_threads, get_thread]
 deny: ["*send*", "*reply*", "*forward*"]
 ```
 
 An invariant in `covers` is enforced by the guard before every call. One
 left out is held only by the agent's instructions. A capability is
-unattended-safe when every invariant is covered, and a `no_send`
+unattended-safe when every invariant is covered, and a `no_external_send`
 invariant must always be covered. With `allow` present, every other tool
 of that system is blocked, so a new tool stays blocked until you allow
 it. Field rules can also limit the values a write may set: `writes`
@@ -76,8 +76,8 @@ setup offers to create the fields by hand or with an API key in the
 user's own terminal. Check a
 tool folder with `python3 hooks/tool_check.py <tool folder> <contract.md>`.
 
-If any capability has a `no_send` invariant, also ship a `guard.yaml` at
-the package root: an agent guard policy with `covers: [no_send]` and a
+If any capability has a `no_external_send` invariant, also ship a `guard.yaml` at
+the package root: an agent guard policy with `covers: [no_external_send]` and a
 `deny` list of send and publish globs (`*send*`, `*reply*`,
 `*forward*`, `*publish*`, …). The guard applies it to every MCP call in
 an instance, whatever the server. Check each glob against the read

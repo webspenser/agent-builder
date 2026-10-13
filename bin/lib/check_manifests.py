@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "6.0"
+CURRENT_STANDARD = "7.0"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -261,8 +261,12 @@ def check_capability(root, cap):
         if not SNAKE.match(inv):
             fails.append(f"{rel}: invariant '{inv}' is not snake_case")
     checker = load_tool_checker()
-    if checker is not None and "no_send" in checker.acceptable(text):
-        fails.append(f"{rel}: no_send cannot be marked (acceptable)")
+    if "no_send" in invariants:
+        fails.append(f"{rel}: no_send was renamed no_external_send")
+    if checker is not None:
+        for inv in ("no_external_send", "owner_only_send"):
+            if inv in checker.acceptable(text):
+                fails.append(f"{rel}: {inv} cannot be marked (acceptable)")
     folder = base / "tools"
     tools = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
     if not tools:
@@ -273,9 +277,9 @@ def check_capability(root, cap):
 
 
 def check_agent_policy(root, caps):
-    """The package-root guard.yaml: parses as an agent policy; required to cover no_send when a contract has it."""
+    """The package-root guard.yaml: parses as an agent policy; required to cover no_external_send when a contract has it."""
     path = root / "guard.yaml"
-    covers, deny = None, []
+    covers, deny, exempt = None, [], []
     if path.exists() or path.is_symlink():
         engine = load_policy_engine()
         if engine is None:
@@ -284,16 +288,24 @@ def check_agent_policy(root, caps):
             policy = engine.parse_agent(read_text(path))
         except (ReadError, engine.PolicyError) as err:
             return [f"guard.yaml: {err}"]
-        covers, deny = policy.get("covers", []), policy["deny"]
+        covers, deny, exempt = policy.get("covers", []), policy["deny"], policy.get("exempt", [])
     fails = []
+    owner_caps = set()
     for cap in caps:
         try:
             text = read_text(root / "capabilities" / cap / "contract.md")
         except ReadError:
             continue  # reported by check_capability
         invariants = [m.group(1) for line in section(text, "Invariants") or [] for m in [INVARIANT.match(line)] if m]
-        if "no_send" in invariants and (covers is None or "no_send" not in covers):
-            fails.append(f"the contract of {cap} has no_send, so the agent needs a guard.yaml at its root that covers no_send")
+        if "owner_only_send" in invariants:
+            owner_caps.add(cap)
+        if "no_external_send" in invariants and (covers is None or "no_external_send" not in covers):
+            fails.append(f"the contract of {cap} has no_external_send, so the agent needs a guard.yaml at its root that covers no_external_send")
+    for cap in exempt:
+        if cap not in caps:
+            fails.append(f"guard.yaml: exempt names {cap}, which is not in capabilities")
+        elif cap not in owner_caps:
+            fails.append(f"guard.yaml: exempt names {cap}, whose contract has no owner_only_send")
     checker = load_tool_checker()
     for cap in caps:
         for ident in sorted((root / "capabilities" / cap / "tools").glob("*/identity.yaml")):
