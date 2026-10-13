@@ -302,6 +302,11 @@ def _norm(name):
     return re.sub(r"[\s-]+", "_", str(name).strip().lower())
 
 
+def _arg_key(name):
+    # draftId, draft_id, DRAFT-ID and draftid are one argument to a protobuf-JSON server.
+    return re.sub(r"[_-]", "", name).lower()
+
+
 def _candidates(tool_name):
     """(suffix, server segment) for every suffix after a '__'; the server
     segment is the text between the previous '__' and this one."""
@@ -443,9 +448,10 @@ def problems(policy, event, bindings, server_match=None):
     args = event.get("tool_input")
     early = []
     if isinstance(args, dict):
-        for name in policy.get("refuse_args", []):
-            if name in args and args[name] not in (None, ""):
-                early.append(f"{shown} may not use {name}")
+        refused = {_arg_key(name) for name in policy.get("refuse_args", [])}
+        for key, value in args.items():
+            if _arg_key(key) in refused and value not in (None, ""):
+                early.append(f"{shown} may not use {key}")
     for entry in policy.get("recipients", []):
         if not _matches(names, entry["tools"]):
             continue
