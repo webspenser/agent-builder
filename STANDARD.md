@@ -664,8 +664,8 @@ validation error and, at runtime, a block.
 
    A `recipients` entry limits a send to values the operator confirmed
    at setup. For an exempt capability, `guard.sh` also requires the
-   bindings file to match its pushed copy, so the agent cannot add one
-   (see Guard hook).
+   bindings file to match its pushed copy, so an edit to the file does
+   not take effect until it is pushed (see Guard hook).
 
 3. **Writes.** The matching entries are the `writes` entries whose
    `tools` match the call's tool name, using the same suffix matching as
@@ -771,8 +771,9 @@ surrounding pair of backticks or matching quotes; the rest must match
 bare ID`. A bulleted line is not read as a binding. Keys that do not
 start with `field_` are not checked.
 
-Recipient lines (`<bound>: <value>`) follow the same plain-line form; the
-value must match `^[^\s<>"',;]+$`.
+Recipient lines (`<bound>: <value>`) follow the same plain-line form. The
+engine strips one surrounding pair of backticks or matching quotes from the
+value, and then the value must match `^[^\s<>"',;]+$`.
 
 ### Agent guard policy
 
@@ -811,8 +812,9 @@ past the deny list. Each name must be a listed capability whose contract
 has `owner_only_send`; the validator rejects any other.
 
 - *Hook.* For each capability in `exempt`, `guard.sh` reads its
-  `bind_` line and finds the bound tool. It adds that tool's
-  `server_match` to the exempt list only when all of these hold: the
+  `bind_` line and finds the bound tool. For a call whose name contains
+  the tool's `server_match`, it adds that `server_match` to the exempt
+  list only when all of these hold: the
   binding is a tool shipped in the package (never `custom`); the tool's
   `identity.yaml` has a valid, non-empty `server_match`; its
   `guard.yaml` is a regular file (not a symlink) and its `covers`

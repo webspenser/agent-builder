@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 6.0. Agent Builder 6.0.0, sales-partner 6.0.0.
+Current: standard 7.0. Agent Builder 7.0.0, sales-partner 6.0.2 (7.0.0 in progress).
 
 ## In plain words
 
@@ -206,7 +206,7 @@ different moment.
 flowchart TD
   S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
   V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>skill and subagent format"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 5.0<br/>four host manifests agree"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 7.0<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
@@ -495,7 +495,9 @@ tools of common connectors.
 An agent can message its own business owner and nobody else. The owner's
 address is recorded once, at setup, with the owner confirming it. The
 guard checks every send against that record before it leaves, so neither
-a mistake nor text the agent reads on a website can add a recipient.
+a mistake nor text the agent reads on a website can add a recipient. An
+agent that tampers with its own repository's git data is outside what
+this check can stop.
 
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a
