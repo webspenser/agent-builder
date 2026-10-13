@@ -625,4 +625,8 @@ ledger_repo "$FIX/led-retype" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell 
 fails_with "$FIX/led-retype" "capabilities/ledger/tables.md: Cells.Runs changed type from number to singleLineText" --require-bump HEAD
 ledger_repo "$FIX/led-droptable" 'ledger_schema: 3'
 fails_with "$FIX/led-droptable" "capabilities/ledger/tables.md: table Cells was removed" --require-bump HEAD
+make_valid_agent "$FIX/pin-accept"
+printf '%s\n' '- `pinned_inputs` (acceptable) — x' >> "$FIX/pin-accept/capabilities/crm/contract.md"
+fails_with "$FIX/pin-accept" "capabilities/crm/contract.md: pinned_inputs cannot be marked (acceptable)"
+
 finish

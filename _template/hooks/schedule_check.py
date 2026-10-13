@@ -254,7 +254,7 @@ def agent_exempt():
 
 
 def recipient_keys(folder):
-    """The bound keys a tool's guard.yaml pins recipients to."""
+    """The bound keys a tool's guard.yaml pins values to."""
     policy = folder / "guard.yaml"
     if not policy.is_file():
         return []
@@ -428,7 +428,7 @@ def expected(instance, repo=None):
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
                     continue
-                if "owner_only_send" in invs:
+                if set(tool_check.PIN_INVARIANTS) & set(invs):
                     bfile = pathlib.Path(instance) / "bindings" / f"{cap}.md"
                     try:
                         have = guard_policy.read_bindings(str(bfile)) if bfile.is_file() else {}
@@ -436,11 +436,11 @@ def expected(instance, repo=None):
                             if not have.get(key):
                                 entry["problems"].append(
                                     f"{cap}: bindings/{cap}.md has no {key} line (the {provider} tool pins "
-                                    "recipients to it); re-run setup's tools step")
+                                    "values to it); re-run setup's tools step")
                             elif not all(guard_policy.BARE_VALUE.match(v) for v in have[key]):
                                 entry["problems"].append(
                                     f"{cap}: bindings/{cap}.md {key} must be a bare value (the {provider} tool "
-                                    "pins recipients to it); re-run setup's tools step")
+                                    "pins values to it); re-run setup's tools step")
                     except (OSError, UnicodeDecodeError, CheckError, guard_policy.PolicyError) as err:
                         entry["problems"].append(f"{cap}: {err}")
                 if "append_only_events" in invs:

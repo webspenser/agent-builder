@@ -432,4 +432,23 @@ expect 1 "missing table_events fails" "bindings/ledger.md has no table_events li
 lbind "$W/l-none"; rm "$W/l-none/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-none" --repo acme/led 2>&1); RC=$?
 expect 1 "no bindings file fails" "bindings/ledger.md has no base_id line"
 
+echo "-- pinned_inputs bindings"
+PP="$W/ppkg"; mkdir -p "$PP/hooks" "$PP/capabilities/scraping/tools/apify"
+cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PP/hooks/"
+printf '%s\n' 'name: pin-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.1"' 'catalog: webspenser' \
+  'catalog_repo: webspenser/agent-library' 'capabilities: scraping' 'activity_scrape: scraping' > "$PP/agent.yaml"
+printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PP/capabilities/scraping/contract.md"
+printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$PP/capabilities/scraping/tools/apify/identity.yaml"
+printf '%s\n' '# Apify' '' '- `find_businesses` — apify:run-maps' '' '## Probe' '' 'Call apify:list-tools.' > "$PP/capabilities/scraping/tools/apify/usage.md"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' > "$PP/capabilities/scraping/tools/apify/guard.yaml"
+PI2="$W/pin-ok"; mkdir -p "$PI2/bindings"
+printf '%s\n' 'agent: pin-agent' 'mode: plugin' 'bind_scraping: apify' > "$PI2/instance.yaml"
+printf '%s\n' 'timezone: UTC' 'schedule_scrape: "daily 06:00"' > "$PI2/schedules.yaml"
+printf '%s\n' 'max_places: 60' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 0 "scraping with max_places passes" "PASS  pin-agent: scrape (pin)"
+printf '%s\n' 'other: 1' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "scraping without max_places fails" "bindings/scraping.md has no max_places line (the apify tool pins values to it)"
+
 finish

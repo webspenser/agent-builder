@@ -37,7 +37,7 @@ REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
 LEDGER_REFERENCE = TEMPLATE_HOOKS.parents[1] / "_ledger"
 LEDGER_FILES = ("contract.md", "tools/airtable/identity.yaml", "tools/airtable/usage.md",
                 "tools/airtable/guard.yaml", "tools/airtable/bootstrap.py")
-RESERVED_INVARIANTS = ("no_external_send", "owner_only_send", "append_only_events", "no_schema_change")
+RESERVED_INVARIANTS = ("no_external_send", "owner_only_send", "append_only_events", "no_schema_change", "pinned_inputs")
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"

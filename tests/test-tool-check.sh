@@ -183,7 +183,7 @@ good_notify() {
 good_notify; run "$NT" "$N/contract.md"; expect 0 "notify tool passes" "OK: "
 rm "$NT/guard.yaml"; run "$NT" "$N/contract.md"; expect 1 "owner_only_send needs guard.yaml" "the contract has owner_only_send, so guard.yaml must cover it"
 good_notify; printf '%s\n' 'covers: [owner_only_send]' 'allow: [send-email]' > "$NT/guard.yaml"; run "$NT" "$N/contract.md"
-expect 1 "owner_only_send needs recipients" "guard.yaml must pin recipients (a recipients entry) for owner_only_send"
+expect 1 "owner_only_send needs recipients" "must pin values (a recipients entry) for owner_only_send"
 good_notify; printf '%s\n' 'covers: [owner_only_send]' 'recipients:' '  - tools: [send-email]' '    at: [to]' '    bound: r' > "$NT/guard.yaml"; run "$NT" "$N/contract.md"
 expect 1 "owner_only_send needs allow" "guard.yaml must have an allow list for owner_only_send"
 good_notify; sed -i.bak 's/^allow: .*/allow: [send-email, list-domains, send-batch]/' "$NT/guard.yaml"; run "$NT" "$N/contract.md"
@@ -251,4 +251,20 @@ good_ledger; sed -i.bak 's/^refuse_args: .*/refuse_args: [interfaceContext]/' "$
 expect 1 "no_schema_change needs typecast refused" "no_schema_change needs refuse_args to include typecast"
 good_ledger; sed -i.bak 's/^covers: .*/covers: [no_delete]/' "$LT2/guard.yaml"; sed -i.bak '/^bound_keys_only/d' "$LT2/guard.yaml"; run "$LT2" "$L/contract.md"
 expect 0 "uncovered ledger invariants are not checked here (the gate refuses them)"
+echo "-- pinned_inputs"
+PI="$W/pkg/capabilities/scraping"; PIT="$PI/tools/apify"; mkdir -p "$PIT"
+printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PI/contract.md"
+good_pin() {
+  printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$PIT/identity.yaml"
+  printf '%s\n' '# Apify' '' '- `find_businesses` — apify:run-maps' '' '## Probe' '' 'Call apify:list-tools.' > "$PIT/usage.md"
+  printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps, list-tools]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' > "$PIT/guard.yaml"
+}
+good_pin; run "$PIT" "$PI/contract.md"; expect 0 "pinned_inputs tool passes" "OK: "
+good_pin; sed -i.bak 's/^allow: .*/allow: [run-*, list-tools]/' "$PIT/guard.yaml"; run "$PIT" "$PI/contract.md"
+expect 1 "wildcard allow refused" "run-* must be an exact tool name for pinned_inputs (no wildcards)"
+good_pin; sed -i.bak 's/^allow: .*/allow: [run-maps, run-other, list-tools]/' "$PIT/guard.yaml"; run "$PIT" "$PI/contract.md"
+expect 1 "unpinned run tool refused" "run-other is allowed but no recipients entry pins it"
+good_pin; printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' > "$PIT/guard.yaml"; run "$PIT" "$PI/contract.md"
+expect 1 "no recipients entry refused" "must pin values (a recipients entry) for pinned_inputs"
+
 finish
