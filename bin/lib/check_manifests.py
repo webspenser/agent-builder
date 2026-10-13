@@ -34,6 +34,10 @@ REFERENCE_POLICY = TEMPLATE_HOOKS / "guard_policy.py"
 REFERENCE_SCHEDULE = TEMPLATE_HOOKS / "schedule_check.py"
 REFERENCE_TOOLCHECK = TEMPLATE_HOOKS / "tool_check.py"
 REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
+LEDGER_REFERENCE = TEMPLATE_HOOKS.parents[1] / "_ledger"
+LEDGER_FILES = ("contract.md", "tools/airtable/identity.yaml", "tools/airtable/usage.md",
+                "tools/airtable/guard.yaml", "tools/airtable/bootstrap.py")
+RESERVED_INVARIANTS = ("no_external_send", "owner_only_send", "append_only_events", "no_schema_change")
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
@@ -228,7 +232,7 @@ def check_tool_folder(tdir, cap, ops, invariants):
     return fails
 
 
-def check_reference_file(root, rel, reference):
+def check_reference_file(root, rel, reference, shown=None):
     """`rel` exists and is byte-identical to the builder's reference copy."""
     path = root / rel
     if not path.is_file():
@@ -237,7 +241,8 @@ def check_reference_file(root, rel, reference):
         same = reference.is_file() and path.read_bytes() == reference.read_bytes()
     except OSError:
         return [f"{rel} cannot be read"]
-    return [] if same else [f"{rel} differs from the Agent Standard reference copy (_template/{rel} in agent-builder)"]
+    where = shown or f"_template/{rel}"
+    return [] if same else [f"{rel} differs from the Agent Standard reference copy ({where} in agent-builder)"]
 
 
 def check_capability(root, cap):
@@ -264,7 +269,7 @@ def check_capability(root, cap):
     if "no_send" in invariants:
         fails.append(f"{rel}: no_send was renamed no_external_send")
     if checker is not None:
-        for inv in ("no_external_send", "owner_only_send"):
+        for inv in RESERVED_INVARIANTS:
             if inv in checker.acceptable(text):
                 fails.append(f"{rel}: {inv} cannot be marked (acceptable)")
     folder = base / "tools"
@@ -357,6 +362,28 @@ def check_activities(root, meta, caps):
     return fails
 
 
+def check_ledger(root):
+    """The standard ledger: copied files byte-identical to _ledger/, the backfill skill, a valid tables.md."""
+    fails = []
+    for rel in LEDGER_FILES:
+        fails.extend(check_reference_file(root, f"capabilities/ledger/{rel}", LEDGER_REFERENCE / rel,
+                                          shown=f"_ledger/{rel}"))
+    fails.extend(check_reference_file(root, "skills/ledger-backfill/SKILL.md",
+                                      LEDGER_REFERENCE / "skills" / "ledger-backfill" / "SKILL.md",
+                                      shown="_ledger/skills/ledger-backfill/SKILL.md"))
+    tables = root / "capabilities" / "ledger" / "tables.md"
+    if not tables.is_file():
+        return fails + ["missing capabilities/ledger/tables.md"]
+    checker = load_tool_checker()
+    if checker is None:
+        return fails + ["validator cannot load its tool checker (_template/hooks/tool_check.py)"]
+    try:
+        _, _, problems = checker.parse_tables(read_text(tables))
+    except ReadError as err:
+        return fails + [f"capabilities/ledger/tables.md: {err}"]
+    return fails + [f"capabilities/ledger/tables.md: {p}" for p in problems]
+
+
 def check_tools(root, meta):
     """Guard hook and engine, capability contracts, tools, guard policies."""
     fails = []
@@ -377,6 +404,8 @@ def check_tools(root, meta):
         else:
             fails.extend(check_reference_file(root, "skills/add-tool/SKILL.md", REFERENCE_ADD_TOOL))
     fails.extend(check_activities(root, meta, caps))
+    if "ledger" in caps:
+        fails.extend(check_ledger(root))
     for cap in caps:
         if not SNAKE.match(cap):
             fails.append(f"agent.yaml: capability '{cap}' is not snake_case")
