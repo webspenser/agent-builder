@@ -265,6 +265,38 @@ def recipient_keys(folder):
     return sorted({entry["bound"] for entry in parsed.get("recipients", [])})
 
 
+def ledger_binding_problems(instance, cap):
+    """append_only_events: bindings/<cap>.md has base_id, a field_ line for every writable
+    Events field, and ledger_schema equal to the package's capabilities/<cap>/tables.md."""
+    fix = "re-run setup's tools step"
+    bfile = pathlib.Path(instance) / "bindings" / f"{cap}.md"
+    try:
+        have = guard_policy.read_bindings(str(bfile)) if bfile.is_file() else {}
+    except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
+        return [f"{cap}: {err}"]
+    problems = []
+    if not have.get("base_id"):
+        problems.append(f"{cap}: bindings/{cap}.md has no base_id line; {fix}")
+    if not have.get("table_events"):
+        problems.append(f"{cap}: bindings/{cap}.md has no table_events line; {fix}")
+    for name in tool_check.ledger_writable():
+        key = "field_" + tool_check.norm_field(name)
+        if not have.get(key):
+            problems.append(f"{cap}: bindings/{cap}.md has no {key} line; {fix}")
+    try:
+        schema, _, bad = tool_check.parse_tables(_read(ROOT / "capabilities" / cap / "tables.md", guard=False))
+    except CheckError as err:
+        return problems + [f"{cap}: {err}"]
+    if bad:
+        return problems + [f"{cap}: capabilities/{cap}/tables.md is invalid: {bad[0]}"]
+    bound = sorted(have.get("ledger_schema") or [])
+    if bound != [str(schema)]:
+        shown = ", ".join(bound) or "missing"
+        problems.append(f"{cap}: bindings/{cap}.md ledger_schema is {shown}, the package needs {schema}; "
+                        "run setup to upgrade the ledger")
+    return problems
+
+
 def utc_cron(when, tz):
     """UTC cron for `<day|daily> HH:MM` in tz, taken at the next occurrence."""
     m = WHEN.match(when.strip())
@@ -411,6 +443,8 @@ def expected(instance, repo=None):
                                     "pins recipients to it); re-run setup's tools step")
                     except (OSError, UnicodeDecodeError, CheckError, guard_policy.PolicyError) as err:
                         entry["problems"].append(f"{cap}: {err}")
+                if "append_only_events" in invs:
+                    entry["problems"].extend(ledger_binding_problems(instance, cap))
                 if ay.get("wrapper") == "n8n":
                     try:
                         missing = tool_check.dispatchers_not_denied(agent_deny())

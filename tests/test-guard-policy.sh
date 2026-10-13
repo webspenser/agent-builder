@@ -356,4 +356,25 @@ policy 'deny: ['
 python3 "$E" --exempt-caps "$W/guard.yaml" >/dev/null 2>&1 && _report no "--exempt-caps bad policy should fail" || _report ok "--exempt-caps bad policy exits non-zero"
 python3 "$E" --covers "$W/guard.yaml" >/dev/null 2>&1 && _report no "--covers bad policy should fail" || _report ok "--covers bad policy exits non-zero"
 
+echo "-- ledger (airtable)"
+cp _ledger/tools/airtable/guard.yaml "$W/guard.yaml"
+parses 0 "ledger guard parses"
+LB="$W/ledger.md"
+printf '%s\n' 'base_id: appAAAAAAAAAAAAAA' 'field_at: fldAT000000000000' 'field_run_id: fldRUN00000000000' \
+  'field_seq: fldSEQ00000000000' 'field_event: fldEVT00000000000' 'field_cell: fldCEL00000000000' > "$LB"
+A=mcp__claude_ai_Airtable__; R='"baseId":"appAAAAAAAAAAAAAA","tableId":"tblE0000000000000"'
+run 0 "append an event" ${A}create_records_for_table "{$R,\"records\":[{\"fields\":{\"fldAT000000000000\":\"2026-10-19T14:02:00Z\",\"fldRUN00000000000\":\"prospect-20261019T1400Z\",\"fldSEQ00000000000\":1,\"fldEVT00000000000\":\"run_started\"}}]}" "" "$LB" airtable
+run 2 "edit an event" ${A}update_records_for_table "{$R,\"records\":[{\"id\":\"recA0000000000000\",\"fields\":{\"fldEVT00000000000\":\"error\"}}]}" "Event may not be changed after create" "$LB" airtable
+run 2 "upsert into Events" ${A}update_records_for_table "{$R,\"performUpsert\":{\"fieldIdsToMergeOn\":[\"fldRUN00000000000\"]},\"records\":[{\"fields\":{\"fldRUN00000000000\":\"x\"}}]}" "Run ID may not be changed after create" "$LB" airtable
+run 0 "upsert an agent-table row" ${A}update_records_for_table "{$R,\"performUpsert\":{\"fieldIdsToMergeOn\":[\"fldCEL00000000000\"]},\"records\":[{\"fields\":{\"fldCEL00000000000\":\"Oakland|hvac\"}}]}" "" "$LB" airtable
+run 2 "typecast false" ${A}create_records_for_table "{$R,\"typecast\":false,\"records\":[{\"fields\":{\"fldEVT00000000000\":\"step\"}}]}" "may not use typecast" "$LB" airtable
+run 2 "interfaceContext" ${A}create_records_for_table "{$R,\"interfaceContext\":{\"interfaceId\":\"pbdAAAAAAAAAAAAAA\"},\"records\":[{\"fields\":{\"fldEVT00000000000\":\"step\"}}]}" "may not use interfaceContext" "$LB" airtable
+run 2 "unrecorded field ID" ${A}create_records_for_table "{$R,\"records\":[{\"fields\":{\"fldOTHER000000000\":\"x\"}}]}" "is not a recorded field ID" "$LB" airtable
+run 2 "field by name, not ID" ${A}create_records_for_table "{$R,\"records\":[{\"fields\":{\"Event\":\"step\"}}]}" "is not a recorded field ID" "$LB" airtable
+for t in delete_records_for_table create_field update_field create_table update_table create_base create_automation revert_action create_record_comment submit_form publish_interface; do
+  run 2 "denied or not allowed: $t" ${A}$t "{$R}" "" "$LB" airtable
+done
+run 0 "read records" ${A}list_records_for_table "{$R}" "" "$LB" airtable
+run 0 "read schema" ${A}list_tables_for_base '{"baseId":"appAAAAAAAAAAAAAA"}' "" "$LB" airtable
+
 finish

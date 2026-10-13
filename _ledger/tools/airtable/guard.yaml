@@ -1,0 +1,53 @@
+# Airtable ledger guard policy. Events rows are append-only; nothing is
+# deleted; the schema never changes over MCP (bootstrap.py owns it).
+# Airtable keys fields by ID, so every written key must be a field ID
+# the probe recorded in bindings/ledger.md (bound_keys_only); the rules
+# below match those IDs by field name. typecast would create select
+# options on write, a schema change, so it is refused at any value.
+covers: [append_only_events, no_delete, no_schema_change]
+allow: [list_tables_for_base, get_table_schema, list_records_for_table,
+        search_records, create_records_for_table, update_records_for_table]
+deny: ["*delete*", "*create_base*", "*create_table*", "*update_table*",
+       "*create_field*", "*update_field*", "*automation*", "*revert*",
+       "*interface*", "*page*", "*comment*", "*form*"]
+refuse_args: [typecast, interfaceContext]
+writes:
+  - kind: create
+    tools: [create_records_for_table]
+    at: ["records[].fields"]
+  - kind: update
+    tools: [update_records_for_table]
+    at: ["records[].fields"]
+unknown_writes: block
+bound_keys_only: true
+rules:
+  - field: At
+    forbid: update
+  - field: Run ID
+    forbid: update
+  - field: Seq
+    forbid: update
+  - field: Activity
+    forbid: update
+  - field: Trigger
+    forbid: update
+  - field: Event
+    forbid: update
+  - field: Subject
+    forbid: update
+  - field: Outcome
+    forbid: update
+  - field: Items In
+    forbid: update
+  - field: Items Out
+    forbid: update
+  - field: Cost USD
+    forbid: update
+  - field: Duration s
+    forbid: update
+  - field: Detail
+    forbid: update
+  - field: Agent Version
+    forbid: update
+  - field: Backfilled
+    forbid: update

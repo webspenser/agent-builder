@@ -106,6 +106,7 @@ In CI, from any agent repo:
 |---|---|
 | `STANDARD.md` | The Agent Standard |
 | `_template/` | The skeleton every agent starts from |
+| `_ledger/` | The standard ledger capability: an append-only record of every run, in the business's own Airtable base |
 | `skills/` | `new-agent` (the wizard) and `validate-agent` |
 | `bin/validate-agent.sh` | The validator |
 | `validate/` | The GitHub Action |

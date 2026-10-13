@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.0"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.1"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
@@ -400,5 +400,36 @@ printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' > "$PKG/guard.yaml
 run check "$G" --repo acme/sales; expect 1 "not exempt: fails" "owner_only_send needs the agent guard policy to list owner_notify in exempt"
 printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' > "$PKG/guard.yaml"
 mv "$W/agent.bak" "$PKG/agent.yaml"; rm -rf "$PKG/capabilities/owner_notify"
+
+echo "-- ledger bindings"
+LP="$W/lpkg"; mkdir -p "$LP/hooks" "$LP/capabilities/ledger"
+cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$LP/hooks/"
+cp -R _ledger/contract.md _ledger/tables.md _ledger/tools "$LP/capabilities/ledger/"
+printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.1"' 'catalog: webspenser' \
+  'catalog_repo: webspenser/agent-library' 'capabilities: ledger' 'activity_log: ledger' > "$LP/agent.yaml"
+LSC="$LP/hooks/schedule_check.py"
+lbind() { # lbind <instance> [schema] [drop-field]: bind ledger to airtable with every writable field
+  local d="$1" schema="${2:-1}" drop="${3:-}"
+  mkdir -p "$d/bindings"
+  printf '%s\n' 'agent: led-agent' 'mode: plugin' 'bind_ledger: airtable' > "$d/instance.yaml"
+  printf '%s\n' 'timezone: UTC' 'schedule_log: "daily 06:00"' > "$d/schedules.yaml"
+  { echo 'base_id: appAAAAAAAAAAAAAA'; echo 'table_events: tblAAAAAAAAAAAAAA'
+    for f in at run_id seq activity trigger event subject outcome items_in items_out cost_usd duration_s detail agent_version backfilled; do
+      [ "$f" = "$drop" ] || echo "field_$f: fld$(printf '%-14s' "$f" | tr ' _' 'XX' | cut -c1-14)"; done
+    echo "ledger_schema: $schema"; } > "$d/bindings/ledger.md"
+}
+lbind "$W/l-ok"; OUT=$(python3 -B "$LSC" check "$W/l-ok" --repo acme/led 2>&1); RC=$?; expect 0 "complete ledger bindings pass" "PASS  led-agent: log (led)"
+lbind "$W/l-tick" '`1`'; OUT=$(python3 -B "$LSC" check "$W/l-tick" --repo acme/led 2>&1); RC=$?; expect 0 "backticked schema is read as 1"
+lbind "$W/l-old" 0; OUT=$(python3 -B "$LSC" check "$W/l-old" --repo acme/led 2>&1); RC=$?
+expect 1 "older ledger_schema fails" "bindings/ledger.md ledger_schema is 0, the package needs 1; run setup to upgrade the ledger"
+lbind "$W/l-pad" 01; OUT=$(python3 -B "$LSC" check "$W/l-pad" --repo acme/led 2>&1); RC=$?; expect 1 "01 is not 1" "ledger_schema is 01, the package needs 1"
+lbind "$W/l-field" 1 detail; OUT=$(python3 -B "$LSC" check "$W/l-field" --repo acme/led 2>&1); RC=$?
+expect 1 "missing field line fails" "bindings/ledger.md has no field_detail line; re-run setup's tools step"
+lbind "$W/l-base"; sed -i.bak '/^base_id/d' "$W/l-base/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-base" --repo acme/led 2>&1); RC=$?
+expect 1 "missing base_id fails" "bindings/ledger.md has no base_id line"
+lbind "$W/l-tbl"; sed -i.bak '/^table_events/d' "$W/l-tbl/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-tbl" --repo acme/led 2>&1); RC=$?
+expect 1 "missing table_events fails" "bindings/ledger.md has no table_events line"
+lbind "$W/l-none"; rm "$W/l-none/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-none" --repo acme/led 2>&1); RC=$?
+expect 1 "no bindings file fails" "bindings/ledger.md has no base_id line"
 
 finish

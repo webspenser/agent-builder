@@ -157,6 +157,11 @@ if [ -n "$BUMP_REF" ]; then
         if { [ -n "$changed" ] || [ -n "$untracked" ]; } && [ "$old_ver" = "$new_ver" ]; then
           fail "files changed since $BUMP_REF but version is still $new_ver — bump it in agent.yaml and all four host manifests"
         fi
+        if [ -f "$DIR/capabilities/ledger/tables.md" ] && git -C "$DIR" cat-file -e "$BUMP_REF:./capabilities/ledger/tables.md" 2>/dev/null; then
+          ldiff=$(git -C "$DIR" show "$BUMP_REF:./capabilities/ledger/tables.md" | "$PYTHON" "$CHECKER" --ledger-diff - "$DIR/capabilities/ledger/tables.md" 2>&1); lrc=$?
+          while IFS= read -r line; do [ -n "$line" ] && fail "${line#FAIL: }"; done <<< "$ldiff"
+          [ "$lrc" -eq 0 ] || fail "ledger diff checker crashed (exit $lrc)"
+        fi
       fi
     fi
   fi

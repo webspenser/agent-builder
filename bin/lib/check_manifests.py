@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "7.0"
+CURRENT_STANDARD = "7.1"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -34,6 +34,10 @@ REFERENCE_POLICY = TEMPLATE_HOOKS / "guard_policy.py"
 REFERENCE_SCHEDULE = TEMPLATE_HOOKS / "schedule_check.py"
 REFERENCE_TOOLCHECK = TEMPLATE_HOOKS / "tool_check.py"
 REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
+LEDGER_REFERENCE = TEMPLATE_HOOKS.parents[1] / "_ledger"
+LEDGER_FILES = ("contract.md", "tools/airtable/identity.yaml", "tools/airtable/usage.md",
+                "tools/airtable/guard.yaml", "tools/airtable/bootstrap.py")
+RESERVED_INVARIANTS = ("no_external_send", "owner_only_send", "append_only_events", "no_schema_change")
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"
@@ -228,7 +232,7 @@ def check_tool_folder(tdir, cap, ops, invariants):
     return fails
 
 
-def check_reference_file(root, rel, reference):
+def check_reference_file(root, rel, reference, shown=None):
     """`rel` exists and is byte-identical to the builder's reference copy."""
     path = root / rel
     if not path.is_file():
@@ -237,7 +241,8 @@ def check_reference_file(root, rel, reference):
         same = reference.is_file() and path.read_bytes() == reference.read_bytes()
     except OSError:
         return [f"{rel} cannot be read"]
-    return [] if same else [f"{rel} differs from the Agent Standard reference copy (_template/{rel} in agent-builder)"]
+    where = shown or f"_template/{rel}"
+    return [] if same else [f"{rel} differs from the Agent Standard reference copy ({where} in agent-builder)"]
 
 
 def check_capability(root, cap):
@@ -264,7 +269,7 @@ def check_capability(root, cap):
     if "no_send" in invariants:
         fails.append(f"{rel}: no_send was renamed no_external_send")
     if checker is not None:
-        for inv in ("no_external_send", "owner_only_send"):
+        for inv in RESERVED_INVARIANTS:
             if inv in checker.acceptable(text):
                 fails.append(f"{rel}: {inv} cannot be marked (acceptable)")
     folder = base / "tools"
@@ -357,6 +362,28 @@ def check_activities(root, meta, caps):
     return fails
 
 
+def check_ledger(root):
+    """The standard ledger: copied files byte-identical to _ledger/, the backfill skill, a valid tables.md."""
+    fails = []
+    for rel in LEDGER_FILES:
+        fails.extend(check_reference_file(root, f"capabilities/ledger/{rel}", LEDGER_REFERENCE / rel,
+                                          shown=f"_ledger/{rel}"))
+    fails.extend(check_reference_file(root, "skills/ledger-backfill/SKILL.md",
+                                      LEDGER_REFERENCE / "skills" / "ledger-backfill" / "SKILL.md",
+                                      shown="_ledger/skills/ledger-backfill/SKILL.md"))
+    tables = root / "capabilities" / "ledger" / "tables.md"
+    if not tables.is_file():
+        return fails + ["missing capabilities/ledger/tables.md"]
+    checker = load_tool_checker()
+    if checker is None:
+        return fails + ["validator cannot load its tool checker (_template/hooks/tool_check.py)"]
+    try:
+        _, _, problems = checker.parse_tables(read_text(tables))
+    except ReadError as err:
+        return fails + [f"capabilities/ledger/tables.md: {err}"]
+    return fails + [f"capabilities/ledger/tables.md: {p}" for p in problems]
+
+
 def check_tools(root, meta):
     """Guard hook and engine, capability contracts, tools, guard policies."""
     fails = []
@@ -377,6 +404,8 @@ def check_tools(root, meta):
         else:
             fails.extend(check_reference_file(root, "skills/add-tool/SKILL.md", REFERENCE_ADD_TOOL))
     fails.extend(check_activities(root, meta, caps))
+    if "ledger" in caps:
+        fails.extend(check_ledger(root))
     for cap in caps:
         if not SNAKE.match(cap):
             fails.append(f"agent.yaml: capability '{cap}' is not snake_case")
@@ -490,6 +519,40 @@ def check(root):
     return fails
 
 
+def ledger_diff(old_text, new_text):
+    """FAIL messages for a tables.md change that is not additive, or not versioned."""
+    if old_text == new_text:
+        return []
+    checker = load_tool_checker()
+    if checker is None:
+        return ["validator cannot load its tool checker (_template/hooks/tool_check.py)"]
+    old_schema, old_tables, _ = checker.parse_tables(old_text)
+    new_schema, new_tables, problems = checker.parse_tables(new_text)
+    rel = "capabilities/ledger/tables.md"
+    if problems:
+        return []  # reported by check_ledger
+    fails = []
+    if old_schema is not None and (new_schema or 0) <= old_schema:
+        fails.append(f"{rel} changed but ledger_schema is still {new_schema}")
+    for name, table in old_tables.items():
+        if name not in new_tables:
+            fails.append(f"{rel}: table {name} was removed")
+            continue
+        for field, (ftype, options) in table["fields"].items():
+            new = new_tables[name]["fields"].get(field)
+            if new is None:
+                fails.append(f"{rel}: {name}.{field} was removed or renamed; ledger changes are additive only")
+            elif new[0] != ftype:
+                fails.append(f"{rel}: {name}.{field} changed type from {ftype} to {new[0]}")
+            else:
+                for option in options:
+                    if option not in new[1]:
+                        fails.append(f"{rel}: {name}.{field} lost option {option}")
+        if table["key"] != new_tables[name]["key"]:
+            fails.append(f"{rel}: table {name} changed its key from {table['key']} to {new_tables[name]['key']}")
+    return fails
+
+
 def get(key, source):
     """Print agent.yaml's top-level `key` from a path or '-' (stdin)."""
     if source == "-":
@@ -507,6 +570,16 @@ def get(key, source):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[0] == "--ledger-diff":
+        try:
+            old = sys.stdin.read() if argv[1] == "-" else read_text(pathlib.Path(argv[1]))
+            new = read_text(pathlib.Path(argv[2]))
+        except ReadError as err:
+            print(f"FAIL: capabilities/ledger/tables.md: {err}")
+            return 0
+        for message in ledger_diff(old, new):
+            print(f"FAIL: {message}")
+        return 0
     if len(argv) == 3 and argv[0] == "--get":
         get(argv[1], argv[2])
         return 0

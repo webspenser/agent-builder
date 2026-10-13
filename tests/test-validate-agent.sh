@@ -17,7 +17,7 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete ag
   for a in CLAUDE GEMINI AGENTS; do echo "Read \`AGENT.md\` in this directory." > "$d/hosts/$a.md"; done
   echo '#!/usr/bin/env bash' > "$d/install.sh"; chmod +x "$d/install.sh"
   echo '# Cases' > "$d/evals/cases.md"
-  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "7.0"' 'capabilities: crm' > "$d/agent.yaml"
+  printf '%s\n' "name: $name" "version: $ver" "description: A demo agent" 'standard: "7.1"' 'capabilities: crm' > "$d/agent.yaml"
   printf '{"name":"%s","owner":{"name":"Test"},"plugins":[{"name":"%s","source":"./"}]}\n' "$name" "$name" > "$d/.claude-plugin/marketplace.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","contextFileName":"AGENT.md"}\n' "$name" "$ver" > "$d/gemini-extension.json"
   printf '{"name":"%s","version":"%s","description":"A demo agent","skills":"./skills/"}\n' "$name" "$ver" > "$d/.codex-plugin/plugin.json"
@@ -129,7 +129,7 @@ assert_pass $V "$FIX/mf-sub"
 # agent.yaml written loosely still parses (quotes, comments, blank lines, nested keys).
 make_valid_agent "$FIX/mf-loose"
 printf '%s\n' '# my agent' '' 'name: "demo-agent"   # the plugin name' \
-  "version: '0.1.0'" 'description: A demo agent' 'standard: "7.0"' \
+  "version: '0.1.0'" 'description: A demo agent' 'standard: "7.1"' \
   'capabilities: crm   # the only one' 'extra:' '  - nested' > "$FIX/mf-loose/agent.yaml"
 assert_pass $V "$FIX/mf-loose"
 
@@ -141,7 +141,7 @@ fails_with "$FIX/mf-badname" "agent.yaml: name 'Demo_Agent' is not kebab-case"
 make_valid_agent "$FIX/mf-badver" demo-agent "1.0"
 fails_with "$FIX/mf-badver" "agent.yaml: version '1.0' is not MAJOR.MINOR.PATCH"
 make_valid_agent "$FIX/mf-std20"; sed -i.bak 's/^standard:.*/standard: "3.0"/' "$FIX/mf-std20/agent.yaml"
-fails_with "$FIX/mf-std20" "agent.yaml: standard '3.0' must be \"7.0\""
+fails_with "$FIX/mf-std20" "agent.yaml: standard '3.0' must be \"7.1\""
 
 # Host manifest problems.
 make_valid_agent "$FIX/mf-nogem"; rm "$FIX/mf-nogem/gemini-extension.json"
@@ -529,8 +529,8 @@ make_valid_agent "$FIX/badagentpolicy"; printf '%s\n' 'covers: [no_external_send
 fails_with "$FIX/badagentpolicy" "guard.yaml: line 2: unknown key 'allow'"
 make_valid_agent "$FIX/dirpolicy"; rm "$FIX/dirpolicy/guard.yaml"; mkdir "$FIX/dirpolicy/guard.yaml"
 fails_with "$FIX/dirpolicy" "guard.yaml: cannot be read (Is a directory)"
-make_valid_agent "$FIX/oldstd"; sed -i.bak 's/standard: "7.0"/standard: "6.0"/' "$FIX/oldstd/agent.yaml"
-fails_with "$FIX/oldstd" "agent.yaml: standard '6.0' must be \"7.0\""
+make_valid_agent "$FIX/oldstd"; sed -i.bak 's/standard: "7.1"/standard: "7.0"/' "$FIX/oldstd/agent.yaml"
+fails_with "$FIX/oldstd" "agent.yaml: standard '7.0' must be \"7.1\""
 
 echo "-- activities"
 make_valid_agent "$FIX/act"; printf '%s\n' 'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'activity_prospect: crm' 'activity_research: none' >> "$FIX/act/agent.yaml"
@@ -582,4 +582,47 @@ make_valid_agent "$FIX/badexempt"; printf '%s\n' 'covers: [no_external_send]' 'd
 fails_with "$FIX/badexempt" "guard.yaml: exempt names crm, whose contract has no owner_only_send"
 make_valid_agent "$FIX/exemptunknown"; printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [nope]' > "$FIX/exemptunknown/guard.yaml"
 fails_with "$FIX/exemptunknown" "guard.yaml: exempt names nope, which is not in capabilities"
+echo "-- ledger"
+add_ledger() { # add_ledger <dir>: the standard ledger capability, copied as an agent would
+  local d="$1"
+  mkdir -p "$d/capabilities/ledger" "$d/skills/ledger-backfill"
+  cp -R _ledger/contract.md _ledger/tables.md _ledger/tools "$d/capabilities/ledger/"
+  cp _ledger/skills/ledger-backfill/SKILL.md "$d/skills/ledger-backfill/SKILL.md"
+  sed -i.bak 's/^capabilities: crm$/capabilities: crm, ledger/' "$d/agent.yaml"; rm -f "$d/agent.yaml.bak"
+}
+make_valid_agent "$FIX/led-good"; add_ledger "$FIX/led-good"
+assert_pass bin/validate-agent.sh "$FIX/led-good"
+make_valid_agent "$FIX/led-edit"; add_ledger "$FIX/led-edit"; echo '# local edit' >> "$FIX/led-edit/capabilities/ledger/tools/airtable/guard.yaml"
+fails_with "$FIX/led-edit" "capabilities/ledger/tools/airtable/guard.yaml differs from the Agent Standard reference copy (_ledger/tools/airtable/guard.yaml in agent-builder)"
+make_valid_agent "$FIX/led-noskill"; add_ledger "$FIX/led-noskill"; rm -r "$FIX/led-noskill/skills/ledger-backfill"
+fails_with "$FIX/led-noskill" "missing skills/ledger-backfill/SKILL.md"
+make_valid_agent "$FIX/led-collide"; add_ledger "$FIX/led-collide"
+printf '%s\n' 'ledger_schema: 2' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Outcome | singleLineText | |' > "$FIX/led-collide/capabilities/ledger/tables.md"
+fails_with "$FIX/led-collide" "capabilities/ledger/tables.md: Cells.Outcome has the same name as the Events field Outcome"
+make_valid_agent "$FIX/led-tables-own"; add_ledger "$FIX/led-tables-own"
+printf '%s\n' 'ledger_schema: 2' '## Cells' 'key: Cell' '| Cell | singleLineText | |' > "$FIX/led-tables-own/capabilities/ledger/tables.md"
+assert_pass bin/validate-agent.sh "$FIX/led-tables-own"
+make_valid_agent "$FIX/led-accept"
+printf '%s\n' '- `append_only_events` (acceptable) — x' >> "$FIX/led-accept/capabilities/crm/contract.md"
+fails_with "$FIX/led-accept" "capabilities/crm/contract.md: append_only_events cannot be marked (acceptable)"
+echo "-- ledger schema stays additive"
+ledger_repo() { # ledger_repo <dir> <tables.md lines...>: a committed agent with a ledger, then new tables.md lines in the work tree
+  local d="$1"; shift
+  make_valid_agent "$d"; add_ledger "$d"
+  printf '%s\n' 'ledger_schema: 2' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | number | |' > "$d/capabilities/ledger/tables.md"
+  git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.name=t -c user.email=t@t commit -qm base
+  printf '%s\n' "$@" > "$d/capabilities/ledger/tables.md"
+  sed -i.bak 's/^version: 0.1.0/version: 0.2.0/' "$d/agent.yaml"; rm -f "$d/agent.yaml.bak"; sync_agents "$d" demo-agent 0.2.0
+  sed -i.bak 's/"version":"0.1.0"/"version":"0.2.0"/' "$d/gemini-extension.json" "$d/.codex-plugin/plugin.json"; rm -f "$d"/*.bak "$d"/.codex-plugin/*.bak
+}
+ledger_repo "$FIX/led-add" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | number | |' '| Yield | number | |'
+assert_pass bin/validate-agent.sh "$FIX/led-add" --require-bump HEAD
+ledger_repo "$FIX/led-nobump" 'ledger_schema: 2' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | number | |' '| Yield | number | |'
+fails_with "$FIX/led-nobump" "capabilities/ledger/tables.md changed but ledger_schema is still 2" --require-bump HEAD
+ledger_repo "$FIX/led-drop" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell | singleLineText | |'
+fails_with "$FIX/led-drop" "capabilities/ledger/tables.md: Cells.Runs was removed or renamed; ledger changes are additive only" --require-bump HEAD
+ledger_repo "$FIX/led-retype" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | singleLineText | |'
+fails_with "$FIX/led-retype" "capabilities/ledger/tables.md: Cells.Runs changed type from number to singleLineText" --require-bump HEAD
+ledger_repo "$FIX/led-droptable" 'ledger_schema: 3'
+fails_with "$FIX/led-droptable" "capabilities/ledger/tables.md: table Cells was removed" --require-bump HEAD
 finish
