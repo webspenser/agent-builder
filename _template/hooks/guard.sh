@@ -56,7 +56,8 @@ rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match o
 # whatever the server. A dangling symlink or a directory still reaches the
 # engine, which fails closed on it. A capability the policy lists in exempt:
 # lifts its deny for the bound tool's server, but only while that tool's own
-# guard.yaml covers owner_only_send; the bind_ loop below still enforces it.
+# guard.yaml covers owner_only_send and its pinned bindings file matches the
+# pushed copy; the bind_ loop below still enforces the tool policy.
 apolicy="$root/guard.yaml"
 if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
   engine="$root/hooks/guard_policy.py"
@@ -72,7 +73,18 @@ if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
     case "$ematch" in ''|*[!a-z0-9_-]*) continue ;; esac
     [ -f "$etdir/guard.yaml" ] && [ ! -L "$etdir/guard.yaml" ] || continue
     python3 "$engine" --covers "$etdir/guard.yaml" 2>/dev/null | grep -qx owner_only_send || continue
-    case "$rest_lc" in *"$ematch"*) set -- "$@" --exempt "$ematch" ;; esac
+    case "$rest_lc" in *"$ematch"*) ;; *) continue ;; esac
+    # The agent can write bindings/, so the pinned values the tool policy
+    # trusts must be tracked and identical to the upstream (pushed) copy.
+    bpath="bindings/$ecap.md"
+    bmsg="$bpath must be committed and pushed before $ecap can send (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"
+    [ ! -L "$instance/$bpath" ] || ablock "$bmsg"
+    command -v git >/dev/null 2>&1 || ablock "$bmsg"
+    git -C "$instance" rev-parse --is-inside-work-tree </dev/null >/dev/null 2>&1 || ablock "$bmsg"
+    git -C "$instance" ls-files --error-unmatch -- "$bpath" </dev/null >/dev/null 2>&1 || ablock "$bmsg"
+    git -C "$instance" rev-parse --abbrev-ref --symbolic-full-name '@{u}' </dev/null >/dev/null 2>&1 || ablock "$bmsg"
+    git -C "$instance" diff --quiet '@{u}' -- "$bpath" </dev/null >/dev/null 2>&1 || ablock "$bmsg"
+    set -- "$@" --exempt "$ematch"
   done
   printf '%s' "$input" | python3 "$engine" "$@"; rc=$?
   if [ "$rc" -ne 0 ]; then
