@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.0. It is in active development: agents track
+The standard is 7.1. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.0"`.
+`agent.yaml`, and the validator requires `standard: "7.1"`.
 
 ## Directory layout
 
@@ -23,6 +23,7 @@ agent-builder/
   README.md                 # what this folder is, how to use a spec
   STANDARD.md               # the Agent Standard
   _template/                # empty skeleton, copy to start an agent
+  _ledger/                  # the standard ledger capability, copied into agents that use it
   <agent-name>/
     agent.yaml              # identity + standard version
     hooks/                  # hooks.json and five scripts, from _template
@@ -231,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.0"                # the Agent Standard version followed
+standard: "7.1"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -346,6 +347,9 @@ mailbox. The package describes it in two layers:
   interactive setup (the business owner). Neither can be marked
   `(acceptable)`, and a contract may not list both. The id `no_send`
   was renamed `no_external_send` in 7.0 and is an error.
+  Two more ids are reserved for the ledger: `append_only_events` and
+  `no_schema_change` (see Ledger). None of the four can be marked
+  `(acceptable)`.
 - `capabilities/<capability>/tools/<tool>/` — one folder per system
   (see Tools).
 
@@ -849,6 +853,48 @@ optional attributes, `field_<name>` IDs — goes in the instance's
 the agent offers setup's tools step instead of calling anything.
 Credentials stay in the host.
 
+## Ledger
+
+An agent may keep a ledger: a record of what it did, in a store the
+business owns, plus state it reads back between runs. The builder
+ships the standard capability at `_ledger/`. An agent that uses it
+lists `ledger` in `capabilities`, copies `_ledger/contract.md` and
+`_ledger/tools/` into `capabilities/ledger/`, and
+`_ledger/skills/ledger-backfill/` into `skills/`. Those files stay
+byte-identical to the builder's. The agent owns
+`capabilities/ledger/tables.md`: its `ledger_schema` version and the
+tables it declares besides `Events`.
+
+- **`Events`** is the same in every agent: `Key` (formula, primary),
+  `At`, `Recorded At` (created time), `Run ID`, `Seq`, `Activity`,
+  `Trigger`, `Event`, `Subject`, `Outcome`, `Items In`, `Items Out`,
+  `Cost USD`, `Duration s`, `Detail`, `Agent Version`, `Backfilled`.
+  The list, with types, is `LEDGER_EVENTS` in `hooks/tool_check.py`.
+- **`tables.md`**: `ledger_schema: <n>`, then per table a `## <Name>`
+  heading, a `key: <Field>` line and a `| Field | Type | Options |`
+  table. No table named `Events`; no field whose name, normalized,
+  equals an `Events` field.
+- **Schema changes** are additive only and made only by the tool's
+  `bootstrap.py`, never over MCP. The script creates missing tables
+  and fields; a missing select option or a field of the wrong type
+  stops it with an error naming the manual fix, and it never deletes,
+  renames or retypes anything. With `--require-bump`, the validator
+  fails a `tables.md` change that does not raise `ledger_schema`, or
+  that removes, renames or retypes a table, field or select option, or
+  changes a table's key.
+- **Invariants**: `append_only_events` (a tool covering it needs
+  `bound_keys_only: true` and a `forbid: update` rule for every
+  writable `Events` field), `no_delete`, and `no_schema_change` (a
+  tool covering it must refuse `typecast`).
+- **Bindings**: the probe writes `base_id`, `table_<name>`,
+  `field_<name>` for every written field (every `Events` field except
+  the computed `Key` and `Recorded At`, and the agent tables' fields),
+  and `ledger_schema`.
+- **Gate**: a scheduled activity using a capability with
+  `append_only_events` needs `base_id`, a `field_<name>` line for every
+  writable `Events` field, and `ledger_schema` equal to the package's.
+- **Failure policy**: in `_ledger/contract.md`.
+
 ## Guard hook
 
 `hooks/guard.sh` and `hooks/guard_policy.py`, each byte-identical to the
@@ -1183,7 +1229,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.0"`.
+- `agent.yaml` exists, and its `standard` is `"7.1"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -1212,11 +1258,25 @@ The validator checks:
   patterns must match each of `execute_workflow`, `create_workflow_from_code`, `update_workflow`, `archive_workflow`, `publish_workflow`, `unpublish_workflow`, `test_workflow` and `restore_workflow_version` (ignoring case; a broad pattern
   counts): `<tool folder> is wrapped in n8n, so guard.yaml at the root
   must deny <tool>`.
-- No contract marks `no_external_send` or `owner_only_send`
-  `(acceptable)`: `<invariant> cannot be marked (acceptable)`.
+- No contract marks `no_external_send`, `owner_only_send`,
+  `append_only_events` or `no_schema_change` `(acceptable)`: `<invariant> cannot be marked (acceptable)`.
 - No contract lists `no_send`: `no_send was renamed no_external_send`.
   No contract lists both `no_external_send` and `owner_only_send`
   (reported by `tool_check.py` for each tool).
+- An agent that lists `ledger` in `capabilities` has
+  `capabilities/ledger/contract.md`, `tools/airtable/identity.yaml`,
+  `usage.md`, `guard.yaml` and `bootstrap.py`, and
+  `skills/ledger-backfill/SKILL.md`, each byte-identical to the
+  builder's `_ledger/` copy.
+- That agent's `capabilities/ledger/tables.md` is valid: a positive
+  integer `ledger_schema`, no table named `Events`, no field named like
+  an `Events` field, field types from the allowed list, select fields
+  with options, and a `key:` naming a declared field in every table.
+- With `--require-bump <ref>`, a `tables.md` that differs from the one
+  at the ref must raise `ledger_schema` and change nothing but by
+  addition.
+- A tool covering `append_only_events` or `no_schema_change` has the
+  `guard.yaml` rules listed under Ledger.
 - `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
   most 25 lines and pointing at `AGENT.md`.
 - An agent with capabilities ships `skills/add-tool/SKILL.md`,

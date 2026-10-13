@@ -499,6 +499,11 @@ a mistake nor text the agent reads on a website can add a recipient. An
 agent that tampers with its own repository's git data is outside what
 this check can stop.
 
+An agent can keep a ledger: every run writes what it did to an Airtable
+base the business owns. The guard lets the agent add rows to that record
+but never change or delete one, and never change the base's structure,
+so the record can be trusted as an audit trail.
+
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a
 HubSpot create) and whether that tool creates or updates. Without it the
