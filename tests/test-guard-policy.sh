@@ -293,11 +293,11 @@ run 0 "case and spaces ignored" mcp__resend__send-email '{"to":[" Owner@ACME.com
 run 0 "string to, not a list" mcp__resend__send-email '{"to":"ops@acme.com","from":"no-reply@acme.com"}' "" "$W/b.md"
 run 0 "null cc counts as absent" mcp__resend__send-email '{"to":["owner@acme.com"],"cc":null,"from":"no-reply@acme.com"}' "" "$W/b.md"
 run 0 "backtick-quoted binding matches" mcp__resend__send-email '{"to":["ops@acme.com"],"from":"no-reply@acme.com"}' "" "$W/b.md"
-run 2 "other recipient blocked" mcp__resend__send-email '{"to":["lead@prospect.com"],"from":"no-reply@acme.com"}' "lead@prospect.com is not a pinned recipient (recipient_email)" "$W/b.md"
-run 2 "extra bcc blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"bcc":["lead@prospect.com"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
-run 2 "display-name form blocked" mcp__resend__send-email '{"to":["Owner <owner@acme.com>"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
-run 2 "other sender blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"me@acme.com"}' "me@acme.com is not a pinned recipient (sender_email)" "$W/b.md"
-run 2 "no recipient blocked" mcp__resend__send-email '{"from":"no-reply@acme.com"}' "send-email names no recipient at to, cc, bcc" "$W/b.md"
+run 2 "other recipient blocked" mcp__resend__send-email '{"to":["lead@prospect.com"],"from":"no-reply@acme.com"}' "lead@prospect.com is not a pinned value (recipient_email)" "$W/b.md"
+run 2 "extra bcc blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"bcc":["lead@prospect.com"],"from":"no-reply@acme.com"}' "is not a pinned value" "$W/b.md"
+run 2 "display-name form blocked" mcp__resend__send-email '{"to":["Owner <owner@acme.com>"],"from":"no-reply@acme.com"}' "is not a pinned value" "$W/b.md"
+run 2 "other sender blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"me@acme.com"}' "me@acme.com is not a pinned value (sender_email)" "$W/b.md"
+run 2 "no recipient blocked" mcp__resend__send-email '{"from":"no-reply@acme.com"}' "send-email names no pinned value at to, cc, bcc" "$W/b.md"
 run 2 "object recipient blocked" mcp__resend__send-email '{"to":{"email":"owner@acme.com"},"from":"no-reply@acme.com"}' "cannot check this call" "$W/b.md"
 run 2 "no binding line blocks" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "no recipient_email line in bindings" -
 printf '%s\n' 'recipient_email: Owner <owner@acme.com>' 'sender_email: no-reply@acme.com' > "$W/b2.md"
@@ -376,5 +376,29 @@ for t in delete_records_for_table create_field update_field create_table update_
 done
 run 0 "read records" ${A}list_records_for_table "{$R}" "" "$LB" airtable
 run 0 "read schema" ${A}list_tables_for_base '{"baseId":"appAAAAAAAAAAAAAA"}' "" "$LB" airtable
+
+echo "-- pinned values (numbers)"
+policy 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places'
+PB="$W/pins.md"; printf '%s\n' 'max_places: 60' > "$PB"
+run 0 "number equal to binding"   mcp__apify__run-maps '{"maxPlaces":60}'    "" "$PB"
+run 0 "float equal to binding"    mcp__apify__run-maps '{"maxPlaces":60.0}'  "" "$PB"
+run 0 "numeric string"            mcp__apify__run-maps '{"maxPlaces":"60"}'  "" "$PB"
+run 0 "numeric string, spaces"    mcp__apify__run-maps '{"maxPlaces":" 60 "}' "" "$PB"
+run 2 "larger number blocks"      mcp__apify__run-maps '{"maxPlaces":5000}'  "5000 is not a pinned value (max_places)" "$PB"
+run 2 "boolean blocks"            mcp__apify__run-maps '{"maxPlaces":true}'  "a pinned value must be a string, a number, or a list of them" "$PB"
+printf '%s\n' 'max_places: 1' > "$W/pins1.md"
+run 2 "true never equals 1"       mcp__apify__run-maps '{"maxPlaces":true}'  "a pinned value must be a string, a number, or a list of them" "$W/pins1.md"
+run 2 "object blocks"             mcp__apify__run-maps '{"maxPlaces":{"n":60}}' "a pinned value must be a string, a number, or a list of them" "$PB"
+run 2 "nested list blocks"        mcp__apify__run-maps '{"maxPlaces":[[60]]}' "a pinned value must be a string, a number, or a list of them" "$PB"
+run 0 "list of equal numbers"     mcp__apify__run-maps '{"maxPlaces":[60, 60.0]}' "" "$PB"
+run 2 "missing argument blocks"   mcp__apify__run-maps '{}'                  "run-maps names no pinned value at maxPlaces" "$PB"
+printf '%s\n' 'max_places: sixty' > "$W/pinsx.md"
+run 2 "non-numeric binding never equals a number" mcp__apify__run-maps '{"maxPlaces":60}' "60 is not a pinned value (max_places)" "$W/pinsx.md"
+echo "-- --pins"
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); [ "$OUT" = "max_places" ] && _report ok "--pins prints the bound key" || _report no "--pins: $OUT"
+policy 'covers: [x]' 'deny: ["*a*"]'
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins prints nothing without recipients" || _report no "--pins empty (rc=$rc): $OUT"
+printf 'covers: [x\n' > "$W/guard.yaml"
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 1 ] && printf '%s' "$OUT" | grep -q '^FAIL:' && _report ok "--pins on a bad policy fails" || _report no "--pins bad (rc=$rc): $OUT"
 
 finish

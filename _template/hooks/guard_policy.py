@@ -6,6 +6,7 @@ Usage:
   guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]... agent policy; hook input on stdin
   guard_policy.py --exempt-caps <agent guard.yaml>                          print each exempt capability
   guard_policy.py --covers <tool guard.yaml>                                print each covers id
+  guard_policy.py --pins <tool guard.yaml>                                  print each bound key the policy pins
   guard_policy.py --check [--agent] <guard.yaml>                            parse only
 
 Decides one PreToolUse call against one tool's guard policy (or, with
@@ -16,7 +17,7 @@ With server_match, `allow` only counts a tool-name suffix whose server segment
 "mcp__attio__purge__get-x" cannot ride on `allow: [get-*]`; `deny` still checks
 every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset (a `writes:` list says where values
-sit; `rules:` constrain them; `recipients:` pins send arguments to values recorded
+sit; `rules:` constrain them; `recipients:` pins argument values (text or numbers) to values recorded
 in bindings); see STANDARD.md "Guard policy".
 """
 import fnmatch
@@ -369,19 +370,34 @@ def _maps_at(obj, path):
     return nodes
 
 
-def _addresses_at(obj, path):
-    """Recipient strings at path: a string is one, a list of strings is its items, null is absent."""
+def _pinned_at(obj, path):
+    """Pinned values at path: a string or a number is one, a list of them is its items, null is absent.
+    Booleans, objects and nested lists fail closed."""
+    def scalar(x):
+        return isinstance(x, str) or (isinstance(x, (int, float)) and not isinstance(x, bool))
     out = []
     for node in _walk(obj, path):
         if node is None:
             continue
-        if isinstance(node, str):
+        if scalar(node):
             out.append(node)
-        elif isinstance(node, list) and all(isinstance(x, str) for x in node):
+        elif isinstance(node, list) and all(scalar(x) for x in node):
             out.extend(node)
         else:
-            raise PolicyError(f"{path}: a recipient must be a string or a list of strings")
+            raise PolicyError(f"{path}: a pinned value must be a string, a number, or a list of them")
     return out
+
+
+def _as_number(value):
+    """value as a float when it is a number or a numeric string, else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        return None
 
 
 def _leaves(value, unwrap):
@@ -426,18 +442,25 @@ def _printable(value):
 
 
 def _recipient_problems(shown, entry, args, bindings):
-    values = [v for path in entry["at"] for v in _addresses_at(args, path)]
+    values = [v for path in entry["at"] for v in _pinned_at(args, path)]
     if not values:
-        return [f"{shown} names no recipient at {', '.join(entry['at'])}"]
+        return [f"{shown} names no pinned value at {', '.join(entry['at'])}"]
     bound = entry["bound"]
     pinned = bindings.get(bound) or set()
     if not pinned:
         return [f"no {bound} line in bindings; re-run setup's tools step"]
     if not all(BARE_VALUE.match(p) for p in pinned):
         return [f"{bound} must be a bare value"]
-    allowed = {p.strip().lower() for p in pinned}
-    return [f"{_printable(v)} is not a pinned recipient ({bound})"
-            for v in values if v.strip().lower() not in allowed]
+    texts = {p.strip().lower() for p in pinned}
+    numbers = {n for n in (_as_number(p) for p in pinned) if n is not None}
+
+    def ok(v):
+        if isinstance(v, str) and v.strip().lower() in texts:
+            return True
+        n = _as_number(v)
+        return n is not None and n in numbers
+
+    return [f"{_printable(v)} is not a pinned value ({bound})" for v in values if not ok(v)]
 
 
 def problems(policy, event, bindings, server_match=None):
@@ -574,6 +597,19 @@ def main(argv):
         return _print_list(argv[1], parse_agent, "exempt")
     if len(argv) == 2 and argv[0] == "--covers":
         return _print_list(argv[1], parse, "covers")
+    if len(argv) == 2 and argv[0] == "--pins":
+        try:
+            with open(argv[1], encoding="utf-8") as fh:
+                policy = parse(fh.read())
+        except Exception as err:  # never a traceback
+            print(f"FAIL: {type(err).__name__}: {err}")
+            return 1
+        seen = []
+        for entry in policy.get("recipients", []):
+            if entry["bound"] not in seen:
+                seen.append(entry["bound"])
+        print("\n".join(seen)) if seen else None
+        return 0
     if len(argv) == 3 and argv[0] == "--check" and argv[1] == "--agent":
         try:
             with open(argv[2], encoding="utf-8") as fh:

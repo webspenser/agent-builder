@@ -200,7 +200,7 @@ git init -q --bare "$W/notify-remote.git"
 git -C "$X" init -q; git -C "$X" add instance.yaml bindings/owner_notify.md; git -C "$X" commit -q -m init
 git -C "$X" remote add origin "$W/notify-remote.git"; git -C "$X" push -q -u origin HEAD 2>/dev/null
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "owner send passes"
-run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "other recipient blocked by tool policy" "lead@x.com is not a pinned recipient"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "other recipient blocked by tool policy" "lead@x.com is not a pinned value"
 mkpin() { # mkpin <dir> [no-bindings]: instance repo pushed to its own bare remote
   mkdir -p "$1/bindings"; cp "$X/instance.yaml" "$1/"
   [ -n "${2:-}" ] || cp "$X/bindings/owner_notify.md" "$1/bindings/"
