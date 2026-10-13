@@ -244,6 +244,27 @@ run_guard "$D" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com
 R="$W/notify-deleted"; mkpin "$R"; git -C "$R" rm -q bindings/owner_notify.md; git -C "$R" commit -q -m rm; git -C "$R" push -q 2>/dev/null
 cp "$X/bindings/owner_notify.md" "$R/bindings/"
 run_guard "$R" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "file deleted at upstream: blocked" "$PINMSG"
+# A promisor remote must never be asked to fetch (it could run a repo-configured program).
+promisor() { # promisor <repo> <url>: tracking ref -> a commit whose tree is missing
+  local fake=1111111111111111111111111111111111111111 c br
+  c=$(printf 'tree %s\nauthor t <t@e> 0 +0000\ncommitter t <t@e> 0 +0000\n\nx\n' "$fake" | git -C "$1" hash-object -t commit -w --literally --stdin)
+  br=$(git -C "$1" branch --show-current); git -C "$1" update-ref "refs/remotes/origin/$br" "$c"
+  git -C "$1" config core.repositoryformatversion 1; git -C "$1" config extensions.partialClone origin
+  git -C "$1" config remote.origin.promisor true; git -C "$1" config remote.origin.url "$2"
+}
+L="$W/notify-lazy"; mkpin "$L"; promisor "$L" "remote.invalid:/y"
+git -C "$L" config core.sshCommand "touch '$W/transport-ran'; false"
+run_guard "$L" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "promisor remote with core.sshCommand: blocked" "$PINMSG"
+[ ! -e "$W/transport-ran" ] && _report ok "core.sshCommand never ran" || _report no "core.sshCommand ran (lazy fetch)"
+E="$W/notify-ext"; mkpin "$E"; promisor "$E" "ext::sh -c touch\\ $W/ext-ran"
+git -C "$E" config protocol.ext.allow always
+run_guard "$E" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "promisor ext:: remote: blocked" "$PINMSG"
+[ ! -e "$W/ext-ran" ] && _report ok "ext:: transport never ran" || _report no "ext:: transport ran (lazy fetch)"
+Q="$W/notify-trick"; mkpin "$Q"; mkdir -p "$Q/notify-trick/bindings"
+printf '%s\n' 'recipient_email: owner@acme.com' 'recipient_email: lead@x.com' > "$Q/notify-trick/bindings/owner_notify.md"
+git -C "$Q" add -A; git -C "$Q" commit -q -m trick; git -C "$Q" push -q 2>/dev/null
+cp "$Q/notify-trick/bindings/owner_notify.md" "$Q/bindings/owner_notify.md"; git -C "$Q" config core.worktree "$W"
+run_guard "$Q" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "core.worktree cannot redirect the upstream path" "$PINMSG"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-broadcast '{}')";                     expect 2 "tool outside allow still blocked" "send-broadcast is denied"
 run_guard "$X" "$(call mcp__claude_ai_Slack__slack_send_message '{}')";                  expect 2 "other servers keep the agent deny" "Blocked by demo-agent agent guard policy: slack_send_message is denied"
 run_guard "$X" "$(call mcp__claude_ai_Slack__mailer_send '{}')";                         expect 2 "another server's tool containing the match is still blocked" "agent guard policy: mailer_send is denied"

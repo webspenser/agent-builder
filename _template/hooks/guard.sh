@@ -78,19 +78,21 @@ if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
     python3 "$engine" --covers "$etdir/guard.yaml" 2>/dev/null | grep -qx owner_only_send || continue
     case "$rest_lc" in *"$ematch"*) ;; *) continue ;; esac
     # The agent can write bindings/, so the pinned values the tool policy
-    # trusts must equal the upstream (pushed) copy. Limit: this stops edits
-    # and unpushed commits; an agent that rewrites the instance repo's own
-    # tracking refs or remote config can still defeat it. Git runs with no
-    # system config, no replace refs and fsmonitor off, and reads the upstream
-    # blob's bytes directly: no diff drivers, filters or hooks from .git/config.
+    # trusts must equal the upstream (pushed) copy: this stops edits and
+    # unpushed commits. Git runs with system config off, replace objects off,
+    # fsmonitor off, lazy fetch off and every transport refused, and reads the
+    # upstream blob's bytes directly (no diff drivers or clean filters). It
+    # does not stop an agent that edits .git itself: rewriting tracking refs
+    # or the branch's upstream/remote config, core.worktree, a .git gitfile
+    # pointing elsewhere, or objects/info/alternates can still defeat it.
     bpath="bindings/$ecap.md"
     bmsg="$bpath must be committed and pushed before $ecap can send (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"
     [ -f "$instance/$bpath" ] && [ ! -L "$instance/$bpath" ] || ablock "$bmsg"
     command -v git >/dev/null 2>&1 || ablock "$bmsg"
-    ugit() { GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false "$@" </dev/null; }
+    ugit() { GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false -c protocol.allow=never "$@" </dev/null; }
     ugit rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 || ablock "$bmsg"
-    ugit cat-file -e "@{u}:./$bpath" >/dev/null 2>&1 || ablock "$bmsg"
-    ugit cat-file blob "@{u}:./$bpath" 2>/dev/null | cmp -s - "$instance/$bpath" || ablock "$bmsg"
+    ugit cat-file -e "@{u}:$bpath" >/dev/null 2>&1 || ablock "$bmsg"
+    ugit cat-file blob "@{u}:$bpath" 2>/dev/null | cmp -s - "$instance/$bpath" || ablock "$bmsg"
     set -- "$@" --exempt "$ematch"
   done
   printf '%s' "$input" | python3 "$engine" "$@"; rc=$?
