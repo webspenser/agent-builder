@@ -605,4 +605,24 @@ assert_pass bin/validate-agent.sh "$FIX/led-tables-own"
 make_valid_agent "$FIX/led-accept"
 printf '%s\n' '- `append_only_events` (acceptable) — x' >> "$FIX/led-accept/capabilities/crm/contract.md"
 fails_with "$FIX/led-accept" "capabilities/crm/contract.md: append_only_events cannot be marked (acceptable)"
+echo "-- ledger schema stays additive"
+ledger_repo() { # ledger_repo <dir> <tables.md lines...>: a committed agent with a ledger, then new tables.md lines in the work tree
+  local d="$1"; shift
+  make_valid_agent "$d"; add_ledger "$d"
+  printf '%s\n' 'ledger_schema: 2' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | number | |' > "$d/capabilities/ledger/tables.md"
+  git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.name=t -c user.email=t@t commit -qm base
+  printf '%s\n' "$@" > "$d/capabilities/ledger/tables.md"
+  sed -i.bak 's/^version: 0.1.0/version: 0.2.0/' "$d/agent.yaml"; rm -f "$d/agent.yaml.bak"; sync_agents "$d" demo-agent 0.2.0
+  sed -i.bak 's/"version":"0.1.0"/"version":"0.2.0"/' "$d/gemini-extension.json" "$d/.codex-plugin/plugin.json"; rm -f "$d"/*.bak "$d"/.codex-plugin/*.bak
+}
+ledger_repo "$FIX/led-add" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | number | |' '| Yield | number | |'
+assert_pass bin/validate-agent.sh "$FIX/led-add" --require-bump HEAD
+ledger_repo "$FIX/led-nobump" 'ledger_schema: 2' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | number | |' '| Yield | number | |'
+fails_with "$FIX/led-nobump" "capabilities/ledger/tables.md changed but ledger_schema is still 2" --require-bump HEAD
+ledger_repo "$FIX/led-drop" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell | singleLineText | |'
+fails_with "$FIX/led-drop" "capabilities/ledger/tables.md: Cells.Runs was removed or renamed; ledger changes are additive only" --require-bump HEAD
+ledger_repo "$FIX/led-retype" 'ledger_schema: 3' '## Cells' 'key: Cell' '| Cell | singleLineText | |' '| Runs | singleLineText | |'
+fails_with "$FIX/led-retype" "capabilities/ledger/tables.md: Cells.Runs changed type from number to singleLineText" --require-bump HEAD
+ledger_repo "$FIX/led-droptable" 'ledger_schema: 3'
+fails_with "$FIX/led-droptable" "capabilities/ledger/tables.md: table Cells was removed" --require-bump HEAD
 finish

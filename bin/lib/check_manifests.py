@@ -519,6 +519,40 @@ def check(root):
     return fails
 
 
+def ledger_diff(old_text, new_text):
+    """FAIL messages for a tables.md change that is not additive, or not versioned."""
+    if old_text == new_text:
+        return []
+    checker = load_tool_checker()
+    if checker is None:
+        return ["validator cannot load its tool checker (_template/hooks/tool_check.py)"]
+    old_schema, old_tables, _ = checker.parse_tables(old_text)
+    new_schema, new_tables, problems = checker.parse_tables(new_text)
+    rel = "capabilities/ledger/tables.md"
+    if problems:
+        return []  # reported by check_ledger
+    fails = []
+    if old_schema is not None and (new_schema or 0) <= old_schema:
+        fails.append(f"{rel} changed but ledger_schema is still {new_schema}")
+    for name, table in old_tables.items():
+        if name not in new_tables:
+            fails.append(f"{rel}: table {name} was removed")
+            continue
+        for field, (ftype, options) in table["fields"].items():
+            new = new_tables[name]["fields"].get(field)
+            if new is None:
+                fails.append(f"{rel}: {name}.{field} was removed or renamed; ledger changes are additive only")
+            elif new[0] != ftype:
+                fails.append(f"{rel}: {name}.{field} changed type from {ftype} to {new[0]}")
+            else:
+                for option in options:
+                    if option not in new[1]:
+                        fails.append(f"{rel}: {name}.{field} lost option {option}")
+        if table["key"] != new_tables[name]["key"]:
+            fails.append(f"{rel}: table {name} changed its key from {table['key']} to {new_tables[name]['key']}")
+    return fails
+
+
 def get(key, source):
     """Print agent.yaml's top-level `key` from a path or '-' (stdin)."""
     if source == "-":
@@ -536,6 +570,16 @@ def get(key, source):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[0] == "--ledger-diff":
+        try:
+            old = sys.stdin.read() if argv[1] == "-" else read_text(pathlib.Path(argv[1]))
+            new = read_text(pathlib.Path(argv[2]))
+        except ReadError as err:
+            print(f"FAIL: capabilities/ledger/tables.md: {err}")
+            return 0
+        for message in ledger_diff(old, new):
+            print(f"FAIL: {message}")
+        return 0
     if len(argv) == 3 and argv[0] == "--get":
         get(argv[1], argv[2])
         return 0
