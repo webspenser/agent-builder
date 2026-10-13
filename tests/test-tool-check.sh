@@ -192,4 +192,16 @@ printf '%s\n' '# Notify' '' '## Operations' '' '| `notify_owner` | x |' '' '## I
 good_notify; run "$NT" "$N/contract.md"; expect 1 "both invariants refused" "a contract may not list both no_external_send and owner_only_send"
 printf '%s\n' '# Notify' '' '## Operations' '' '| `notify_owner` | x |' '' '## Invariants' '' '- `no_send` — x' > "$N/contract.md"
 good_notify; run "$NT" "$N/contract.md"; expect 1 "old name refused" "no_send was renamed no_external_send"
+echo "-- owner_only_send allow must be exact names"
+printf '%s\n' '# Notify' '' '## Operations' '' '| `notify_owner` | x |' '' '## Invariants' '' '- `owner_only_send` — x' > "$N/contract.md"
+allow_with() { good_notify; sed -i.bak "s/^allow: .*/allow: $1/" "$NT/guard.yaml"; run "$NT" "$N/contract.md"; }
+allow_with '["*"]'; expect 1 "allow * refused" "* must be an exact tool name for owner_only_send (no wildcards)"
+allow_with '[send-email, "*send*"]'; expect 1 "allow *send* refused" "*send* must be an exact tool name for owner_only_send (no wildcards)"
+allow_with '[send-email, send]'; expect 1 "bare send not pinned" "send is allowed but no recipients entry pins it"
+allow_with '[send-email, list-domains]'; expect 0 "probe-named exact read passes" "OK: "
+allow_with '[send-email, list]'; expect 1 "token must not match inside list-domains" "list is allowed but no recipients entry pins it"
+pin_with() { good_notify; printf '%s\n' 'covers: [owner_only_send]' 'allow: [send-email]' 'recipients:' "  - tools: [$1]" '    at: [to]' '    bound: r' > "$NT/guard.yaml"; run "$NT" "$N/contract.md"; }
+pin_with '"send-*"'; expect 0 "recipients glob pins send-email" "OK: "
+pin_with 'Send-Email'; expect 0 "recipients match is case-insensitive" "OK: "
+pin_with 'send_email'; expect 1 "send_email does not pin send-email" "send-email is allowed but no recipients entry pins it"
 finish

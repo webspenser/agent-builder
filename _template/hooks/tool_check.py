@@ -304,8 +304,9 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
 
 
 def check_owner_only(parsed, folder, label):
-    """owner_only_send: an allow list, at least one recipients entry, and every allowed
-    pattern either pinned by a recipients entry or named in usage.md's ## Probe as a read."""
+    """owner_only_send: an allow list of exact tool names (no wildcards), at least one recipients
+    entry, and every allowed name either pinned by a recipients entry or named as a whole token
+    in usage.md's ## Probe as a read."""
     fails = []
     if "allow" not in parsed:
         fails.append(f"{label}/guard.yaml: guard.yaml must have an allow list for owner_only_send")
@@ -313,13 +314,18 @@ def check_owner_only(parsed, folder, label):
         fails.append(f"{label}/guard.yaml: guard.yaml must pin recipients (a recipients entry) for owner_only_send")
     if fails:
         return fails
-    pinned = {p for entry in parsed["recipients"] for p in entry["tools"]}
+    # the engine's own test (guard_policy._matches): case-insensitive fnmatch of the name against an entry's tools
+    def pins(name):
+        return any(guard_policy._matches([name.lower()], entry["tools"]) for entry in parsed["recipients"])
     try:
         probe = "\n".join(section(read(folder / "usage.md"), "Probe") or [])
     except ToolError:
         probe = ""  # reported by the usage check
     for pattern in parsed["allow"]:
-        if pattern in pinned or pattern.strip("*") in probe:
+        if any(ch in pattern for ch in "*?["):
+            fails.append(f"{label}/guard.yaml: {pattern} must be an exact tool name for owner_only_send (no wildcards)")
+            continue
+        if pins(pattern) or re.search(r"(?<![\w-])" + re.escape(pattern) + r"(?![\w-])", probe):
             continue
         fails.append(f"{label}/guard.yaml: {pattern} is allowed but no recipients entry pins it "
                      "(list it under recipients, or name it in usage.md ## Probe as a read)")
