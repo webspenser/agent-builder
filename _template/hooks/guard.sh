@@ -68,22 +68,29 @@ if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
     case "$ecap" in ''|*[!a-z0-9_]*) continue ;; esac
     eprov=$(lower "$(yaml_get "$instance/instance.yaml" "bind_$ecap")")
     case "$eprov" in ''|*[!a-z0-9-]*) continue ;; esac
-    if [ "$eprov" = custom ]; then etdir="$instance/custom-tools/$ecap"; else etdir="$root/capabilities/$ecap/tools/$eprov"; fi
+    # Only a tool shipped in the package can lift the deny: custom-tools/ is
+    # instance content the agent can write, so a custom binding grants nothing.
+    [ "$eprov" != custom ] || continue
+    etdir="$root/capabilities/$ecap/tools/$eprov"
     ematch=$(lower "$(yaml_get "$etdir/identity.yaml" server_match)")
     case "$ematch" in ''|*[!a-z0-9_-]*) continue ;; esac
     [ -f "$etdir/guard.yaml" ] && [ ! -L "$etdir/guard.yaml" ] || continue
     python3 "$engine" --covers "$etdir/guard.yaml" 2>/dev/null | grep -qx owner_only_send || continue
     case "$rest_lc" in *"$ematch"*) ;; *) continue ;; esac
     # The agent can write bindings/, so the pinned values the tool policy
-    # trusts must be tracked and identical to the upstream (pushed) copy.
+    # trusts must equal the upstream (pushed) copy. Limit: this stops edits
+    # and unpushed commits; an agent that rewrites the instance repo's own
+    # tracking refs or remote config can still defeat it. Git runs with no
+    # system config, no replace refs and fsmonitor off, and reads the upstream
+    # blob's bytes directly: no diff drivers, filters or hooks from .git/config.
     bpath="bindings/$ecap.md"
     bmsg="$bpath must be committed and pushed before $ecap can send (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"
-    [ ! -L "$instance/$bpath" ] || ablock "$bmsg"
+    [ -f "$instance/$bpath" ] && [ ! -L "$instance/$bpath" ] || ablock "$bmsg"
     command -v git >/dev/null 2>&1 || ablock "$bmsg"
-    git -C "$instance" rev-parse --is-inside-work-tree </dev/null >/dev/null 2>&1 || ablock "$bmsg"
-    git -C "$instance" ls-files --error-unmatch -- "$bpath" </dev/null >/dev/null 2>&1 || ablock "$bmsg"
-    git -C "$instance" rev-parse --abbrev-ref --symbolic-full-name '@{u}' </dev/null >/dev/null 2>&1 || ablock "$bmsg"
-    git -C "$instance" diff --quiet '@{u}' -- "$bpath" </dev/null >/dev/null 2>&1 || ablock "$bmsg"
+    ugit() { GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false "$@" </dev/null; }
+    ugit rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 || ablock "$bmsg"
+    ugit cat-file -e "@{u}:./$bpath" >/dev/null 2>&1 || ablock "$bmsg"
+    ugit cat-file blob "@{u}:./$bpath" 2>/dev/null | cmp -s - "$instance/$bpath" || ablock "$bmsg"
     set -- "$@" --exempt "$ematch"
   done
   printf '%s' "$input" | python3 "$engine" "$@"; rc=$?

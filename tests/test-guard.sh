@@ -195,12 +195,18 @@ printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' 'exem
 X="$W/notify"; mkdir -p "$X/bindings"
 printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' 'bind_owner_notify: mailer' > "$X/instance.yaml"
 printf '%s\n' 'recipient_email: owner@acme.com' > "$X/bindings/owner_notify.md"
-export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 git init -q --bare "$W/notify-remote.git"
 git -C "$X" init -q; git -C "$X" add instance.yaml bindings/owner_notify.md; git -C "$X" commit -q -m init
 git -C "$X" remote add origin "$W/notify-remote.git"; git -C "$X" push -q -u origin HEAD 2>/dev/null
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "owner send passes"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "other recipient blocked by tool policy" "lead@x.com is not a pinned recipient"
+mkpin() { # mkpin <dir> [no-bindings]: instance repo pushed to its own bare remote
+  mkdir -p "$1/bindings"; cp "$X/instance.yaml" "$1/"
+  [ -n "${2:-}" ] || cp "$X/bindings/owner_notify.md" "$1/bindings/"
+  git init -q --bare "$1-remote.git"; git -C "$1" init -q; git -C "$1" add -A; git -C "$1" commit -q -m init
+  git -C "$1" remote add origin "$1-remote.git"; git -C "$1" push -q -u origin HEAD 2>/dev/null
+}
 PINMSG="bindings/owner_notify.md must be committed and pushed before owner_notify can send"
 echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "uncommitted bindings edit: blocked" "$PINMSG"
@@ -218,9 +224,39 @@ rm "$X/bindings/owner_notify.md"; ln -s "$N/bindings/owner_notify.md" "$X/bindin
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "symlinked bindings file: blocked" "$PINMSG"
 rm "$X/bindings/owner_notify.md"; git -C "$X" checkout -q -- bindings/owner_notify.md
 run_guard "$I" "$(call mcp__democrm__list-records)";                                     expect 0 "non-exempt call needs no git"
+echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"
+git -C "$X" config diff.external true; git -C "$X" config diff.trustExitCode true
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "diff.external trusting exit code cannot hide an edit" "$PINMSG"
+git -C "$X" config --unset diff.external; git -C "$X" config --unset diff.trustExitCode
+printf '%s\n' '#!/bin/sh' "touch '$W/fsmon-ran'" > "$W/fsmon.sh"; chmod 755 "$W/fsmon.sh"
+git -C "$X" config core.fsmonitor "$W/fsmon.sh"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "core.fsmonitor set: edit still blocked" "$PINMSG"
+[ ! -e "$W/fsmon-ran" ] && _report ok "core.fsmonitor program never ran" || _report no "core.fsmonitor program ran"
+git -C "$X" config --unset core.fsmonitor
+printf '%s\n' 'bindings/* filter=x' >> "$X/.git/info/attributes"
+git -C "$X" config filter.x.clean "echo recipient_email: owner@acme.com"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "a clean filter cannot hide an edit" "$PINMSG"
+git -C "$X" config --unset filter.x.clean; : > "$X/.git/info/attributes"
+git -C "$X" checkout -q -- bindings/owner_notify.md
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "config knobs removed: passes again"
+D="$W/notify-absent"; mkpin "$D" nobindings; cp "$X/bindings/owner_notify.md" "$D/bindings/"
+run_guard "$D" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "file untracked and absent at upstream: blocked" "$PINMSG"
+R="$W/notify-deleted"; mkpin "$R"; git -C "$R" rm -q bindings/owner_notify.md; git -C "$R" commit -q -m rm; git -C "$R" push -q 2>/dev/null
+cp "$X/bindings/owner_notify.md" "$R/bindings/"
+run_guard "$R" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "file deleted at upstream: blocked" "$PINMSG"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-broadcast '{}')";                     expect 2 "tool outside allow still blocked" "send-broadcast is denied"
 run_guard "$X" "$(call mcp__claude_ai_Slack__slack_send_message '{}')";                  expect 2 "other servers keep the agent deny" "Blocked by demo-agent agent guard policy: slack_send_message is denied"
-run_guard "$X" "$(call mcp__claude_ai_Slack__mailer_send '{}')";                         expect 2 "another server's tool containing the match is still blocked" "is not in the allow list"
+run_guard "$X" "$(call mcp__claude_ai_Slack__mailer_send '{}')";                         expect 2 "another server's tool containing the match is still blocked" "agent guard policy: mailer_send is denied"
+cp "$NT/guard.yaml" "$NT/guard.yaml.keep"
+printf '%s\n' 'covers: [owner_only_send]' 'recipients:' '  - tools: [send-email]' '    at: [to, cc, bcc]' '    bound: recipient_email' > "$NT/guard.yaml"
+run_guard "$X" "$(call mcp__claude_ai_Slack__mailer_send '{}')"; expect 2 "no allow list: other server's tool with the match still blocked" "agent guard policy: mailer_send is denied"
+mv "$NT/guard.yaml.keep" "$NT/guard.yaml"
+K="$W/notify-custom"; mkdir -p "$K/custom-tools/owner_notify" "$K/bindings"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' 'bind_owner_notify: custom' > "$K/instance.yaml"
+printf '%s\n' 'capability: owner_notify' 'provider: custom' 'server_match: slack' > "$K/custom-tools/owner_notify/identity.yaml"
+printf '%s\n' 'covers: [owner_only_send]' > "$K/custom-tools/owner_notify/guard.yaml"
+run_guard "$K" "$(call mcp__claude_ai_Slack__slack_send_message '{}')"; expect 2 "custom binding grants no exemption" "agent guard policy: slack_send_message is denied"
+
 sed -i.bak 's/^covers: .*/covers: [other]/' "$NT/guard.yaml"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "tool without owner_only_send: no exemption" "agent guard policy: send-email is denied"
 mv "$NT/guard.yaml.bak" "$NT/guard.yaml"

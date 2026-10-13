@@ -346,6 +346,8 @@ arun() { # arun <rc> <label> <tool_name> [exempt server_match...]
 arun 2 "send denied without exemption" mcp__claude_ai_Resend__send-email
 arun 0 "send on exempt server skips deny" mcp__claude_ai_Resend__send-email resend
 arun 2 "exemption is per server" mcp__claude_ai_Slack__slack_send_message resend
+arun 2 "exempt match in another server's tool name is still denied" mcp__claude_ai_Slack__resend_message resend
+arun 0 "exempt match in a server segment containing __" mcp__x__Resend__send resend
 arun 2 "bad exempt value blocks" mcp__claude_ai_Resend__send-email 'Re send'
 out=$(python3 "$E" --exempt-caps "$W/guard.yaml"); [ "$out" = owner_notify ] && _report ok "--exempt-caps lists capabilities" || _report no "--exempt-caps: $out"
 policy 'covers: [owner_only_send, other]' 'allow: [a]'

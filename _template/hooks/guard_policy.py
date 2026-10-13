@@ -541,14 +541,16 @@ def problems(policy, event, bindings, server_match=None):
 
 def agent_problems(policy, event, exempt=()):
     """The agent policy: deny patterns over every suffix, whatever the server,
-    except on a server exempted for an owner_only_send capability (guard.sh decides which)."""
+    except on a server exempted for an owner_only_send capability (guard.sh decides which;
+    the match must be in a server segment of the name)."""
     tool_name = event.get("tool_name")
-    names = [suffix for suffix, _ in _candidates(tool_name)]
-    rest = tool_name[5:].lower()
+    pairs = _candidates(tool_name)
+    names = [suffix for suffix, _ in pairs]
     for match in exempt:
         if not SERVER_MATCH.match(match):
             raise PolicyError(f"exempt server_match {match!r} is not [a-z0-9_-]+")
-    if any(match in rest for match in exempt):
+    # Same rule as allow: the match must sit in a server segment, not in the tool name.
+    if any(match in server for match in exempt for _, server in pairs):
         return []
     for pattern in policy["deny"]:
         if _matches(names, [pattern]):
