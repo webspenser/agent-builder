@@ -375,4 +375,23 @@ mv "$W/usage.bak" "$PKG/capabilities/crm/tools/good/usage.md"
 I="$W/nocustom"; instance "$I" custom mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
 run check "$I";                                    expect 1 "custom binding with no custom tool fails" "run the add-tool skill"
 
+echo "-- owner_notify gate"
+mkdir -p "$PKG/capabilities/owner_notify/tools/mailer"
+printf '%s\n' '# Notify' '' '## Operations' '' '| `notify_owner` | x |' '' '## Invariants' '' '- `owner_only_send` — x' > "$PKG/capabilities/owner_notify/contract.md"
+printf '%s\n' 'capability: owner_notify' 'provider: mailer' 'server_match: mailer' > "$PKG/capabilities/owner_notify/tools/mailer/identity.yaml"
+printf '%s\n' '`notify_owner`' '## Probe' 'list-domains' > "$PKG/capabilities/owner_notify/tools/mailer/usage.md"
+printf '%s\n' 'covers: [owner_only_send]' 'allow: [send-email]' 'recipients:' '  - tools: [send-email]' '    at: [to]' '    bound: recipient_email' > "$PKG/capabilities/owner_notify/tools/mailer/guard.yaml"
+cp "$PKG/agent.yaml" "$W/agent.bak"
+sed -i.bak -e 's/^capabilities: .*/capabilities: crm, email_drafts, owner_notify/' -e 's/^activity_digest: .*/activity_digest: crm, owner_notify/' "$PKG/agent.yaml"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]' > "$PKG/guard.yaml"
+G="$W/gate-notify"; instance "$G" good - 'timezone: UTC' 'schedule_digest: "Monday 08:00"'
+echo 'bind_owner_notify: mailer' >> "$G/instance.yaml"
+run check "$G" --repo acme/sales; expect 1 "missing recipient binding fails" "bindings/owner_notify.md has no recipient_email line"
+mkdir -p "$G/bindings"; echo 'recipient_email: owner@acme.com' > "$G/bindings/owner_notify.md"
+run check "$G" --repo acme/sales; expect 0 "pinned and exempt: passes" "PASS  demo-agent: digest (sales)"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' > "$PKG/guard.yaml"
+run check "$G" --repo acme/sales; expect 1 "not exempt: fails" "owner_only_send needs the agent guard policy to list owner_notify in exempt"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' > "$PKG/guard.yaml"
+mv "$W/agent.bak" "$PKG/agent.yaml"; rm -rf "$PKG/capabilities/owner_notify"
+
 finish
