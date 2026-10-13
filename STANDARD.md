@@ -659,7 +659,7 @@ validation error and, at runtime, a block.
 | `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
 | `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Pins argument values (text or numbers) to values recorded in bindings: every value at those paths must equal a `<bound>: <value>` line |
-| `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required; `required` may only be `true`). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed, unless the entry says `required: true`, which makes a path that is absent or `null` block |
+| `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required; `required` may only be `true`). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed, unless the entry says `required: true`, which makes a path that is not supplied block (see Semantics) |
 | `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, spelled exactly (no case, `_` or `-` folding; the path is walked with exact names too). Recommended over `refuse_args` for restricting arguments |
 | `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
 
@@ -757,9 +757,15 @@ validation error and, at runtime, a block.
    2. Collect the values at every `at` path, with segments compared as
       for nested `refuse_args` (folded, which only makes a cap stricter).
       `null` is skipped, and so is a path the call does not have: limits
-      cap, they do not require, unless the entry has `required: true`,
-      in which case a path with no value other than `null` blocks:
-      `<tool> names no <path>`. A wrong shape
+      cap, they do not require, unless the entry has `required: true`.
+      Then each `at` path must be supplied, else block: `<tool> names no
+      <path>`. The check walks the path with exact key names, so a
+      variant spelling (`StartUrls` for `startUrls`) does not satisfy it,
+      though that spelling is still capped by the folded check above.
+      A value of `null` is not supplied, and for kind `count` neither is
+      `[]`: the list needs at least one item. For a path ending in `[]`,
+      an empty list yields no values at all, so it blocks the same way.
+      A wrong shape
       on the way (a scalar where an object or list is expected) blocks as
       `cannot check this call`.
    3. Kind `count`: the value must be a list, else block: `<path>:

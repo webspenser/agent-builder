@@ -19,7 +19,8 @@ every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset (a `writes:` list says where values
 sit; `rules:` constrain them; `recipients:` pins argument values (text or numbers) to values recorded
 in bindings; `limits:` caps a list's length (kind count) or a number (kind max) at a value recorded in
-bindings (`required: true` also blocks a call that leaves the path out); `only_keys:` allows an object
+bindings (`required: true` also blocks a call that leaves the path out: found by exact name, and for kind
+count a non-empty list); `only_keys:` allows an object
 at a path only the keys it lists, spelled exactly (no case or `_`/`-` folding, so it agrees with the
 exact-key `recipients` paths); `refuse_args:` refuses an argument, or a nested value at a path like
 "startUrls[].payload" (names there are folded, which only makes it stricter); an only_keys allowlist is
@@ -495,6 +496,13 @@ def _only_keys_problems(shown, entry, args):
     return found
 
 
+def _supplied(args, path, kind):
+    """A required limits path is supplied only under its exact name (a variant spelling is capped by the
+    folded walk but does not satisfy `required`), and a counted list needs at least one item."""
+    nodes, _ = _walk_folded(args, path, exact=True)
+    return any(node is not None and not (kind == "count" and node == []) for node in nodes)
+
+
 def _limit_problems(shown, entry, args, bindings):
     """limits: kind count caps a list's length, kind max caps a number (at least 1), both at the one number
     bound to entry["bound"]. A path the call does not have is fine: limits cap, they do not require."""
@@ -511,7 +519,7 @@ def _limit_problems(shown, entry, args, bindings):
         nodes, mismatch = _walk_folded(args, path)
         if mismatch:
             raise PolicyError(f"{path}: unexpected shape")
-        if entry.get("required") and all(node is None for node in nodes):
+        if entry.get("required") and not _supplied(args, path, entry["kind"]):
             found.append(f"{shown} names no {path}")
         for node in nodes:
             if node is None:

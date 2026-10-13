@@ -413,11 +413,22 @@ policy 'covers: [pinned_inputs]' 'allow: [crawl]' 'limits:' '  - tools: [crawl]'
 run 2 "required: an absent path blocks" $C '{}' "crawl names no startUrls" "$LB2"
 run 2 "required: a null path blocks" $C '{"startUrls":null}' "crawl names no startUrls" "$LB2"
 run 0 "required: a present path passes" $C '{"startUrls":[{"url":"a"}]}' "" "$LB2"
-run 0 "required: an empty list is present" $C '{"startUrls":[]}' "" "$LB2"
-run 2 "required: a variant spelling counts as the path" $C '{"start_urls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites at startUrls (3 > 2)" "$LB2"
+run 2 "required count: an empty list blocks" $C '{"startUrls":[]}' "crawl names no startUrls" "$LB2"
+run 2 "required: a variant spelling does not satisfy it" $C '{"StartUrls":[{"url":"a"}]}' "crawl names no startUrls" "$LB2"
+run 2 "required: a snake-case spelling does not satisfy it" $C '{"start_urls":[{"url":"a"}]}' "crawl names no startUrls" "$LB2"
+run 2 "required: a variant spelling is still capped" $C '{"start_urls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites at startUrls (3 > 2)" "$LB2"
+run 0 "required: the exact spelling beside a variant passes the presence check" $C '{"startUrls":[{"url":"a"}],"StartUrls":[{"url":"b"}]}' "" "$LB2"
 run 2 "required: an over-bound list still blocks" $C '{"startUrls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites" "$LB2"
 policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: [a, b]' '    bound: max_sites' '    kind: max' '    required: true'
 run 2 "required: every path is required" $C '{"a":1}' "crawl names no b" "$LB2"
+policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: ["urls[]"]' '    bound: max_sites' '    kind: max' '    required: true'
+run 2 "required: a path ending in [] with an empty list blocks" $C '{"urls":[]}' "crawl names no urls[]" "$LB2"
+run 0 "required: a path ending in [] with an item passes" $C '{"urls":[1]}' "" "$LB2"
+policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: [n]' '    bound: max_sites' '    kind: max' '    required: true'
+run 0 "required max: a value passes" $C '{"n":2}' "" "$LB2"
+run 2 "required max: absent blocks" $C '{}' "crawl names no n" "$LB2"
+run 2 "required max: null blocks" $C '{"n":null}' "crawl names no n" "$LB2"
+run 2 "required max: a variant spelling does not satisfy it" $C '{"N":2}' "crawl names no n" "$LB2"
 policy 'covers: [x]' 'refuse_args: ["a.b"]'
 run 2 "tool_input that is not an object blocks a nested refuse path" mcp__apify__run '[1]' "cannot check this call" -
 
