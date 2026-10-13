@@ -578,19 +578,36 @@ recipients:
 refuse_args: [draftId, replyToMessageId]
 ```
 
-A tool that scrapes caps how much one call may ask for, and refuses
-nested arguments it cannot let through:
+A tool that scrapes names the arguments it accepts, and caps how much
+one call may ask for:
 
 ```yaml
 # capabilities/scraping/tools/apify/guard.yaml
 covers: [pinned_inputs]
 allow: [crawl]
-refuse_args: ["startUrls[].payload", "startUrls[].method", proxyConfig]
+only_keys:
+  - tools: [crawl]
+    at: ["$"]
+    keys: [startUrls, maxRequests]
+  - tools: [crawl]
+    at: ["startUrls[]"]
+    keys: [url]
 limits:
   - tools: [crawl]
     at: [startUrls]
     bound: max_sites
+    kind: count
+  - tools: [crawl]
+    at: [maxRequests]
+    bound: max_requests
+    kind: max
 ```
+
+An allowlist (`only_keys`) is the recommended way to restrict arguments:
+a deny list (`refuse_args`) only stops the keys it names, so any other
+key the vendor accepts (a `requestsFromUrl` that loads a whole URL list,
+`headers`, `userData`) passes. Use `refuse_args` for a value that must
+never appear in an argument the tool otherwise takes.
 
 ### Grammar
 
@@ -611,14 +628,16 @@ validation error and, at runtime, a block.
   scalar may not contain its own quote character, and a double-quoted
   one may not contain a backslash. A list item is one scalar
   (`["a" "b"]` is an error).
-- The exceptions are `rules:`, `writes:`, `recipients:` and `limits:`, whose values
+- The exceptions are `rules:`, `writes:`, `recipients:`, `limits:` and `only_keys:`, whose values
   are block lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `create:`,
   `update:`, `any:`, or `field:` plus `forbid: true` or `forbid: update`;
   `forbid` takes no other value and is never combined with `create`,
   `update` or `any`. A `writes` item holds `kind:`, `tools:`
-  and `at:`, the last two as flow lists. A `recipients` or `limits` item
-  holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A flow list in an item may
+  and `at:`, the last two as flow lists. A `recipients` item
+  holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A `limits` item
+  holds the same and `kind:`, a scalar (`count` or `max`). An `only_keys` item
+  holds `tools:`, `at:` and `keys:`, all flow lists. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
@@ -638,8 +657,9 @@ validation error and, at runtime, a block.
 | `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
 | `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Pins argument values (text or numbers) to values recorded in bindings: every value at those paths must equal a `<bound>: <value>` line |
-| `limits` | no | A list of `{tools, at, bound}` entries, the same shape as `recipients`. Caps a size instead of pinning a value: each list at an `at` path may be no longer, and each number no larger, than the one number in the `<bound>` binding line. A path the call does not have is allowed |
-| `refuse_args` | no | Argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value |
+| `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed |
+| `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, compared as `refuse_args` names are. Recommended over `refuse_args` for restricting arguments |
+| `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
 
 ### Semantics
 
@@ -652,7 +672,7 @@ validation error and, at runtime, a block.
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
-2. **Recipients, limits and refused arguments.** These run after `allow` and
+2. **Recipients, limits, allowed keys and refused arguments.** These run after `allow` and
    `deny`. Every problem they find is reported, and any one blocks the
    call before writes are read.
 
@@ -671,9 +691,21 @@ validation error and, at runtime, a block.
    `null` and not `""` blocks: `<tool> may not use <path>`, with
    `<path>` as the policy wrote it. A `null` where an object or list is
    expected holds nothing. Any other wrong shape (a scalar where a list
-   or object is expected, a list item that is not an object) counts as
-   present and blocks: a mismatch never raises. With a path entry
-   present, a call whose input is not an object blocks.
+   or object is expected, a list item that is not an object) blocks:
+   `<path>: unexpected shape`; a mismatch never raises. With a path
+   entry present, a call whose input is not an object blocks.
+
+   *Allowed keys.* For each `only_keys` entry whose `tools` match the
+   call (a matching call whose input is not an object blocks), for each
+   `at` path, find the values there (`$` is the tool input itself; other
+   paths are walked as for nested `refuse_args`; an absent path is
+   skipped, and so is `null`). Each must be an object, else block:
+   `<path>: expected an object`; a wrong shape on the way blocks:
+   `<path>: unexpected shape`. Every key of the object, compared with
+   the entry's `keys` after lowercasing and removing `_` and `-`, must
+   equal one of them, whatever its value (a `null` value does not
+   excuse it); otherwise block: `<tool> may not use <path>.<key>`, or
+   `<tool> may not use <key>` for `$`, with `<key>` as the call sent it.
 
    *Recipients.* For each `recipients` entry whose `tools` match the
    call (suffix matching as in step 1; a matching call whose input is
@@ -722,10 +754,14 @@ validation error and, at runtime, a block.
       call does not have: limits cap, they do not require. A wrong shape
       on the way (a scalar where an object or list is expected) blocks as
       `cannot check this call`.
-   3. A list counts as its length. A number, or a string that is numeric
-      as in Recipients step 4, counts as its value. Anything else (a
-      boolean, an object, a non-numeric string) blocks: `<path>: a
-      limited value must be a list or a number`.
+   3. Kind `count`: the value must be a list, else block: `<path>:
+      expected a list`. A list holding a list blocks: `<path>: a counted
+      list may not contain lists`. Its length is the count.
+      Kind `max`: the value must be a number or a string that is numeric
+      as in Recipients step 4 (not a boolean, list or object), else
+      block: `<path>: expected a number`. Below 1 (zero or negative)
+      blocks: `<path>: must be at least 1`, since many APIs read those
+      as unlimited. The number is the count.
    4. A count above the bound blocks: `<tool> exceeds <bound> at <path>
       (<count> > <bound value>)`.
 
@@ -809,7 +845,12 @@ Each is an invalid policy, and fails closed.
   that is not `snake_case`; or `recipients:` has no items.
 - A `limits` entry is invalid in the same ways as a `recipients` entry
   (unknown key, no `bound`, a `bound` that is not `snake_case`, a missing
-  or empty `tools` or `at`, a bad `at` path); or `limits:` has no items.
+  or empty `tools` or `at`, a bad `at` path), or has no `kind`, or a
+  `kind` other than `count` or `max`; or `limits:` has no items.
+- An `only_keys` entry has an unknown key, a missing or empty `tools`,
+  `at` or `keys`, an `at` that is neither `$` nor a valid path, or a
+  `keys` item that is not a plain argument name; or `only_keys:` has no
+  items.
 - `refuse_args` is empty, or holds an entry that is neither a plain
   argument name (`^[A-Za-z_][A-Za-z0-9_]*$`) nor a path like `a.b` or
   `a[].b` (the `writes` path grammar).
@@ -895,7 +936,7 @@ has `owner_only_send`; the validator rejects any other.
   next (case-insensitive; the rule `allow` uses). A match anywhere else
   in the name does not count. Nothing else is skipped: the `bind_` loop
   still runs the tool's own policy, which must pass the call (`allow`,
-  `recipients`, `limits`, `refuse_args`). A `server_match` that is not
+  `recipients`, `limits`, `only_keys`, `refuse_args`). A `server_match` that is not
   `[a-z0-9_-]+` blocks.
 
 Globs match names, not behaviour: a connector whose send tool has an
@@ -1213,7 +1254,9 @@ the send and pinning invariants:
   bound tool (`<capability>: bindings/<capability>.md has no <key> line
   (the <provider> tool pins values to it) ...`), each a bare value
   (`<capability>: bindings/<capability>.md <key> must be a bare value
-  (the <provider> tool pins values to it) ...`).
+  (the <provider> tool pins values to it) ...`); a `limits` `bound` key
+  must also be a number (`<capability>: bindings/<capability>.md <key>
+  must be a number (the <provider> tool limits a value with it) ...`).
 - An `owner_only_send` capability also needs the agent guard policy to
   list it in `exempt` (`owner_only_send needs the agent guard policy to
   list <capability> in exempt`). A `pinned_inputs` capability needs no

@@ -18,8 +18,10 @@ With server_match, `allow` only counts a tool-name suffix whose server segment
 every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset (a `writes:` list says where values
 sit; `rules:` constrain them; `recipients:` pins argument values (text or numbers) to values recorded
-in bindings; `limits:` caps a list's length or a number at a value recorded in bindings; `refuse_args:`
-refuses an argument, or a nested value at a path like "startUrls[].payload"); see STANDARD.md "Guard policy".
+in bindings; `limits:` caps a list's length (kind count) or a number (kind max) at a value recorded in
+bindings; `only_keys:` allows an object at a path only the keys it lists; `refuse_args:` refuses an
+argument, or a nested value at a path like "startUrls[].payload"; an only_keys allowlist is the
+recommended way to restrict arguments); see STANDARD.md "Guard policy".
 """
 import decimal
 import fnmatch
@@ -30,13 +32,17 @@ import sys
 import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
-        "rules", "recipients", "limits", "refuse_args")
+        "rules", "recipients", "limits", "only_keys", "refuse_args")
 AGENT_KEYS = ("covers", "deny", "exempt")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys", "refuse_args")
 ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
-RECIPIENT_KEYS = ("tools", "at", "bound")  # limits entries have the same keys
+RECIPIENT_KEYS = ("tools", "at", "bound")
+LIMIT_KEYS = ("tools", "at", "bound", "kind")
+ONLY_KEYS_KEYS = ("tools", "at", "keys")
+LIMIT_KINDS = ("count", "max")
+ROOT = "$"  # an only_keys path naming the whole tool input
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
 }
@@ -204,6 +210,8 @@ def _validate(policy):
                 raise PolicyError(f"writes: {path} is not a path like values or \"records[].fields\"")
     for name in ("recipients", "limits"):
         for entry in policy.get(name, []):
+            if name == "limits" and entry.get("kind") not in LIMIT_KINDS:
+                raise PolicyError("limits: kind must be count or max")
             for k in ("tools", "at"):
                 if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
                     raise PolicyError(f"{name}: each entry needs a non-empty {k} list")
@@ -212,6 +220,16 @@ def _validate(policy):
                     raise PolicyError(f"{name}: {path} is not a path like to or \"message.to\"")
             if not isinstance(entry.get("bound"), str) or not SNAKE.match(entry["bound"]):
                 raise PolicyError(f"{name}: bound must be a snake_case binding key")
+    for entry in policy.get("only_keys", []):
+        for k in ("tools", "at", "keys"):
+            if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
+                raise PolicyError(f"only_keys: each entry needs a non-empty {k} list")
+        for path in entry["at"]:
+            if path != ROOT and not PATH.match(path):
+                raise PolicyError(f"only_keys: {path} is not a path like \"$\" or \"startUrls[]\"")
+        for name in entry["keys"]:
+            if not ARG_NAME.match(name):
+                raise PolicyError(f"only_keys: '{name}' is not a plain argument name")
     if "refuse_args" in policy:
         if not policy["refuse_args"]:
             raise PolicyError("refuse_args must name at least one argument")
@@ -288,11 +306,11 @@ def _read(text, keys):
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
         i += 1
-        if key in ("rules", "writes", "recipients", "limits"):
+        if key in ("rules", "writes", "recipients", "limits", "only_keys"):
             if value:
                 raise PolicyError(f"line {lineno}: {key}: takes '  - ...' items on the following lines")
             allowed = {"rules": RULE_KEYS, "writes": WRITE_KEYS, "recipients": RECIPIENT_KEYS,
-                       "limits": RECIPIENT_KEYS}[key]
+                       "limits": LIMIT_KEYS, "only_keys": ONLY_KEYS_KEYS}[key]
             policy[key], i = _parse_items(lines, i, key, allowed)
             continue
         if not value:
@@ -439,14 +457,40 @@ def _as_number(value):
 
 
 def _refused_at(obj, path):
-    """True when a refuse_args path holds anything but null or "", or the call does not have the path's shape."""
+    """"present" when a refuse_args path holds anything but null or "", "shape" when the call does not have
+    the path's shape (and holds nothing refused), else None."""
     nodes, mismatch = _walk_folded(obj, path)
-    return mismatch or any(node not in (None, "") for node in nodes)
+    if any(node not in (None, "") for node in nodes):
+        return "present"
+    return "shape" if mismatch else None
+
+
+def _only_keys_problems(shown, entry, args):
+    """only_keys: every object at the paths holds only the listed keys (compared with _arg_key)."""
+    allowed = {_arg_key(name) for name in entry["keys"]}
+    found = []
+    for path in entry["at"]:
+        if path == ROOT:
+            nodes, mismatch = [args], False
+        else:
+            nodes, mismatch = _walk_folded(args, path)
+        if mismatch:
+            found.append(f"{path}: unexpected shape")
+        for node in nodes:
+            if node is None:
+                continue
+            if not isinstance(node, dict):
+                found.append(f"{path}: expected an object")
+                continue
+            for key in node:
+                if _arg_key(key) not in allowed:
+                    found.append(f"{shown} may not use {key}" if path == ROOT else f"{shown} may not use {path}.{key}")
+    return found
 
 
 def _limit_problems(shown, entry, args, bindings):
-    """limits: each list at the paths is no longer, and each number no larger, than the one number bound to
-    entry["bound"]. A path the call does not have is fine: limits cap, they do not require."""
+    """limits: kind count caps a list's length, kind max caps a number (at least 1), both at the one number
+    bound to entry["bound"]. A path the call does not have is fine: limits cap, they do not require."""
     bound = entry["bound"]
     lines = bindings.get(bound) or set()
     if not lines:
@@ -463,10 +507,23 @@ def _limit_problems(shown, entry, args, bindings):
         for node in nodes:
             if node is None:
                 continue
-            size = decimal.Decimal(len(node)) if isinstance(node, list) else _as_number(node)
-            if size is None:
-                found.append(f"{path}: a limited value must be a list or a number")
-            elif size > cap:
+            if entry["kind"] == "count":
+                if not isinstance(node, list):
+                    found.append(f"{path}: expected a list")
+                    continue
+                if any(isinstance(item, list) for item in node):
+                    found.append(f"{path}: a counted list may not contain lists")
+                    continue
+                size = decimal.Decimal(len(node))
+            else:
+                size = _as_number(node)
+                if size is None:
+                    found.append(f"{path}: expected a number")
+                    continue
+                if size < 1:
+                    found.append(f"{path}: must be at least 1")
+                    continue
+            if size > cap:
                 found.append(f"{shown} exceeds {bound} at {path} ({_printable(size)} > {cap})")
     return found
 
@@ -560,7 +617,10 @@ def problems(policy, event, bindings, server_match=None):
         for key, value in args.items():
             if _arg_key(key) in refused and value not in (None, ""):
                 early.append(f"{shown} may not use {key}")
-        early.extend(f"{shown} may not use {path}" for path in refuse_paths if _refused_at(args, path))
+        for path in refuse_paths:
+            why = _refused_at(args, path)
+            if why:
+                early.append(f"{shown} may not use {path}" if why == "present" else f"{path}: unexpected shape")
     for entry in policy.get("recipients", []):
         if not _matches(names, entry["tools"]):
             continue
@@ -573,6 +633,12 @@ def problems(policy, event, bindings, server_match=None):
         if not isinstance(args, dict):
             raise PolicyError("tool_input is not an object")
         early.extend(_limit_problems(shown, entry, args, bindings))
+    for entry in policy.get("only_keys", []):
+        if not _matches(names, entry["tools"]):
+            continue
+        if not isinstance(args, dict):
+            raise PolicyError("tool_input is not an object")
+        early.extend(_only_keys_problems(shown, entry, args))
     if early:
         return early
     rules = policy.get("rules", [])
