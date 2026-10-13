@@ -27,6 +27,11 @@ if ! grep -q '^standard: "7.0"' _template/agent.yaml; then echo "FAIL: _template
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/tools/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
+# tool_check reads the capability name from capabilities/<cap>/tools/<tool>/, so check a copy laid out that way.
+LTMP=$(mktemp -d); mkdir -p "$LTMP/capabilities/ledger"; cp -R _ledger/contract.md _ledger/tools "$LTMP/capabilities/ledger/"
+if ! python3 -B _template/hooks/tool_check.py "$LTMP/capabilities/ledger/tools/airtable" "$LTMP/capabilities/ledger/contract.md" >/dev/null; then
+  echo "FAIL: _ledger/tools/airtable fails tool_check"; python3 -B _template/hooks/tool_check.py "$LTMP/capabilities/ledger/tools/airtable" "$LTMP/capabilities/ledger/contract.md"; STATUS=1; fi
+rm -rf "$LTMP"
 if [ -d _template/hooks/__pycache__ ]; then echo "FAIL: bytecode in _template/hooks"; STATUS=1; fi
 if [ ! -f _template/skills/add-tool/SKILL.md ]; then echo "FAIL: template has no add-tool skill"; STATUS=1; fi
 SKEL=$(mktemp -d); mkdir -p "$SKEL/capabilities"; cp -R _capability-template "$SKEL/capabilities/example_capability"  # tool_check reads the capability name from the path
