@@ -252,14 +252,25 @@ promisor() { # promisor <repo> <url>: tracking ref -> a commit whose tree is mis
   git -C "$1" config core.repositoryformatversion 1; git -C "$1" config extensions.partialClone origin
   git -C "$1" config remote.origin.promisor true; git -C "$1" config remote.origin.url "$2"
 }
-L="$W/notify-lazy"; mkpin "$L"; promisor "$L" "remote.invalid:/y"
-git -C "$L" config core.sshCommand "touch '$W/transport-ran'; false"
-run_guard "$L" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "promisor remote with core.sshCommand: blocked" "$PINMSG"
-[ ! -e "$W/transport-ran" ] && _report ok "core.sshCommand never ran" || _report no "core.sshCommand ran (lazy fetch)"
-E="$W/notify-ext"; mkpin "$E"; promisor "$E" "ext::sh -c touch\\ $W/ext-ran"
-git -C "$E" config protocol.ext.allow always
-run_guard "$E" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "promisor ext:: remote: blocked" "$PINMSG"
-[ ! -e "$W/ext-ran" ] && _report ok "ext:: transport never ran" || _report no "ext:: transport ran (lazy fetch)"
+# Each variant is a way to make a lazy fetch run a program. The shim hides
+# GIT_NO_LAZY_FETCH from git (as git before 2.45 would ignore it), so only
+# GIT_ALLOW_PROTOCOL= and protocol.allow=never stand in the way.
+SHIM="$W/shim"; mkdir -p "$SHIM"
+printf '%s\n' '#!/bin/sh' 'unset GIT_NO_LAZY_FETCH' "exec '$(command -v git)' \"\$@\"" > "$SHIM/git"; chmod 755 "$SHIM/git"
+lazy() { # lazy <variant> <shim|real>
+  local d="$W/lazy-$1-$2" m="$W/lazy-ran-$1-$2"; mkpin "$d"
+  case "$1" in
+    ssh)     promisor "$d" "remote.invalid:/y"; git -C "$d" config core.sshCommand "touch '$m'; false" ;;
+    ssh-on)  promisor "$d" "remote.invalid:/y"; git -C "$d" config core.sshCommand "touch '$m'; false"; git -C "$d" config protocol.ssh.allow always ;;
+    file-on) promisor "$d" "$d-remote.git"; git -C "$d" config remote.origin.uploadpack "touch '$m'; false"; git -C "$d" config protocol.file.allow always ;;
+    ext-on)  promisor "$d" "ext::sh -c touch% $m"; git -C "$d" config protocol.ext.allow always ;;
+  esac
+  if [ "$2" = shim ]; then PATH="$SHIM:$PATH" run_guard "$d" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"
+  else run_guard "$d" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; fi
+  expect 2 "promisor $1 ($2 git): blocked" "$PINMSG"
+  [ ! -e "$m" ] && _report ok "promisor $1 ($2 git): no program ran" || _report no "promisor $1 ($2 git): a program ran (lazy fetch)"
+}
+for lv in ssh ssh-on file-on ext-on; do lazy "$lv" real; lazy "$lv" shim; done
 Q="$W/notify-trick"; mkpin "$Q"; mkdir -p "$Q/notify-trick/bindings"
 printf '%s\n' 'recipient_email: owner@acme.com' 'recipient_email: lead@x.com' > "$Q/notify-trick/bindings/owner_notify.md"
 git -C "$Q" add -A; git -C "$Q" commit -q -m trick; git -C "$Q" push -q 2>/dev/null
