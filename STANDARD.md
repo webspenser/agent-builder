@@ -1259,7 +1259,8 @@ The validator checks:
   counts): `<tool folder> is wrapped in n8n, so guard.yaml at the root
   must deny <tool>`.
 - No contract marks `no_external_send`, `owner_only_send`,
-  `append_only_events` or `no_schema_change` `(acceptable)`: `<invariant> cannot be marked (acceptable)`.
+  `append_only_events` or `no_schema_change` `(acceptable)`:
+  `<invariant> cannot be marked (acceptable)`.
 - No contract lists `no_send`: `no_send was renamed no_external_send`.
   No contract lists both `no_external_send` and `owner_only_send`
   (reported by `tool_check.py` for each tool).
