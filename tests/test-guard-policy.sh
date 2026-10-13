@@ -332,4 +332,26 @@ policy 'covers: [x]' 'refuse_args: []';        parses 1 "empty refuse_args"
 policy 'covers: [x]' 'refuse_args: [a.b]';     parses 1 "refuse_args entry is not a plain name"
 policy 'covers: [x]' 'refuse_args: draftId';   parses 1 "refuse_args given a scalar"
 
+echo "-- agent exempt"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'; aparses 0 "exempt parses"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [Owner-Notify]'; aparses 1 "exempt not snake_case"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: []'; aparses 1 "empty exempt"
+policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'
+arun() { # arun <rc> <label> <tool_name> [exempt server_match...]
+  local rc out want="$1" lbl="$2" t="$3"; shift 3
+  local extra=(); for m in "$@"; do extra+=(--exempt "$m"); done
+  out=$(printf '{"tool_name":"%s","tool_input":{}}' "$t" | python3 "$E" --agent "$W/guard.yaml" "demo agent guard policy" ${extra[@]+"${extra[@]}"} 2>&1); rc=$?
+  if [ "$rc" -eq "$want" ] && ! printf '%s' "$out" | grep -q Traceback; then _report ok "$lbl"; else _report no "$lbl (rc=$rc): $out"; fi
+}
+arun 2 "send denied without exemption" mcp__claude_ai_Resend__send-email
+arun 0 "send on exempt server skips deny" mcp__claude_ai_Resend__send-email resend
+arun 2 "exemption is per server" mcp__claude_ai_Slack__slack_send_message resend
+arun 2 "bad exempt value blocks" mcp__claude_ai_Resend__send-email 'Re send'
+out=$(python3 "$E" --exempt-caps "$W/guard.yaml"); [ "$out" = owner_notify ] && _report ok "--exempt-caps lists capabilities" || _report no "--exempt-caps: $out"
+policy 'covers: [owner_only_send, other]' 'allow: [a]'
+out=$(python3 "$E" --covers "$W/guard.yaml" | tr '\n' ' '); [ "$out" = "owner_only_send other " ] && _report ok "--covers lists covers" || _report no "--covers: $out"
+policy 'deny: ['
+python3 "$E" --exempt-caps "$W/guard.yaml" >/dev/null 2>&1 && _report no "--exempt-caps bad policy should fail" || _report ok "--exempt-caps bad policy exits non-zero"
+python3 "$E" --covers "$W/guard.yaml" >/dev/null 2>&1 && _report no "--covers bad policy should fail" || _report ok "--covers bad policy exits non-zero"
+
 finish

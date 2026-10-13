@@ -3,7 +3,9 @@
 
 Usage:
   guard_policy.py <guard.yaml> <bindings-file|-> [label] [server_match]   hook input JSON on stdin
-  guard_policy.py --agent <guard.yaml> [label]                              agent policy; hook input on stdin
+  guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]... agent policy; hook input on stdin
+  guard_policy.py --exempt-caps <agent guard.yaml>                          print each exempt capability
+  guard_policy.py --covers <tool guard.yaml>                                print each covers id
   guard_policy.py --check [--agent] <guard.yaml>                            parse only
 
 Decides one PreToolUse call against one tool's guard policy (or, with
@@ -25,7 +27,7 @@ import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
         "rules", "recipients", "refuse_args")
-AGENT_KEYS = ("covers", "deny")
+AGENT_KEYS = ("covers", "deny", "exempt")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys", "refuse_args")
 ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
@@ -36,6 +38,7 @@ REFUSE_PRESETS = {
 }
 KEY_LINE = re.compile(r"^([a-z_]+):(?: (.*))?$")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
+SERVER_MATCH = re.compile(r"^[a-z0-9_-]+$")
 PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\])?)*$")
 BINDING_LINE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(\S.*?)\s*$")
 BARE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -248,6 +251,13 @@ def parse_agent(text):
     for inv in covers:
         if not SNAKE.match(inv):
             raise PolicyError(f"covers: '{inv}' is not a snake_case invariant id")
+    exempt = policy.get("exempt")
+    if exempt is not None:
+        if not isinstance(exempt, list) or not exempt:
+            raise PolicyError("exempt must be a non-empty list of capability names")
+        for cap in exempt:
+            if not SNAKE.match(cap):
+                raise PolicyError(f"exempt: '{cap}' is not a snake_case capability name")
     return policy
 
 
@@ -529,16 +539,39 @@ def problems(policy, event, bindings, server_match=None):
     return found
 
 
-def agent_problems(policy, event):
-    """The agent policy: deny patterns over every suffix, whatever the server."""
-    names = [suffix for suffix, _ in _candidates(event.get("tool_name"))]
+def agent_problems(policy, event, exempt=()):
+    """The agent policy: deny patterns over every suffix, whatever the server,
+    except on a server exempted for an owner_only_send capability (guard.sh decides which)."""
+    tool_name = event.get("tool_name")
+    names = [suffix for suffix, _ in _candidates(tool_name)]
+    rest = tool_name[5:].lower()
+    for match in exempt:
+        if not SERVER_MATCH.match(match):
+            raise PolicyError(f"exempt server_match {match!r} is not [a-z0-9_-]+")
+    if any(match in rest for match in exempt):
+        return []
     for pattern in policy["deny"]:
         if _matches(names, [pattern]):
             return [f"{names[0]} is denied ({pattern})"]
     return []
 
 
+def _print_list(path, parser, key):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            values = parser(fh.read()).get(key, [])
+    except Exception:  # never a traceback; the caller treats failure as "none"
+        return 1
+    for value in values:
+        print(value)
+    return 0
+
+
 def main(argv):
+    if len(argv) == 2 and argv[0] == "--exempt-caps":
+        return _print_list(argv[1], parse_agent, "exempt")
+    if len(argv) == 2 and argv[0] == "--covers":
+        return _print_list(argv[1], parse, "covers")
     if len(argv) == 3 and argv[0] == "--check" and argv[1] == "--agent":
         try:
             with open(argv[2], encoding="utf-8") as fh:
@@ -548,17 +581,25 @@ def main(argv):
             return 1
         return 0
     if argv and argv[0] == "--agent":
-        if len(argv) not in (2, 3):
-            print("usage: guard_policy.py --agent <guard.yaml> [label]", file=sys.stderr)
+        rest, exempt = list(argv[1:]), []
+        while "--exempt" in rest:
+            at = rest.index("--exempt")
+            if at + 1 >= len(rest):
+                print("usage: guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]...", file=sys.stderr)
+                return 2
+            exempt.append(rest[at + 1])
+            del rest[at:at + 2]
+        if len(rest) not in (1, 2):
+            print("usage: guard_policy.py --agent <guard.yaml> [label] [--exempt <server_match>]...", file=sys.stderr)
             return 2
-        label = argv[2] if len(argv) == 3 else "agent guard policy"
+        label = rest[1] if len(rest) == 2 else "agent guard policy"
         try:
-            with open(argv[1], encoding="utf-8") as fh:
+            with open(rest[0], encoding="utf-8") as fh:
                 policy = parse_agent(fh.read())
             event = json.load(sys.stdin)
             if not isinstance(event, dict):
                 raise PolicyError("hook input is not an object")
-            found = agent_problems(policy, event)
+            found = agent_problems(policy, event, exempt)
         except Exception as err:  # fail closed
             print(f"Blocked by {label}: cannot check this call ({type(err).__name__}: {err})", file=sys.stderr)
             return 2
