@@ -29,7 +29,8 @@ ugit() { GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CO
 # pushed <cap>: the agent can write bindings/, so values a tool policy pins
 # must equal the upstream (pushed) copy. This stops edits and unpushed
 # commits. It does not stop an agent that edits .git itself (tracking refs,
-# upstream/remote config, core.worktree, a .git gitfile, alternates).
+# upstream/remote config, core.worktree, a .git gitfile, alternates). The
+# engine is then given the verified upstream bytes, not the working file.
 pushed() {
   _bp="bindings/$1.md"
   [ -f "$instance/$_bp" ] && [ ! -L "$instance/$_bp" ] || return 1
@@ -39,6 +40,12 @@ pushed() {
   ugit cat-file blob "@{u}:$_bp" 2>/dev/null | cmp -s - "$instance/$_bp"
 }
 pushed_msg() { printf '%s' "bindings/$1.md must be committed and pushed before $1 can run (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"; }
+
+# Private scratch for the bind loop (policy snapshot, verified bindings copy);
+# removed on every exit path, including the early exit 2 blocks.
+tmp=""
+trap '[ -z "$tmp" ] || rm -rf "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
 
 name=$(yaml_get "$root/agent.yaml" name)
 [ -n "$name" ] || exit 0
@@ -149,14 +156,28 @@ while IFS= read -r line || [ -n "$line" ]; do
   engine="$root/hooks/guard_policy.py"
   [ -f "$engine" ] || pblock "the guard policy engine is missing from $name"
   command -v python3 >/dev/null 2>&1 || pblock "python3 is required to run the guard policy"
-  # A policy the engine cannot parse prints FAIL and exits 1: it is not read
-  # as pinning here, the call below then fails closed on it with the engine's message.
-  if pins=$(python3 "$engine" --pins "$tdir/guard.yaml" 2>/dev/null) && [ -n "$pins" ]; then
-    pushed "$cap" || pblock "$(pushed_msg "$cap")"
+  # The tool policy and the pinned bindings can be agent-writable (source mode,
+  # custom-tools/, bindings/): read each once into private scratch, so the
+  # checks below and the engine see the same bytes.
+  if [ -z "$tmp" ]; then
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/guard.XXXXXX" 2>/dev/null) || { tmp=""; pblock "cannot check this call (no private temporary directory)"; }
+  fi
+  cat "$tdir/guard.yaml" > "$tmp/policy" 2>/dev/null || pblock "cannot check this call (the guard policy cannot be read)"
+  pins=$(python3 "$engine" --pins "$tmp/policy" 2>&1); prc=$?
+  if [ "$prc" -ne 0 ]; then
+    case "$pins" in
+      "FAIL: "*) pblock "cannot check this call (${pins#FAIL: })" ;;
+      *) pblock "the guard policy engine failed (exit $prc)" ;;
+    esac
   fi
   bfile="$instance/bindings/$cap.md"
   [ -f "$bfile" ] || bfile=-
-  printf '%s' "$input" | python3 "$engine" "$tdir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
+  if [ -n "$pins" ]; then
+    pushed "$cap" || pblock "$(pushed_msg "$cap")"
+    ugit cat-file blob "@{u}:bindings/$cap.md" > "$tmp/bindings" 2>/dev/null || pblock "$(pushed_msg "$cap")"
+    bfile="$tmp/bindings"
+  fi
+  printf '%s' "$input" | python3 "$engine" "$tmp/policy" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
   [ "$rc" -eq 0 ] && continue
   [ "$rc" -eq 2 ] && exit 2
   pblock "the guard policy engine failed (exit $rc)"

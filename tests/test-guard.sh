@@ -325,4 +325,29 @@ git -C "$S" reset -q --hard origin/HEAD 2>/dev/null || git -C "$S" reset -q --ha
 run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "restored: passes"
 run_guard "$S" "$(call mcp__claude_ai_Attio__list-records '{}')";             expect 0 "other servers are unaffected"
 
+echo "-- pinned values: snapshots, symlinks, custom tools"
+cp "$ST/guard.yaml" "$W/apify-guard.good"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps' > "$ST/guard.yaml"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "policy --pins cannot parse: blocked" "cannot check this call"
+cp "$W/apify-guard.good" "$ST/guard.yaml"
+SHIM="$W/shim"; mkdir -p "$SHIM"; REAL_PY=$(command -v python3)
+printf '%s\n' '#!/bin/sh' "printf '%s\\n' \"\$*\" >> \"$W/py.log\"" "exec \"$REAL_PY\" \"\$@\"" > "$SHIM/python3"; chmod +x "$SHIM/python3"
+: > "$W/py.log"
+OUT=$(printf '%s' "$(call mcp__apify__run-maps '{"maxPlaces":60}')" | PATH="$SHIM:$PATH" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$S" bash "$GUARD" 2>&1); RC=$?
+expect 0 "engine run with pushed copy: passes"
+ENGINE_LINE=$(grep -F "guard policy (scraping/apify)" "$W/py.log" | head -1)
+if [ -n "$ENGINE_LINE" ] && ! printf '%s\n' "$ENGINE_LINE" | grep -qF "$ST/guard.yaml" && ! printf '%s\n' "$ENGINE_LINE" | grep -qF "$S/bindings/scraping.md"; then
+  _report ok "engine reads private copies, not the policy or bindings in place"; else _report no "engine args name the original files: $ENGINE_LINE"; fi
+sleep 1; touch "$S/bindings/scraping.md"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "same bytes, newer mtime: passes"
+cp "$S/bindings/scraping.md" "$W/scraping.real"; rm "$S/bindings/scraping.md"; ln -s "$W/scraping.real" "$S/bindings/scraping.md"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "symlinked bindings file: blocked" "$SMSG"
+rm "$S/bindings/scraping.md"; git -C "$S" checkout -q -- bindings/scraping.md
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "symlink removed: passes"
+SC="$W/scrape-custom"; mkdir -p "$SC/bindings" "$SC/custom-tools/scraping"
+cp "$ST/identity.yaml" "$SC/custom-tools/scraping/identity.yaml"; cp "$ST/guard.yaml" "$SC/custom-tools/scraping/guard.yaml"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_scraping: custom' > "$SC/instance.yaml"
+printf '%s\n' 'max_places: 60' > "$SC/bindings/scraping.md"
+run_guard "$SC" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";           expect 2 "custom pinning tool, bindings not pushed: blocked" "$SMSG"
+
 finish
