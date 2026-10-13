@@ -312,4 +312,18 @@ printf '%s\n' 'field_status: fldAAAAAAAAAAAAAA' 'field_status: "fldBBBBBBBBBBBBB
 policy 'covers: [x]' 'writes:' '  - kind: update' '    tools: [u]' '    at: [values]' 'rules:' '  - field: status' '    forbid: update'
 run 2 "repeated field_ lines still both match" mcp__crm__u '{"values":{"fldBBBBBBBBBBBBBB":"x"}}' "may not be changed after create" "$W/f.md"
 
+echo "-- refuse_args"
+policy 'covers: [owner_only_send]' 'allow: [send_message]' 'refuse_args: [draftId, replyThreadId]' \
+  'recipients:' '  - tools: [send_message]' '    at: [to]' '    bound: recipient_email'
+parses 0 "refuse_args parses"
+printf '%s\n' 'recipient_email: owner@acme.com' > "$W/r.md"
+run 2 "draftId refused even with a pinned to" mcp__gmail__send_message '{"draftId":"r-1","to":["owner@acme.com"]}' "send_message may not use draftId" "$W/r.md"
+run 2 "draftId alone refused" mcp__gmail__send_message '{"draftId":"r-1"}' "may not use draftId" "$W/r.md"
+run 0 "null refused arg passes" mcp__gmail__send_message '{"draftId":null,"to":["owner@acme.com"]}' "" "$W/r.md"
+run 0 "empty refused arg passes" mcp__gmail__send_message '{"replyThreadId":"","to":["owner@acme.com"]}' "" "$W/r.md"
+run 0 "case-sensitive: draftid is another argument" mcp__gmail__send_message '{"draftid":"x","to":["owner@acme.com"]}' "" "$W/r.md"
+policy 'covers: [x]' 'refuse_args: []';        parses 1 "empty refuse_args"
+policy 'covers: [x]' 'refuse_args: [a.b]';     parses 1 "refuse_args entry is not a plain name"
+policy 'covers: [x]' 'refuse_args: draftId';   parses 1 "refuse_args given a scalar"
+
 finish

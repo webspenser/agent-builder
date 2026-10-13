@@ -26,7 +26,8 @@ import unicodedata
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
         "rules", "recipients", "refuse_args")
 AGENT_KEYS = ("covers", "deny")
-LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
+LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys", "refuse_args")
+ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
 RECIPIENT_KEYS = ("tools", "at", "bound")
@@ -202,6 +203,12 @@ def _validate(policy):
                 raise PolicyError(f"recipients: {path} is not a path like to or \"message.to\"")
         if not isinstance(entry.get("bound"), str) or not SNAKE.match(entry["bound"]):
             raise PolicyError("recipients: bound must be a snake_case binding key")
+    if "refuse_args" in policy:
+        if not policy["refuse_args"]:
+            raise PolicyError("refuse_args must name at least one argument")
+        for name in policy["refuse_args"]:
+            if not ARG_NAME.match(name):
+                raise PolicyError(f"refuse_args: '{name}' is not an argument name")
     if ("rules" in policy or "refuse_keys" in policy or "bound_keys_only" in policy) and not policy.get("writes"):
         raise PolicyError("writes is required when rules, refuse_keys or bound_keys_only are present")
     if "rules" in policy:
@@ -435,6 +442,10 @@ def problems(policy, event, bindings, server_match=None):
         return [f"{shown} is not in the allow list"]
     args = event.get("tool_input")
     early = []
+    if isinstance(args, dict):
+        for name in policy.get("refuse_args", []):
+            if name in args and args[name] not in (None, ""):
+                early.append(f"{shown} may not use {name}")
     for entry in policy.get("recipients", []):
         if not _matches(names, entry["tools"]):
             continue
