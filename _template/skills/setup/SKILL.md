@@ -102,9 +102,17 @@ skill, if this agent has one.
       line, `field_<name>: <ID>`, with nothing else on it: no bullet, no
       backticks or quotes, no trailing note. Anything else blocks the
       guarded call.
-   4. If the contract has a `no_external_send` invariant and the tool's
-      `guard.yaml` does not list it in `covers`, refuse to bind it and
-      say why. If the tool leaves an invariant uncovered that the
+   4. If the contract has a `no_external_send` or `owner_only_send`
+      invariant and the tool's `guard.yaml` does not list it in
+      `covers`, refuse to bind it and say why. For `owner_only_send`,
+      ask the user for each pinned value the tool's `usage.md`
+      `## Setup` lists (for example `recipient_email`), repeat each
+      back, and write them as plain `<key>: <value>` lines to
+      `bindings/<capability>.md` only after the user confirms. Then
+      commit and push the instance: owner sends are refused until
+      `bindings/<capability>.md` matches the pushed copy. Then offer one
+      test notification to that recipient; send it only after the user
+      says yes. If the tool leaves an invariant uncovered that the
       contract marks `(acceptable)`, explain in plain words what the
       guard will not enforce and what could happen, and add it to
       `accept_instruction_only:` in `instance.yaml` only after the user

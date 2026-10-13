@@ -90,7 +90,7 @@ capabilities/<cap>/
   tools/<tool>/
     usage.md                how the agent uses this tool, for the model to read
     identity.yaml           capability, provider, server_match, for the hooks to read
-    guard.yaml              enforcement rules (optional, but required for no_external_send)
+    guard.yaml              enforcement rules (optional, but required for no_external_send and owner_only_send)
     bootstrap.py            optional one-time field setup, run by the person with their own API key
 hooks/                      identical in every agent (copied from the builder)
   hooks.json                wires the two hooks below into Claude Code
@@ -215,7 +215,7 @@ flowchart TD
   TL --> T2["hooks are byte-identical<br/>to the builder's _template/hooks"]
   TL --> T3["each capability: contract has<br/>Operations and Invariants"]
   TL --> T4["each tool passes tool_check.py:<br/>usage.md maps every operation and has a Probe,<br/>and a Setup section when bootstrap.py exists;<br/>identity.yaml keys valid;<br/>server_match is a-z 0-9 _ -"]
-  TL --> T5["guard.yaml parses, rules valid (forbid, writes);<br/>covers only names real invariants;<br/>no_external_send must be covered"]
+  TL --> T5["guard.yaml parses, rules valid (forbid, writes);<br/>covers only names real invariants;<br/>no_external_send and owner_only_send must be covered"]
   TL --> T6["add-tool skill present and<br/>byte-identical to the builder's"]
   AC --> A1["activity names kebab-case, not repeated"]
   AC --> A2["capabilities exist; none is not mixed with others"]
@@ -491,6 +491,11 @@ send for the agent either, and a hand-made custom tool is covered too.
 Any agent with a `no_external_send` capability must ship it. It matches tool
 names, not what a tool does, so the list is checked against the read
 tools of common connectors.
+
+An agent can message its own business owner and nobody else. The owner's
+address is recorded once, at setup, with the owner confirming it. The
+guard checks every send against that record before it leaves, so neither
+a mistake nor text the agent reads on a website can add a recipient.
 
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a

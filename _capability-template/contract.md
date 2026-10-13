@@ -16,4 +16,6 @@ A tool's `guard.yaml` lists in `covers` the invariants it enforces
 by mechanism; the rest rely on the agent's instructions.
 
 - `example_invariant` — a rule every tool must uphold. Name one
-  `no_external_send` if the capability must never send a message to anyone.
+  `no_external_send` if the capability must never send a message to
+  anyone, or `owner_only_send` if it sends only to the business owner
+  (recipients pinned at setup). Never both.
