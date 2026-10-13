@@ -76,10 +76,10 @@ The validator checks this, the same way it checks `hooks/`, so the
 
 | Field | Airtable type | Written by | Example |
 |---|---|---|---|
-| `Key` | formula `{Run ID} & "#" & {Seq}` (primary field) | Airtable | `prospect-20261019T1400Z#3` |
+| `Run ID` | single line text (primary field) | agent | `prospect-20261019T1400Z` |
+| `Key` | formula `{Run ID} & "#" & {Seq}` | Airtable | `prospect-20261019T1400Z#3` |
 | `At` | date and time, UTC | agent | 2026-10-19 14:02 |
 | `Recorded At` | created time | Airtable | 2026-10-19 14:02 |
-| `Run ID` | single line text | agent | `prospect-20261019T1400Z` |
 | `Seq` | number (integer) | agent | 3 |
 | `Activity` | single line text | agent | `prospect` |
 | `Trigger` | single select: `scheduled`, `interactive` | agent | `scheduled` |
@@ -93,6 +93,8 @@ The validator checks this, the same way it checks `hooks/`, so the
 | `Detail` | long text | agent | `Oakland\|hvac: 60 raw, 41 kept, 4 passed` |
 | `Agent Version` | single line text | agent | `7.1.0` |
 | `Backfilled` | checkbox | agent | false |
+
+Airtable cannot create formula fields as part of table creation (live check, 2026-10-13), so `bootstrap.py` creates each table with its plain fields and then adds computed fields.
 
 `Run ID` is `<activity>-<UTC start, yyyymmddThhmmZ>`. `Seq` starts at 1
 for `run_started` and increases by one per event in the run.

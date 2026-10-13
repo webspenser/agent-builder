@@ -47,7 +47,7 @@ a write.
      prints the base ID. It never deletes, renames or retypes anything,
      and it never prints the token.
    - **By hand.** Create a base with a table named `Events` holding the
-     fields below (`Key` first, as the primary field), plus every table
+     fields below (`Run ID` first, as the primary field), plus every table
      and field in `capabilities/ledger/tables.md`.
 3. Add the Airtable connector in your host and sign in with the same
    account.
@@ -56,10 +56,10 @@ a write.
 
 | Field | Type | Options |
 |---|---|---|
-| Key | formula (primary field) | `{Run ID} & "#" & {Seq}` |
+| Run ID | singleLineText | (primary field) |
+| Key | formula | `{Run ID} & "#" & {Seq}` |
 | At | dateTime | UTC |
 | Recorded At | createdTime | |
-| Run ID | singleLineText | |
 | Seq | number | integer |
 | Activity | singleLineText | |
 | Trigger | singleSelect | scheduled, interactive |

@@ -5,6 +5,8 @@ Additive and idempotent: every table and field is created only if
 missing, so re-running after a partial failure is safe. A missing select
 option, or a field of the wrong type, stops the script with an error
 naming what to fix by hand. Nothing is ever deleted, renamed or retyped.
+Computed fields (formula, createdTime) are added after their table is
+created, because Airtable cannot create them as part of table creation.
 
 Reads AIRTABLE_TOKEN from the environment (set it in your shell with
 `read -rs AIRTABLE_TOKEN && export AIRTABLE_TOKEN`; never write it to a
@@ -27,6 +29,7 @@ API = "https://api.airtable.com/v0"
 HERE = pathlib.Path(__file__).resolve().parent
 BASE_ID = re.compile(r"^app[A-Za-z0-9]{14}$")
 WORKSPACE_ID = re.compile(r"^wsp[A-Za-z0-9]{14}$")
+COMPUTED_TYPES = ("formula", "createdTime")
 DATE_TIME = {"dateFormat": {"name": "iso"}, "timeFormat": {"name": "24hour"}, "timeZone": "utc"}
 
 
@@ -82,14 +85,20 @@ def wanted(root, events_only=False):
 
 
 def plan(existing, tables):
-    """(actions, errors) that bring `existing` up to `tables`, additively."""
+    """(actions, errors) that bring `existing` up to `tables`, additively.
+
+    A new table is created with its plain fields (the first is the primary field);
+    computed fields follow as create_field actions, after the fields they may read."""
     actions, errors = [], []
     for table, fields in tables:
         have = existing.get(table)
+        plain = [f for f in fields if f[1] not in COMPUTED_TYPES]
+        computed = [f for f in fields if f[1] in COMPUTED_TYPES]
         if have is None:
-            actions.append(("create_table", table, [field_spec(*f) for f in fields]))
+            actions.append(("create_table", table, [field_spec(*f) for f in plain]))
+            actions.extend(("create_field", table, field_spec(*f)) for f in computed)
             continue
-        for name, ftype, options in fields:
+        for name, ftype, options in plain + computed:
             got = have["fields"].get(name)
             if got is None:
                 actions.append(("create_field", table, field_spec(name, ftype, options)))
@@ -152,6 +161,37 @@ def apply(base, existing, actions):
     return 0
 
 
+def finish(base, tables, schema, dry, after_create=False):
+    """Read `base`, plan and apply what the ledger still needs. after_create: `base` was just
+    created by this run, so a failure here is told apart (the base exists; --base finishes it)."""
+    try:
+        existing = existing_tables(base)
+    except SystemExit as err:
+        if not after_create:
+            raise
+        print(f"{err.code}; the base exists, rerun with --base {base} to finish it")
+        return 1
+    actions, errors = plan(existing, tables)
+    for e in errors:
+        print(f"ERROR: {e}")
+    if errors:
+        return 1
+    if dry:
+        for kind, table, payload in actions:
+            print(f"would {kind.replace('_', ' ')} {table}" + ("" if kind == "create_table" else f".{payload['name']}"))
+        print(f"{len(actions)} change(s) planned")
+        return 0
+    rc = apply(base, existing, actions)
+    if rc:
+        if after_create:
+            print(f"ERROR: the base {base} exists but is incomplete; rerun with --base {base} to finish it")
+        return rc
+    if not after_create:
+        print(f"base_id: {base}")
+    print(f"ledger_schema: {schema} built")
+    return 0
+
+
 def main(argv):
     args = list(argv)
     dry = "--dry-run" in args
@@ -167,7 +207,7 @@ def main(argv):
     if "--workspace" in opts and not WORKSPACE_ID.match(opts["--workspace"]):
         print(f"ERROR: {opts['--workspace']!r} is not an Airtable workspace ID (wsp + 14 characters)")
         return 2
-    if not os.environ.get("AIRTABLE_TOKEN"):
+    if not os.environ.get("AIRTABLE_TOKEN") and not ("--workspace" in opts and dry):
         print("ERROR: AIRTABLE_TOKEN is not set; run: read -rs AIRTABLE_TOKEN && export AIRTABLE_TOKEN")
         return 2
     root = HERE.parents[3]
@@ -180,31 +220,16 @@ def main(argv):
             print(f"would create a base with tables: {', '.join(t for t, _ in tables)}")
             return 0
         body = {"name": opts.get("--name", "Agent ledger"), "workspaceId": opts["--workspace"],
-                "tables": [{"name": t, "fields": [field_spec(*f) for f in fs]} for t, fs in tables]}
+                "tables": [{"name": t, "fields": [field_spec(*f) for f in fs if f[1] not in COMPUTED_TYPES]}
+                           for t, fs in tables]}
         status, resp = call("POST", "/meta/bases", body)
         if status != 200:
             print(f"ERROR: create base failed ({status}): {resp.get('error', resp)}")
             return 1
-        print(f"base_id: {resp.get('id')}")
-        print(f"ledger_schema: {schema} built")
-        return 0
-    base = opts["--base"]
-    existing = existing_tables(base)
-    actions, errors = plan(existing, tables)
-    for e in errors:
-        print(f"ERROR: {e}")
-    if errors:
-        return 1
-    if dry:
-        for kind, table, payload in actions:
-            print(f"would {kind.replace('_', ' ')} {table}" + ("" if kind == "create_table" else f".{payload['name']}"))
-        print(f"{len(actions)} change(s) planned")
-        return 0
-    rc = apply(base, existing, actions)
-    if rc == 0:
+        base = resp.get("id")
         print(f"base_id: {base}")
-        print(f"ledger_schema: {schema} built")
-    return rc
+        return finish(base, tables, schema, dry=False, after_create=True)
+    return finish(opts["--base"], tables, schema, dry)
 
 
 if __name__ == "__main__":

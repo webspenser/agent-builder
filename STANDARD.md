@@ -865,8 +865,8 @@ byte-identical to the builder's. The agent owns
 `capabilities/ledger/tables.md`: its `ledger_schema` version and the
 tables it declares besides `Events`.
 
-- **`Events`** is the same in every agent: `Key` (formula, primary),
-  `At`, `Recorded At` (created time), `Run ID`, `Seq`, `Activity`,
+- **`Events`** is the same in every agent: `Run ID` (primary),
+  `Key` (formula), `At`, `Recorded At` (created time), `Seq`, `Activity`,
   `Trigger`, `Event`, `Subject`, `Outcome`, `Items In`, `Items Out`,
   `Cost USD`, `Duration s`, `Detail`, `Agent Version`, `Backfilled`.
   The list, with types, is `LEDGER_EVENTS` in `hooks/tool_check.py`.

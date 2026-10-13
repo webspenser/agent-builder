@@ -44,12 +44,13 @@ PLACEHOLDER = re.compile(r"(?<!\{)\{[A-Za-z_][A-Za-z0-9_]*\}(?!\})")
 LITERAL_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 LEDGER_INVARIANTS = ("append_only_events", "no_schema_change")
 # The standard ledger Events table (STANDARD.md, "Ledger"): (name, Airtable type, options).
-# A formula's options hold its expression. Key and Recorded At are computed by Airtable.
+# The first entry is the table's primary field. A formula's options hold its expression.
+# Key and Recorded At (LEDGER_COMPUTED) are computed by Airtable and created after the table.
 LEDGER_EVENTS = (
+    ("Run ID", "singleLineText", ()),
     ("Key", "formula", ('{Run ID} & "#" & {Seq}',)),
     ("At", "dateTime", ()),
     ("Recorded At", "createdTime", ()),
-    ("Run ID", "singleLineText", ()),
     ("Seq", "number", ()),
     ("Activity", "singleLineText", ()),
     ("Trigger", "singleSelect", ("scheduled", "interactive")),
