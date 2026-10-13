@@ -41,7 +41,7 @@ echo "== tool naming"
 if grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | grep -q .; then
   echo "FAIL: 'adapter' still used:"; grep -rniE '\badapters?\b' STANDARD.md README.md docs/how-it-works.md docs/writing-an-agent.md skills _template _capability-template | head; STATUS=1
 fi
-for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'server_match' 'lowercase' 'no_send' 'tool_check.py'; do
+for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'server_match' 'lowercase' 'no_external_send' 'tool_check.py'; do
   grep -qF -- "$want" _template/skills/add-tool/SKILL.md || { echo "FAIL: add-tool skill does not mention $want"; STATUS=1; }
 done
 grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }

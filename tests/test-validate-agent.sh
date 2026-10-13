@@ -30,11 +30,11 @@ make_valid_agent() { # make_valid_agent <dir> [name] [version] — a complete ag
   mkdir -p "$a"
   printf '%s\n' '# CRM contract' '' '## Operations' '' '| Operation | Arguments |' '|---|---|' \
     '| `create_lead` | `company` |' '| `get_lead` | `lead_id` |' '' '## Invariants' '' \
-    '- `draft_only` — only drafts' '- `no_send` — never sends' > "$c/contract.md"
+    '- `draft_only` — only drafts' '- `no_external_send` — never sends' > "$c/contract.md"
   printf '%s\n' '# Demo tool' '' '- `create_lead` — demo:create' '- `get_lead` — demo:get' '' '## Probe' '' 'Call demo:whoami.' > "$a/usage.md"
   printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: demo' > "$a/identity.yaml"
-  printf '%s\n' 'covers: [draft_only, no_send]' 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [create-lead]' '    at: [values]' '  - kind: update' '    tools: [update-lead]' '    at: [values]' > "$a/guard.yaml"
-  printf '%s\n' 'covers: [no_send]' 'deny: ["*send*"]' > "$d/guard.yaml"
+  printf '%s\n' 'covers: [draft_only, no_external_send]' 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [create-lead]' '    at: [values]' '  - kind: update' '    tools: [update-lead]' '    at: [values]' > "$a/guard.yaml"
+  printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' > "$d/guard.yaml"
   sync_agents "$d" "$name" "$ver"
 }
 sync_agents() { # sync_agents <dir> [name] [version] — rewrite plugin.json's agents list from subagents/
@@ -483,18 +483,18 @@ make_valid_agent "$FIX/matchbare"; sed -i.bak 's/^server_match: .*/server_match:
 fails_with "$FIX/matchbare" "$A/identity.yaml line 4: identity.yaml holds flat 'key: value' lines only (no lists or nesting)"
 make_valid_agent "$FIX/badpol"; printf '%s\n' 'covers: [draft_only' > "$FIX/badpol/$A/guard.yaml"
 fails_with "$FIX/badpol" "$A/guard.yaml: line 1: unclosed '['"
-make_valid_agent "$FIX/strange"; printf '%s\n' 'covers: [draft_only, no_send, other]' 'deny: ["*send*"]' > "$FIX/strange/$A/guard.yaml"
+make_valid_agent "$FIX/strange"; printf '%s\n' 'covers: [draft_only, no_external_send, other]' 'deny: ["*send*"]' > "$FIX/strange/$A/guard.yaml"
 fails_with "$FIX/strange" "$A/guard.yaml: covers names other, which is not an invariant of the contract"
 make_valid_agent "$FIX/nopolicy"; rm "$FIX/nopolicy/$A/guard.yaml"
-fails_with "$FIX/nopolicy" "$A: the contract has no_send, so guard.yaml must cover it"
+fails_with "$FIX/nopolicy" "$A: the contract has no_external_send, so guard.yaml must cover it"
 make_valid_agent "$FIX/nosendcov"; printf '%s\n' 'covers: [draft_only]' > "$FIX/nosendcov/$A/guard.yaml"
-fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_send"
-make_valid_agent "$FIX/instronly"; sed -i.bak '/no_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
+fails_with "$FIX/nosendcov" "$A/guard.yaml: covers must include no_external_send"
+make_valid_agent "$FIX/instronly"; sed -i.bak '/no_external_send/d' "$FIX/instronly/capabilities/crm/contract.md"; rm "$FIX/instronly/$A/guard.yaml"
 assert_pass $V "$FIX/instronly"   # a tool without a policy is allowed: instruction-only
 make_valid_agent "$FIX/acc"; sed -i.bak 's/^- `draft_only` — only drafts/- `draft_only` (acceptable) — only drafts/' "$FIX/acc/capabilities/crm/contract.md"
 assert_pass $V "$FIX/acc"   # an acceptable mark parses; the invariant id is still draft_only
-make_valid_agent "$FIX/accnosend"; sed -i.bak 's/^- `no_send` — never sends/- `no_send` (acceptable) — never sends/' "$FIX/accnosend/capabilities/crm/contract.md"
-fails_with "$FIX/accnosend" "capabilities/crm/contract.md: no_send cannot be marked (acceptable)"
+make_valid_agent "$FIX/accnosend"; sed -i.bak 's/^- `no_external_send` — never sends/- `no_external_send` (acceptable) — never sends/' "$FIX/accnosend/capabilities/crm/contract.md"
+fails_with "$FIX/accnosend" "capabilities/crm/contract.md: no_external_send cannot be marked (acceptable)"
 wrapdemo() { # wrapdemo <dir>: the demo tool becomes n8n-wrapped with a valid workflow
   local a="$1/capabilities/crm/tools/demo"
   printf '%s\n' 'wrapper: n8n' >> "$a/identity.yaml"
@@ -511,21 +511,21 @@ PY
 make_valid_agent "$FIX/wrapnodeny"; wrapdemo "$FIX/wrapnodeny"
 fails_with "$FIX/wrapnodeny" 'capabilities/crm/tools/demo is wrapped in n8n, so guard.yaml at the root must deny execute_workflow'
 make_valid_agent "$FIX/wrapok"; wrapdemo "$FIX/wrapok"
-printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*EXECUTE_WORKFLOW*", "*create_workflow*", "*update_workflow*",' \
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*EXECUTE_WORKFLOW*", "*create_workflow*", "*update_workflow*",' \
   '       "*archive_workflow*", "*publish_workflow*", "*test_workflow*", "*restore_workflow*"]' > "$FIX/wrapok/guard.yaml"
 assert_pass $V "$FIX/wrapok"
 make_valid_agent "$FIX/wrapbroad"; wrapdemo "$FIX/wrapbroad"
-printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*_workflow*", "*restore_workflow*"]' > "$FIX/wrapbroad/guard.yaml"
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*_workflow*", "*restore_workflow*"]' > "$FIX/wrapbroad/guard.yaml"
 assert_pass $V "$FIX/wrapbroad"   # a broad pattern that covers every dispatcher is enough
 make_valid_agent "$FIX/wrapnotest"; wrapdemo "$FIX/wrapnotest"
-printf '%s\n' 'covers: [no_send]' 'deny: ["*send*", "*execute_workflow*", "*create_workflow*", "*update_workflow*",' \
+printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*execute_workflow*", "*create_workflow*", "*update_workflow*",' \
   '       "*archive_workflow*", "*publish_workflow*"]' > "$FIX/wrapnotest/guard.yaml"
 fails_with "$FIX/wrapnotest" 'capabilities/crm/tools/demo is wrapped in n8n, so guard.yaml at the root must deny test_workflow'
 make_valid_agent "$FIX/noagentpolicy"; rm "$FIX/noagentpolicy/guard.yaml"
-fails_with "$FIX/noagentpolicy" "the contract of crm has no_send, so the agent needs a guard.yaml at its root that covers no_send"
+fails_with "$FIX/noagentpolicy" "the contract of crm has no_external_send, so the agent needs a guard.yaml at its root that covers no_external_send"
 make_valid_agent "$FIX/agentnocover"; printf '%s\n' 'deny: ["*send*"]' > "$FIX/agentnocover/guard.yaml"
-fails_with "$FIX/agentnocover" "the contract of crm has no_send, so the agent needs a guard.yaml at its root that covers no_send"
-make_valid_agent "$FIX/badagentpolicy"; printf '%s\n' 'covers: [no_send]' 'allow: [x]' 'deny: ["*send*"]' > "$FIX/badagentpolicy/guard.yaml"
+fails_with "$FIX/agentnocover" "the contract of crm has no_external_send, so the agent needs a guard.yaml at its root that covers no_external_send"
+make_valid_agent "$FIX/badagentpolicy"; printf '%s\n' 'covers: [no_external_send]' 'allow: [x]' 'deny: ["*send*"]' > "$FIX/badagentpolicy/guard.yaml"
 fails_with "$FIX/badagentpolicy" "guard.yaml: line 2: unknown key 'allow'"
 make_valid_agent "$FIX/dirpolicy"; rm "$FIX/dirpolicy/guard.yaml"; mkdir "$FIX/dirpolicy/guard.yaml"
 fails_with "$FIX/dirpolicy" "guard.yaml: cannot be read (Is a directory)"
@@ -573,4 +573,13 @@ fails_with "$FIX/no-addtool" "missing skills/add-tool/SKILL.md (agent.yaml lists
 make_valid_agent "$FIX/edit-addtool"; echo x >> "$FIX/edit-addtool/skills/add-tool/SKILL.md"
 fails_with "$FIX/edit-addtool" "skills/add-tool/SKILL.md differs from the Agent Standard reference copy (_template/skills/add-tool/SKILL.md in agent-builder)"
 
+echo "-- 7.0 invariants"
+make_valid_agent "$FIX/oldname"; sed -i.bak 's/no_external_send/no_send/g' "$FIX/oldname/capabilities/crm/contract.md"
+fails_with "$FIX/oldname" "capabilities/crm/contract.md: no_send was renamed no_external_send"
+make_valid_agent "$FIX/accowner"; printf '%s\n' '- `owner_only_send` (acceptable) — x' >> "$FIX/accowner/capabilities/crm/contract.md"
+fails_with "$FIX/accowner" "capabilities/crm/contract.md: owner_only_send cannot be marked (acceptable)"
+make_valid_agent "$FIX/badexempt"; printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [crm]' > "$FIX/badexempt/guard.yaml"
+fails_with "$FIX/badexempt" "guard.yaml: exempt names crm, whose contract has no owner_only_send"
+make_valid_agent "$FIX/exemptunknown"; printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [nope]' > "$FIX/exemptunknown/guard.yaml"
+fails_with "$FIX/exemptunknown" "guard.yaml: exempt names nope, which is not in capabilities"
 finish

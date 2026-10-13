@@ -102,7 +102,7 @@ skill, if this agent has one.
       line, `field_<name>: <ID>`, with nothing else on it: no bullet, no
       backticks or quotes, no trailing note. Anything else blocks the
       guarded call.
-   4. If the contract has a `no_send` invariant and the tool's
+   4. If the contract has a `no_external_send` invariant and the tool's
       `guard.yaml` does not list it in `covers`, refuse to bind it and
       say why. If the tool leaves an invariant uncovered that the
       contract marks `(acceptable)`, explain in plain words what the

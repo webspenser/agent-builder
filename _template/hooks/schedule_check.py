@@ -8,7 +8,7 @@ Usage:
 check  — for every schedule_<activity> in the instance's schedules.yaml:
          applies the unattended gate (every capability its activities use is
          bound, every contract invariant is in the bound tool's guard.yaml
-         covers, and no_send is also in the agent guard policy's covers;
+         covers, and no_external_send is also in the agent guard policy's covers;
          an invariant the contract marks (acceptable) and instance.yaml
          lists in accept_instruction_only counts as covered and is shown as
          ACCEPTED)
@@ -341,11 +341,11 @@ def expected(instance, repo=None):
             if len(providers) > 1:
                 entry["problems"].append(f"{cap} is bound more than once; the guard applies every binding")
             invs = invariants(cap)
-            if "no_send" in invs:
+            if "no_external_send" in invs:
                 try:
-                    if "no_send" not in agent_covers():
+                    if "no_external_send" not in agent_covers():
                         entry["problems"].append(
-                            f"{cap}: invariant no_send is not covered by the agent guard policy (guard.yaml at the package root)")
+                            f"{cap}: invariant no_external_send is not covered by the agent guard policy (guard.yaml at the package root)")
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
             try:

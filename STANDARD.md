@@ -339,7 +339,7 @@ mailbox. The package describes it in two layers:
   example one that depends on a record's state in another system) may
   be marked acceptable by writing ` (acceptable)` right after its id:
   ``- `enroll_ready_only` (acceptable) — …``. An instance may then
-  accept it as instruction-only (`accept_instruction_only`). `no_send`
+  accept it as instruction-only (`accept_instruction_only`). `no_external_send`
   can never be marked acceptable.
 - `capabilities/<capability>/tools/<tool>/` — one folder per system
   (see Tools).
@@ -372,7 +372,7 @@ files, each with one reader and one purpose:
   `covers` lists the invariants it enforces by mechanism. The rest are
   held only by the agent's instructions. A tool without `guard.yaml`
   works, but every invariant is instruction-only. An invariant named
-  `no_send` must be covered.
+  `no_external_send` must be covered.
 - `bootstrap.py` is optional, for tools that need a setup script. When
   it exists, `usage.md` must have a `## Setup` section, so a person can
   always create the fields by hand. `## Setup` lists each field or object
@@ -408,7 +408,7 @@ exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
   has a `## Probe` section;
 - `guard.yaml`, when present, parses with the engine's parser and its
   `covers` names only contract invariants;
-- when the contract has `no_send`, `guard.yaml` exists and covers it;
+- when the contract has `no_external_send`, `guard.yaml` exists and covers it;
 
 ### Wrapped tools (n8n)
 
@@ -493,7 +493,7 @@ setup's tools step continues with the new tool at its probe and binding
 sub-steps. The tool name `custom` is reserved for an instance's own tool,
 so the package target refuses it and `tool_check.py` fails a shipped tool
 folder with that name. It never writes credentials: logins stay in
-the host's connectors. It refuses to continue on a `no_send` contract
+the host's connectors. It refuses to continue on a `no_external_send` contract
 until `guard.yaml` covers it.
 
 ## Guard policy
@@ -704,7 +704,7 @@ agent, whatever the server, bound or not:
 
 ```yaml
 # guard.yaml — sales-partner agent guard policy
-covers: [no_send]
+covers: [no_external_send]
 deny: ["*send*", "*reply*", "*forward*", "*publish*", "*schedule_message*",
        "*cross_post*", "*posts_create*", "*bulk_upload_posts*", "*execute_write*"]
 ```
@@ -718,8 +718,8 @@ names are every suffix after `mcp__` that follows a `__`, with no
 `server_match`, so every suffix counts. A matching pattern blocks with
 `<tool> is denied (<pattern>)`; errors block as in a tool policy.
 
-When any capability's contract has a `no_send` invariant, the agent
-must ship this file and its `covers` must include `no_send`. The
+When any capability's contract has a `no_external_send` invariant, the agent
+must ship this file and its `covers` must include `no_external_send`. The
 validator and the schedule gate both check it.
 
 Globs match names, not behaviour: a connector whose send tool has an
@@ -790,7 +790,7 @@ symlink by that name) it blocks every MCP call, since its policy could
 never apply; the message says to fix `identity.yaml` (`tool_check.py`
 reports it).
 
-A custom tool bound to a `no_send` capability is covered by the agent
+A custom tool bound to a `no_external_send` capability is covered by the agent
 guard policy's deny list, whatever its own files say; `add-tool`,
 `tool_check.py` and the schedule gate still require its own
 `guard.yaml`.
@@ -828,7 +828,7 @@ Setup's tools step binds each capability:
   by hand or with an API key.
 - Write `bindings/<capability>.md`, including any `field_<name>` IDs the
   probe records.
-- Refuse to bind when the contract has `no_send` and the tool's
+- Refuse to bind when the contract has `no_external_send` and the tool's
   `covers` lacks it.
 - Write `bind_<capability>: <provider>` to `instance.yaml`.
 - In source mode, add the `PreToolUse` guard hook to
@@ -929,7 +929,7 @@ lines for it.
 An entry may be scheduled only if it passes the gate. For the entry's
 activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
-bound tool's `guard.yaml` `covers`. A `no_send` invariant must also be
+bound tool's `guard.yaml` `covers`. A `no_external_send` invariant must also be
 in the agent guard policy's `covers`. An invariant the contract marks
 `(acceptable)` and `instance.yaml` lists in `accept_instruction_only`
 counts as covered; the check prints it under the passing entry as
@@ -1037,14 +1037,14 @@ The validator checks:
   passes `tool_check.py` (the validator loads the template's copy): the
   identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
   and `guard.yaml` rules in Tools above, and
-  `guard.yaml` covering `no_send` when the contract has it.
+  `guard.yaml` covering `no_external_send` when the contract has it.
 - A `guard.yaml` at the package root parses as an agent guard policy.
-  When any contract has `no_send`, it must exist and its `covers` must
-  include `no_send`. When any tool says `wrapper: n8n`, its `deny`
+  When any contract has `no_external_send`, it must exist and its `covers` must
+  include `no_external_send`. When any tool says `wrapper: n8n`, its `deny`
   patterns must match each of `execute_workflow`, `create_workflow_from_code`, `update_workflow`, `archive_workflow`, `publish_workflow`, `unpublish_workflow`, `test_workflow` and `restore_workflow_version` (ignoring case; a broad pattern
   counts): `<tool folder> is wrapped in n8n, so guard.yaml at the root
   must deny <tool>`.
-- No contract marks `no_send` `(acceptable)`.
+- No contract marks `no_external_send` `(acceptable)`.
 - `hosts/` exists with `CLAUDE.md`, `GEMINI.md` and `AGENTS.md`, each at
   most 25 lines and pointing at `AGENT.md`.
 - An agent with capabilities ships `skills/add-tool/SKILL.md`,

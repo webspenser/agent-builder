@@ -80,7 +80,7 @@ skeleton is `_capability-template/` in the same root. The validator is
      does the same for a system connected in this session); the validator runs the same check. List the
      names in `agent.yaml` as `capabilities: a, b`. Skills and
      sub-agents name operations, never a system's tools. If the agent
-     must never send messages, give the capability a `no_send`
+     must never send messages, give the capability a `no_external_send`
      invariant and cover it: usually `deny: ["*send*", "*reply*",
      "*forward*"]` plus an `allow` list of the MCP tools `usage.md` uses.
      Confirm in `usage.md` that the provider has no other way to

@@ -168,15 +168,15 @@ arun() { # arun <rc> <label> <tool_name> [text]
   if [ "$rc" -eq "$1" ] && { [ -z "${4:-}" ] || printf '%s\n' "$out" | grep -qF -- "$4"; } && ! printf '%s' "$out" | grep -q Traceback; then
     _report ok "$2"; else _report no "$2 (rc=$rc): $out"; fi
 }
-policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'; aparses 0 "agent policy parses"
+policy 'covers: [no_external_send]' 'deny: ["*send*", "*reply*"]'; aparses 0 "agent policy parses"
 policy 'deny: ["*send*"]';                         aparses 0 "covers is optional"
-policy 'covers: [no_send]';                        aparses 1 "deny is required"
+policy 'covers: [no_external_send]';                        aparses 1 "deny is required"
 policy 'deny: []';                                 aparses 1 "deny may not be empty"
 policy 'deny: ["*send*"]' 'allow: [x]';            aparses 1 "allow is not an agent policy key"
 policy 'deny: ["*send*"]' 'writes:' '  - kind: create' '    tools: [c]' '    at: [v]'; aparses 1 "writes is not an agent policy key"
 policy 'covers: [Bad]' 'deny: ["*send*"]';         aparses 1 "covers ids are snake_case"
 : > "$W/guard.yaml";                               aparses 1 "empty agent policy"
-policy 'covers: [no_send]' 'deny: ["*send*", "*reply*"]'
+policy 'covers: [no_external_send]' 'deny: ["*send*", "*reply*"]'
 arun 2 "deny matches on any server" mcp__claude_ai_Slack__slack_send_message "Blocked by demo agent guard policy: slack_send_message is denied (*send*)"
 arun 2 "deny matches a suffix after __ in the server" mcp__x__gmail__reply "denied (*reply*)"
 arun 0 "replies is not reply" mcp__claude_ai_Attio__list-comment-replies
