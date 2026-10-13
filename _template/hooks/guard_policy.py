@@ -14,7 +14,8 @@ With server_match, `allow` only counts a tool-name suffix whose server segment
 "mcp__attio__purge__get-x" cannot ride on `allow: [get-*]`; `deny` still checks
 every suffix. Without it, `allow` considers every suffix.
 The policy format is a strict YAML subset (a `writes:` list says where values
-sit; `rules:` constrain them); see STANDARD.md "Guard policy".
+sit; `rules:` constrain them; `recipients:` pins send arguments to values recorded
+in bindings); see STANDARD.md "Guard policy".
 """
 import fnmatch
 import json
@@ -22,11 +23,13 @@ import re
 import sys
 import unicodedata
 
-KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only", "rules")
+KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
+        "rules", "recipients", "refuse_args")
 AGENT_KEYS = ("covers", "deny")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys")
 RULE_KEYS = ("field", "forbid", "create", "update", "any")
 WRITE_KEYS = ("kind", "tools", "at")
+RECIPIENT_KEYS = ("tools", "at", "bound")
 REFUSE_PRESETS = {
     "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
 }
@@ -35,6 +38,7 @@ SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\])?)*$")
 BINDING_LINE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(\S.*?)\s*$")
 BARE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+BARE_VALUE = re.compile(r"^[^\s<>\"',;]+$")
 
 
 class PolicyError(Exception):
@@ -189,6 +193,15 @@ def _validate(policy):
         for path in entry["at"]:
             if not PATH.match(path):
                 raise PolicyError(f"writes: {path} is not a path like values or \"records[].fields\"")
+    for entry in policy.get("recipients", []):
+        for k in ("tools", "at"):
+            if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
+                raise PolicyError(f"recipients: each entry needs a non-empty {k} list")
+        for path in entry["at"]:
+            if not PATH.match(path):
+                raise PolicyError(f"recipients: {path} is not a path like to or \"message.to\"")
+        if not isinstance(entry.get("bound"), str) or not SNAKE.match(entry["bound"]):
+            raise PolicyError("recipients: bound must be a snake_case binding key")
     if ("rules" in policy or "refuse_keys" in policy or "bound_keys_only" in policy) and not policy.get("writes"):
         raise PolicyError("writes is required when rules, refuse_keys or bound_keys_only are present")
     if "rules" in policy:
@@ -252,10 +265,11 @@ def _read(text, keys):
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
         i += 1
-        if key in ("rules", "writes"):
+        if key in ("rules", "writes", "recipients"):
             if value:
                 raise PolicyError(f"line {lineno}: {key}: takes '  - ...' items on the following lines")
-            policy[key], i = _parse_items(lines, i, key, RULE_KEYS if key == "rules" else WRITE_KEYS)
+            allowed = {"rules": RULE_KEYS, "writes": WRITE_KEYS, "recipients": RECIPIENT_KEYS}[key]
+            policy[key], i = _parse_items(lines, i, key, allowed)
             continue
         if not value:
             raise PolicyError(f"line {lineno}: {key} has no value")
@@ -303,7 +317,7 @@ def _matches(candidates, patterns):
     return any(fnmatch.fnmatchcase(c, p.lower()) for c in candidates for p in patterns)
 
 
-def _maps_at(obj, path):
+def _walk(obj, path):
     nodes = [obj]
     for part in path.split("."):
         many = part.endswith("[]")
@@ -322,10 +336,30 @@ def _maps_at(obj, path):
             else:
                 nxt.append(value)
         nodes = nxt
+    return nodes
+
+
+def _maps_at(obj, path):
+    nodes = _walk(obj, path)
     for node in nodes:
         if not isinstance(node, dict):
             raise PolicyError(f"{path}: attribute values are not an object")
     return nodes
+
+
+def _addresses_at(obj, path):
+    """Recipient strings at path: a string is one, a list of strings is its items, null is absent."""
+    out = []
+    for node in _walk(obj, path):
+        if node is None:
+            continue
+        if isinstance(node, str):
+            out.append(node)
+        elif isinstance(node, list) and all(isinstance(x, str) for x in node):
+            out.extend(node)
+        else:
+            raise PolicyError(f"{path}: a recipient must be a string or a list of strings")
+    return out
 
 
 def _leaves(value, unwrap):
@@ -346,6 +380,7 @@ def _leaves(value, unwrap):
 
 
 def read_bindings(path):
+    """Every `key: value` line, each key mapped to the set of its values (a key may repeat)."""
     if path == "-":
         return {}
     data = {}
@@ -355,16 +390,32 @@ def read_bindings(path):
             if not m:
                 continue
             key, value = m.group(1), m.group(2)
-            if key.startswith("field_"):
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "`'\"":
-                    value = value[1:-1]
-                if not BARE_ID.match(value):
-                    shown = "".join(c for c in m.group(2) if c.isprintable())[:60]
-                    raise PolicyError(f"bindings: {key} must be a bare ID, got {shown}")
-                data.setdefault(key, set()).add(value)
-                continue
-            data[key] = value
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "`'\"":
+                value = value[1:-1]
+            if key.startswith("field_") and not BARE_ID.match(value):
+                shown = "".join(c for c in m.group(2) if c.isprintable())[:60]
+                raise PolicyError(f"bindings: {key} must be a bare ID, got {shown}")
+            data.setdefault(key, set()).add(value)
     return data
+
+
+def _printable(value):
+    return "".join(c for c in str(value) if c.isprintable())[:80]
+
+
+def _recipient_problems(shown, entry, args, bindings):
+    values = [v for path in entry["at"] for v in _addresses_at(args, path)]
+    if not values:
+        return [f"{shown} names no recipient at {', '.join(entry['at'])}"]
+    bound = entry["bound"]
+    pinned = bindings.get(bound) or set()
+    if not pinned:
+        return [f"no {bound} line in bindings; re-run setup's tools step"]
+    if not all(BARE_VALUE.match(p) for p in pinned):
+        return [f"{bound} must be a bare value"]
+    allowed = {p.strip().lower() for p in pinned}
+    return [f"{_printable(v)} is not a pinned recipient ({bound})"
+            for v in values if v.strip().lower() not in allowed]
 
 
 def problems(policy, event, bindings, server_match=None):
@@ -382,6 +433,16 @@ def problems(policy, event, bindings, server_match=None):
             return [f"{shown} is denied ({pattern})"]
     if "allow" in policy and not _matches(allow_names, policy["allow"]):
         return [f"{shown} is not in the allow list"]
+    args = event.get("tool_input")
+    early = []
+    for entry in policy.get("recipients", []):
+        if not _matches(names, entry["tools"]):
+            continue
+        if not isinstance(args, dict):
+            raise PolicyError("tool_input is not an object")
+        early.extend(_recipient_problems(shown, entry, args, bindings))
+    if early:
+        return early
     rules = policy.get("rules", [])
     refuse = [REFUSE_PRESETS[p] for p in policy.get("refuse_keys", [])]
     keyed = policy.get("bound_keys_only") == "true"
@@ -389,7 +450,6 @@ def problems(policy, event, bindings, server_match=None):
         return []
     writes = policy.get("writes", [])
     matched = [w for w in writes if _matches(names, w["tools"])]
-    args = event.get("tool_input")
     if not isinstance(args, dict):
         if matched:
             raise PolicyError("tool_input is not an object")

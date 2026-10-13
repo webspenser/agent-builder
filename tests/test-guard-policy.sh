@@ -282,4 +282,34 @@ run 2 "forbid: update blocks the field on update" mcp__a__u '{"v":{"hs_pipeline_
 run 2 "forbid: update blocks on an unknown write checked as update" mcp__a__other '{"v":{"hs_pipeline_stage":"done"}}' "may not be changed after create"
 run 2 "forbid: update blocks a bound ID on update" mcp__a__u '{"v":{"stageprop1":"x"}}' "may not be changed after create" "$W/fb.md"
 
+echo "-- recipients"
+policy 'covers: [owner_only_send]' 'allow: [send-email, list-domains]' \
+  'recipients:' '  - tools: [send-email]' '    at: [to, cc, bcc]' '    bound: recipient_email' \
+  '  - tools: [send-email]' '    at: [from]' '    bound: sender_email'
+parses 0 "recipients block parses"
+printf '%s\n' 'recipient_email: owner@acme.com' 'recipient_email: `ops@acme.com`' "sender_email: 'no-reply@acme.com'" > "$W/b.md"
+run 0 "pinned to and from" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "case and spaces ignored" mcp__resend__send-email '{"to":[" Owner@ACME.com "],"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "string to, not a list" mcp__resend__send-email '{"to":"ops@acme.com","from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "null cc counts as absent" mcp__resend__send-email '{"to":["owner@acme.com"],"cc":null,"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 0 "backtick-quoted binding matches" mcp__resend__send-email '{"to":["ops@acme.com"],"from":"no-reply@acme.com"}' "" "$W/b.md"
+run 2 "other recipient blocked" mcp__resend__send-email '{"to":["lead@prospect.com"],"from":"no-reply@acme.com"}' "lead@prospect.com is not a pinned recipient (recipient_email)" "$W/b.md"
+run 2 "extra bcc blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"bcc":["lead@prospect.com"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
+run 2 "display-name form blocked" mcp__resend__send-email '{"to":["Owner <owner@acme.com>"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
+run 2 "other sender blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"me@acme.com"}' "me@acme.com is not a pinned recipient (sender_email)" "$W/b.md"
+run 2 "no recipient blocked" mcp__resend__send-email '{"from":"no-reply@acme.com"}' "send-email names no recipient at to, cc, bcc" "$W/b.md"
+run 2 "object recipient blocked" mcp__resend__send-email '{"to":{"email":"owner@acme.com"},"from":"no-reply@acme.com"}' "cannot check this call" "$W/b.md"
+run 2 "no binding line blocks" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "no recipient_email line in bindings" -
+printf '%s\n' 'recipient_email: Owner <owner@acme.com>' 'sender_email: no-reply@acme.com' > "$W/b2.md"
+run 2 "non-bare binding blocks" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "recipient_email must be a bare value" "$W/b2.md"
+run 0 "a tool outside recipients tools is not checked" mcp__resend__list-domains '{}' "" "$W/b.md"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]';                         parses 1 "recipients entry without bound"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: Bad-Key';    parses 1 "bound not snake_case"
+policy 'covers: [x]' 'recipients:' '  - at: [to]' '    bound: r';                          parses 1 "recipients entry without tools"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: ["bad path!"]' '    bound: r'; parses 1 "recipients bad path"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: r' '    kind: create'; parses 1 "unknown recipients key"
+printf '%s\n' 'field_status: fldAAAAAAAAAAAAAA' 'field_status: "fldBBBBBBBBBBBBBB"' > "$W/f.md"
+policy 'covers: [x]' 'writes:' '  - kind: update' '    tools: [u]' '    at: [values]' 'rules:' '  - field: status' '    forbid: update'
+run 2 "repeated field_ lines still both match" mcp__crm__u '{"values":{"fldBBBBBBBBBBBBBB":"x"}}' "may not be changed after create" "$W/f.md"
+
 finish
