@@ -891,8 +891,9 @@ tables it declares besides `Events`.
   the computed `Key` and `Recorded At`, and the agent tables' fields),
   and `ledger_schema`.
 - **Gate**: a scheduled activity using a capability with
-  `append_only_events` needs `base_id`, a `field_<name>` line for every
-  writable `Events` field, and `ledger_schema` equal to the package's.
+  `append_only_events` needs `base_id`, `table_events`, a `field_<name>`
+  line for every writable `Events` field, and `ledger_schema` equal to
+  the package's.
 - **Failure policy**: in `_ledger/contract.md`.
 
 ## Guard hook

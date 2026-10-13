@@ -277,6 +277,8 @@ def ledger_binding_problems(instance, cap):
     problems = []
     if not have.get("base_id"):
         problems.append(f"{cap}: bindings/{cap}.md has no base_id line; {fix}")
+    if not have.get("table_events"):
+        problems.append(f"{cap}: bindings/{cap}.md has no table_events line; {fix}")
     for name in tool_check.ledger_writable():
         key = "field_" + tool_check.norm_field(name)
         if not have.get(key):

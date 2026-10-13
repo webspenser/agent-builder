@@ -427,6 +427,8 @@ lbind "$W/l-field" 1 detail; OUT=$(python3 -B "$LSC" check "$W/l-field" --repo a
 expect 1 "missing field line fails" "bindings/ledger.md has no field_detail line; re-run setup's tools step"
 lbind "$W/l-base"; sed -i.bak '/^base_id/d' "$W/l-base/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-base" --repo acme/led 2>&1); RC=$?
 expect 1 "missing base_id fails" "bindings/ledger.md has no base_id line"
+lbind "$W/l-tbl"; sed -i.bak '/^table_events/d' "$W/l-tbl/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-tbl" --repo acme/led 2>&1); RC=$?
+expect 1 "missing table_events fails" "bindings/ledger.md has no table_events line"
 lbind "$W/l-none"; rm "$W/l-none/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-none" --repo acme/led 2>&1); RC=$?
 expect 1 "no bindings file fails" "bindings/ledger.md has no base_id line"
 

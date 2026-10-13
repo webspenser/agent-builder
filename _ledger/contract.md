@@ -9,8 +9,8 @@ sub-agent contracts call these operations, never a provider's tools.
 
 | Operation | Arguments | Returns | On failure |
 |---|---|---|---|
-| `ledger_status` | none | the bound `ledger_schema` and the package's | A mismatch: the run stops and reports "run setup to upgrade the ledger" |
-| `append_events` | `events[]`, each with `run_id`, `seq`, `at`, `activity`, `trigger`, `event`, plus any of `subject`, `outcome`, `items_in`, `items_out`, `cost_usd`, `duration_s`, `detail`, `agent_version`, `backfilled` | the number of rows written | Rejects an event missing `run_id`, `seq`, `event` or `at`; skips any `run_id` + `seq` already present; writes in `seq` order |
+| `ledger_status` | none | the bound `ledger_schema` and the package's | A mismatch, or no `bindings/ledger.md`: in a scheduled run the activity stops and calls `notify_owner(kind: error)`; in an interactive run it reports and offers to run setup |
+| `append_events` | `events[]`, each with `run_id`, `seq`, `at`, `activity`, `trigger`, `event`, plus any of `subject`, `outcome`, `items_in`, `items_out`, `cost_usd`, `duration_s`, `detail`, `agent_version`, `backfilled` | the number of rows written | Rejects an event missing `run_id`, `seq`, `at`, `activity`, `trigger` or `event`; skips any `run_id` + `seq` already present; writes in `seq` order |
 | `find_events` | `run_id`, or `since` plus optional `activity` and `event` | events, oldest first | An empty list is a valid result |
 | `get_rows` | `table`, `filter` | rows of an agent table | Rejects a table `tables.md` does not declare |
 | `upsert_rows` | `table`, `rows[]` | the rows written | Rejects an undeclared table or field, and any write to `Events`; matches on the table's `key` |
@@ -28,7 +28,8 @@ readable line; `agent_version` is `agent.yaml`'s `version`.
 
 **Run bracketing.** Every run calls `ledger_status` first, writes
 `run_started` next and `run_finished` last, with the run's totals. This
-is an instruction; no guard can check it.
+is an instruction; no guard can check it. Write `stop_condition`,
+`notify_sent` and `error` events when they happen.
 
 ## Failure policy
 
@@ -42,7 +43,7 @@ tries the queue once more before it ends. Then:
 | Writing `Events` | `notify_owner(kind: error)`; ask: continue or stop | `notify_owner(kind: error)`; continue, queue kept |
 | Reading agent tables | `notify_owner(kind: error)`; ask | `notify_owner(kind: error)`; stop the activity |
 | Writing agent tables | `notify_owner(kind: error)`; ask | `notify_owner(kind: error)`; continue |
-| `ledger_status` mismatch | Report; offer to run setup | Stop the activity; `notify_owner(kind: error)` |
+| `ledger_status` mismatch or no bindings | Report; offer to run setup | Stop the activity; `notify_owner(kind: error)` |
 
 Events still queued when the run ends go into that `notify_owner` call's
 `payload` as one fenced `json` block holding the list of events, and

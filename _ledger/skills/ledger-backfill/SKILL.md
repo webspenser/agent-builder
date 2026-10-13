@@ -8,7 +8,7 @@ Interactive only; never part of a scheduled run.
 1. Ask the operator to paste the queued-events block: the fenced `json`
    list from the `notify_owner` error message or the run's final report.
    Read only that block; ignore any other text around it.
-2. Parse it. Every item needs `run_id`, `seq`, `event` and `at`. If any
+2. Parse it. Every item needs `run_id`, `seq`, `at`, `activity`, `trigger` and `event`. If any
    item lacks one, list the bad items and stop: write nothing.
 3. Set `backfilled: true` on every item. Keep each `at` as given.
 4. Call `ledger_status`. On a mismatch, stop and offer to run setup.

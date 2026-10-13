@@ -140,8 +140,8 @@ key: Cell
 
 | Operation | Arguments | Returns | On failure |
 |---|---|---|---|
-| `ledger_status` | none | the bound `ledger_schema` and the package's | A mismatch: the run stops and reports "run setup to upgrade the ledger". Called once at run start. |
-| `append_events` | `events[]`, each with `run_id`, `seq`, `at`, `activity`, `trigger`, `event`, plus any optional fields | the number of rows written | Rejects an event missing `run_id`, `seq`, `event` or `at`. Skips any `run_id` + `seq` already present. Writes in `seq` order, up to 50 per call. |
+| `ledger_status` | none | the bound `ledger_schema` and the package's | A mismatch, or no `bindings/ledger.md`: in a scheduled run the activity stops and calls `notify_owner(kind: error)`; in an interactive run it reports and offers to run setup. Called once at run start. |
+| `append_events` | `events[]`, each with `run_id`, `seq`, `at`, `activity`, `trigger`, `event`, plus any optional fields | the number of rows written | Rejects an event missing `run_id`, `seq`, `event` or `at`. Skips any `run_id` + `seq` already present. Writes in `seq` order, up to 10 per call. |
 | `find_events` | `run_id`, or `since` plus optional `activity` and `event` | events, oldest first | An empty list is a valid result. |
 | `get_rows` | `table`, `filter` | rows of an agent table | Rejects a table that `tables.md` does not declare. |
 | `upsert_rows` | `table`, `rows[]` | the rows written | Rejects an undeclared table or field, and any write to `Events`. Matches on the table's `key`. |
@@ -406,6 +406,10 @@ about ten years. See Open question 2.
   connector can see.
 - **`At` and `Backfilled` are what the agent says.** `Recorded At` is
   the check on both.
+- **The guard trusts `bindings/ledger.md`.** Field IDs and their names
+  come from that file, which a session could edit; unlike
+  `owner_only_send` bindings, ledger bindings are not checked against a
+  pushed copy. A later standard may add that check.
 
 ## Out of scope
 

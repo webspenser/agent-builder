@@ -502,7 +502,8 @@ this check can stop.
 An agent can keep a ledger: every run writes what it did to an Airtable
 base the business owns. The guard lets the agent add rows to that record
 but never change or delete one, and never change the base's structure,
-so the record can be trusted as an audit trail.
+so the record works as an audit trail (see the spec's stated limits for
+what it does not prevent).
 
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a

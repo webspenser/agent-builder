@@ -13,13 +13,19 @@ lowercase with spaces as `_`); every write keys fields by those IDs.
   `filters` `field_run_id` = the run's `run_id`, `fieldIds`
   [`field_seq`], to learn which `seq` values exist. Then
   `airtable:create_records_for_table` on `table_events` with the
-  missing events in `seq` order, up to 50 per call. `fields` keys are
+  missing events in `seq` order, up to 10 per call. `fields` keys are
   `field_<name>` IDs; select values are plain strings (`"run_started"`).
   Never write `Key` or `Recorded At`: Airtable computes them.
 - `find_events` — `airtable:list_records_for_table` on `table_events`
-  with `filters` on `field_run_id`, or on `field_at` (`>=` the `since`
-  date) plus `field_activity` and `field_event` when given; `sort` by
-  `field_at`, then `field_seq`.
+  with `filters` on `field_run_id` (= the run_id) when a run_id is
+  given, otherwise on `field_activity` (= the activity); both are text
+  fields, so a plain string works. Never filter on `field_event` or
+  `field_at`: single-select filters need choice IDs and date filters
+  need a date-value object. `sort` by `field_at` desc, then
+  `field_seq`. Then keep, in the agent, only rows whose `At` is on or
+  after `since` and whose `Event` equals `event` when given. Select
+  values may come back as objects (`{"name": "step", …}`): compare on
+  the name.
 - `get_rows` — `airtable:list_records_for_table` on `table_<name>` with
   `filters`.
 - `upsert_rows` — `airtable:update_records_for_table` on `table_<name>`
@@ -88,5 +94,7 @@ a write.
    for `Events` and each agent table; `field_<name>: <fld…>` for every
    field the agent writes (every field except `Key` and `Recorded At`);
    and `ledger_schema: <n>` copied from `tables.md`.
+4. Commit and push `bindings/ledger.md`, then re-run the `schedule`
+   skill so scheduled runs pick up the ledger.
 
 The probe only reads.
