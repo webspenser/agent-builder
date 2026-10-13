@@ -6,7 +6,9 @@ Probed 2026-10-12 from a Claude Code session with the claude.ai Resend connector
 ## Server prefix
 
 Tool names appear as `mcp__claude_ai_Resend__<tool>`. The server segment,
-lowercased, is `claude_ai_resend`; this becomes the tool's `server_match`.
+lowercased, is `claude_ai_resend`. The tool's `server_match` is `resend`: the
+engine matches it as a substring of the server segment, so it also covers a
+locally configured server named `resend`.
 
 ## Tools
 
