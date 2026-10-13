@@ -207,7 +207,7 @@ mkpin() { # mkpin <dir> [no-bindings]: instance repo pushed to its own bare remo
   git init -q --bare "$1-remote.git"; git -C "$1" init -q; git -C "$1" add -A; git -C "$1" commit -q -m init
   git -C "$1" remote add origin "$1-remote.git"; git -C "$1" push -q -u origin HEAD 2>/dev/null
 }
-PINMSG="bindings/owner_notify.md must be committed and pushed before owner_notify can send"
+PINMSG="bindings/owner_notify.md must be committed and pushed before owner_notify can run"
 echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "uncommitted bindings edit: blocked" "$PINMSG"
 git -C "$X" checkout -q -- bindings/owner_notify.md
@@ -300,5 +300,29 @@ run_guard "$U" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com
 printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' > "$PKG/guard.yaml"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no exempt key: no exemption" "agent guard policy: send-email is denied"
 rm -rf "$PKG/capabilities/owner_notify"
+
+echo "-- pinned values need the pushed copy (non-exempt capability)"
+ST="$PKG/capabilities/scraping/tools/apify"; mkdir -p "$ST"
+printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PKG/capabilities/scraping/contract.md"
+printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$ST/identity.yaml"
+printf '%s\n' '`find_businesses`' '## Probe' 'x' > "$ST/usage.md"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' > "$ST/guard.yaml"
+S="$W/scrape"; mkdir -p "$S/bindings"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' 'bind_scraping: apify' > "$S/instance.yaml"
+printf '%s\n' 'max_places: 60' > "$S/bindings/scraping.md"
+SMSG="bindings/scraping.md must be committed and pushed before scraping can run"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "no git: blocked" "$SMSG"
+git -C "$S" init -q; git -C "$S" add -A; git -C "$S" commit -q -m init
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "no upstream: blocked" "$SMSG"
+git init -q --bare "$W/scrape-remote.git"; git -C "$S" remote add origin "$W/scrape-remote.git"; git -C "$S" push -q -u origin HEAD 2>/dev/null
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "pushed and in limit: passes"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          expect 2 "pushed, over limit: blocked" "5000 is not a pinned value (max_places)"
+printf '%s\n' 'max_places: 5000' > "$S/bindings/scraping.md"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          expect 2 "edited limit, not pushed: blocked" "$SMSG"
+git -C "$S" commit -q -am raise
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          expect 2 "committed, not pushed: blocked" "$SMSG"
+git -C "$S" reset -q --hard origin/HEAD 2>/dev/null || git -C "$S" reset -q --hard HEAD~1
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "restored: passes"
+run_guard "$S" "$(call mcp__claude_ai_Attio__list-records '{}')";             expect 0 "other servers are unaffected"
 
 finish
