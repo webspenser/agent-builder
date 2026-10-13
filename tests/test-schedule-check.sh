@@ -450,5 +450,16 @@ expect 0 "scraping with max_places passes" "PASS  pin-agent: scrape (pin)"
 printf '%s\n' 'other: 1' > "$PI2/bindings/scraping.md"
 OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
 expect 1 "scraping without max_places fails" "bindings/scraping.md has no max_places line (the apify tool pins values to it)"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' \
+  'limits:' '  - tools: [run-maps]' '    at: [startUrls]' '    bound: max_sites' > "$PP/capabilities/scraping/tools/apify/guard.yaml"
+printf '%s\n' 'max_places: 60' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "a limits bound without its line fails" "bindings/scraping.md has no max_sites line (the apify tool pins values to it)"
+printf '%s\n' 'max_places: 60' 'max_sites: two urls' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "a non-bare limits bound fails" "bindings/scraping.md max_sites must be a bare value (the apify tool pins values to it)"
+printf '%s\n' 'max_places: 60' 'max_sites: 2' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 0 "both bound lines present passes" "PASS  pin-agent: scrape (pin)"
 
 finish

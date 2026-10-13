@@ -578,6 +578,20 @@ recipients:
 refuse_args: [draftId, replyToMessageId]
 ```
 
+A tool that scrapes caps how much one call may ask for, and refuses
+nested arguments it cannot let through:
+
+```yaml
+# capabilities/scraping/tools/apify/guard.yaml
+covers: [pinned_inputs]
+allow: [crawl]
+refuse_args: ["startUrls[].payload", "startUrls[].method", proxyConfig]
+limits:
+  - tools: [crawl]
+    at: [startUrls]
+    bound: max_sites
+```
+
 ### Grammar
 
 The policy is a strict subset of YAML. Anything outside it is a
@@ -597,14 +611,14 @@ validation error and, at runtime, a block.
   scalar may not contain its own quote character, and a double-quoted
   one may not contain a backslash. A list item is one scalar
   (`["a" "b"]` is an error).
-- The exceptions are `rules:`, `writes:` and `recipients:`, whose values
+- The exceptions are `rules:`, `writes:`, `recipients:` and `limits:`, whose values
   are block lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `create:`,
   `update:`, `any:`, or `field:` plus `forbid: true` or `forbid: update`;
   `forbid` takes no other value and is never combined with `create`,
   `update` or `any`. A `writes` item holds `kind:`, `tools:`
-  and `at:`, the last two as flow lists. A `recipients` item holds
-  `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A flow list in an item may
+  and `at:`, the last two as flow lists. A `recipients` or `limits` item
+  holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
@@ -624,7 +638,8 @@ validation error and, at runtime, a block.
 | `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
 | `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Pins argument values (text or numbers) to values recorded in bindings: every value at those paths must equal a `<bound>: <value>` line |
-| `refuse_args` | no | Top-level argument names a call may not use (any value but `null` or `""` blocks) |
+| `limits` | no | A list of `{tools, at, bound}` entries, the same shape as `recipients`. Caps a size instead of pinning a value: each list at an `at` path may be no longer, and each number no larger, than the one number in the `<bound>` binding line. A path the call does not have is allowed |
+| `refuse_args` | no | Argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value |
 
 ### Semantics
 
@@ -637,7 +652,7 @@ validation error and, at runtime, a block.
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
-2. **Recipients and refused arguments.** These run after `allow` and
+2. **Recipients, limits and refused arguments.** These run after `allow` and
    `deny`. Every problem they find is reported, and any one blocks the
    call before writes are read.
 
@@ -648,6 +663,17 @@ validation error and, at runtime, a block.
    value other than JSON `null` or `""` (`0`, `false` and an empty list
    included) is blocked: `<tool> may not use <arg>`, with `<arg>` as the
    call sent it.
+
+   A `refuse_args` entry that is a path (anything but a plain name) is
+   walked through the call's input. Each segment is compared with the
+   key the way a plain name is (lowercased, `_` and `-` removed), and
+   every key that matches counts. A value found at the path that is not
+   `null` and not `""` blocks: `<tool> may not use <path>`, with
+   `<path>` as the policy wrote it. A `null` where an object or list is
+   expected holds nothing. Any other wrong shape (a scalar where a list
+   or object is expected, a list item that is not an object) counts as
+   present and blocks: a mismatch never raises. With a path entry
+   present, a call whose input is not an object blocks.
 
    *Recipients.* For each `recipients` entry whose `tools` match the
    call (suffix matching as in step 1; a matching call whose input is
@@ -680,8 +706,28 @@ validation error and, at runtime, a block.
    at setup: a send's recipients, or the size of a scrape. `guard.sh`
    also requires the bindings file to match its pushed copy, for an
    exempt capability and for every bound tool whose policy has a
-   `recipients` entry, so an edit to the file does not take effect until
-   it is pushed (see Guard hook).
+   `recipients` or `limits` entry, so an edit to the file does not take
+   effect until it is pushed (see Guard hook).
+
+   *Limits.* For each `limits` entry whose `tools` match the call (a
+   matching call whose input is not an object blocks):
+
+   1. Read every `<bound>: <value>` line in the bindings. With none,
+      block: `no <bound> line in bindings; re-run setup's tools step`.
+      The lines must agree on one number, parsed as in Recipients step 4;
+      more than one distinct number, or a value that is not a number,
+      blocks: `<bound> must be one number`.
+   2. Collect the values at every `at` path, with segments compared as
+      for nested `refuse_args`. `null` is skipped, and so is a path the
+      call does not have: limits cap, they do not require. A wrong shape
+      on the way (a scalar where an object or list is expected) blocks as
+      `cannot check this call`.
+   3. A list counts as its length. A number, or a string that is numeric
+      as in Recipients step 4, counts as its value. Anything else (a
+      boolean, an object, a non-numeric string) blocks: `<path>: a
+      limited value must be a list or a number`.
+   4. A count above the bound blocks: `<tool> exceeds <bound> at <path>
+      (<count> > <bound value>)`.
 
 3. **Writes.** The matching entries are the `writes` entries whose
    `tools` match the call's tool name, using the same suffix matching as
@@ -761,8 +807,12 @@ Each is an invalid policy, and fails closed.
 - A `writes` entry has an unknown key.
 - A `recipients` entry has an unknown key, or no `bound`, or a `bound`
   that is not `snake_case`; or `recipients:` has no items.
-- `refuse_args` is empty, or holds a name that is not a plain argument
-  name (`^[A-Za-z_][A-Za-z0-9_]*$`).
+- A `limits` entry is invalid in the same ways as a `recipients` entry
+  (unknown key, no `bound`, a `bound` that is not `snake_case`, a missing
+  or empty `tools` or `at`, a bad `at` path); or `limits:` has no items.
+- `refuse_args` is empty, or holds an entry that is neither a plain
+  argument name (`^[A-Za-z_][A-Za-z0-9_]*$`) nor a path like `a.b` or
+  `a[].b` (the `writes` path grammar).
 - `rules`, `refuse_keys` or `bound_keys_only` is present without `writes`.
 - `bound_keys_only` is not `true`.
 - `forbid` is not `true` or `update`.
@@ -845,7 +895,7 @@ has `owner_only_send`; the validator rejects any other.
   next (case-insensitive; the rule `allow` uses). A match anywhere else
   in the name does not count. Nothing else is skipped: the `bind_` loop
   still runs the tool's own policy, which must pass the call (`allow`,
-  `recipients`, `refuse_args`). A `server_match` that is not
+  `recipients`, `limits`, `refuse_args`). A `server_match` that is not
   `[a-z0-9_-]+` blocks.
 
 Globs match names, not behaviour: a connector whose send tool has an
@@ -923,8 +973,8 @@ policy. `--agent <guard.yaml> [label] [--exempt <server_match>]...` and
 Two query modes serve `guard.sh`: `--exempt-caps <guard.yaml>` prints each
 `exempt` capability of an agent policy, and `--covers <guard.yaml>`
 prints each `covers` id of a tool policy, and `--pins <guard.yaml>` prints
-each `bound` key of a tool policy's `recipients` entries (nothing when it
-pins none). It never prints a traceback.
+each `bound` key of a tool policy's `recipients` entries and then its
+`limits` entries, each key once (nothing when it pins none). It never prints a traceback.
 
 Inside an instance of the agent (source mode included), for an MCP
 call, `guard.sh` first runs the agent guard policy when `guard.yaml`
@@ -960,7 +1010,7 @@ agent guard policy:`.
 
 **Pinned values.** The same pushed-copy check, with the same message,
 also runs for every bound tool whose policy pins values (a `recipients`
-entry, listed by `--pins`), exempt or not, whatever the invariant. The
+or `limits` entry, listed by `--pins`), exempt or not, whatever the invariant. The
 bind loop reads the tool's `guard.yaml` once into private scratch and
 runs `--pins` on that copy; a `--pins` that fails blocks the call. When
 the policy pins values, the engine then reads a private copy of the
@@ -1159,7 +1209,7 @@ the send and pinning invariants:
 - A `no_external_send` invariant must also be in the agent guard policy's
   `covers`.
 - An `owner_only_send` or `pinned_inputs` capability needs the bindings
-  to hold at least one line for every `recipients` `bound` key of the
+  to hold at least one line for every `recipients` and `limits` `bound` key of the
   bound tool (`<capability>: bindings/<capability>.md has no <key> line
   (the <provider> tool pins values to it) ...`), each a bare value
   (`<capability>: bindings/<capability>.md <key> must be a bare value

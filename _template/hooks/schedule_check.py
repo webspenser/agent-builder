@@ -253,8 +253,8 @@ def agent_exempt():
         raise CheckError(f"guard.yaml: {err}")
 
 
-def recipient_keys(folder):
-    """The bound keys a tool's guard.yaml pins values to."""
+def pinned_keys(folder):
+    """The bound keys a tool's guard.yaml takes values from: its recipients and its limits."""
     policy = folder / "guard.yaml"
     if not policy.is_file():
         return []
@@ -262,7 +262,7 @@ def recipient_keys(folder):
         parsed = guard_policy.parse(policy.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
         raise CheckError(f"{folder.name}/guard.yaml: {err}")
-    return sorted({entry["bound"] for entry in parsed.get("recipients", [])})
+    return sorted({entry["bound"] for key in ("recipients", "limits") for entry in parsed.get(key, [])})
 
 
 def ledger_binding_problems(instance, cap):
@@ -432,7 +432,7 @@ def expected(instance, repo=None):
                     bfile = pathlib.Path(instance) / "bindings" / f"{cap}.md"
                     try:
                         have = guard_policy.read_bindings(str(bfile)) if bfile.is_file() else {}
-                        for key in recipient_keys(folder):
+                        for key in pinned_keys(folder):
                             if not have.get(key):
                                 entry["problems"].append(
                                     f"{cap}: bindings/{cap}.md has no {key} line (the {provider} tool pins "
