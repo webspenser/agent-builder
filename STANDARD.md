@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.1. It is in active development: agents track
+The standard is 7.2. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.1"`.
+`agent.yaml`, and the validator requires `standard: "7.2"`.
 
 ## Directory layout
 
@@ -232,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.1"                # the Agent Standard version followed
+standard: "7.2"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -348,8 +348,11 @@ mailbox. The package describes it in two layers:
   `(acceptable)`, and a contract may not list both. The id `no_send`
   was renamed `no_external_send` in 7.0 and is an error.
   Two more ids are reserved for the ledger: `append_only_events` and
-  `no_schema_change` (see Ledger). None of the four can be marked
-  `(acceptable)`.
+  `no_schema_change` (see Ledger). A fifth, `pinned_inputs`, is reserved
+  for limits on a call's size: every input that limits a call's size
+  (a result count, a page size, a budget) comes only from values pinned
+  in `bindings/<capability>.md` at interactive setup. None of the five
+  can be marked `(acceptable)`.
 - `capabilities/<capability>/tools/<tool>/` — one folder per system
   (see Tools).
 
@@ -421,7 +424,8 @@ exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
   `guard.yaml` exists and covers it; a contract with `no_send` fails
   (`no_send was renamed no_external_send`), and one with both send
   invariants fails;
-- when the contract has `owner_only_send`, `guard.yaml` also has an
+- when the contract has `owner_only_send` or `pinned_inputs` (and the
+  policy covers it), `guard.yaml` also has an
   `allow` list and at least one `recipients` entry. Each `allow` entry
   is an exact tool name (no `*`, `?` or `[`), and is either pinned by a
   `recipients` entry (the engine's case-insensitive match over its
@@ -619,7 +623,7 @@ validation error and, at runtime, a block.
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
 | `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
-| `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Every value at those paths must equal a `<bound>: <value>` line in bindings |
+| `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Pins argument values (text or numbers) to values recorded in bindings: every value at those paths must equal a `<bound>: <value>` line |
 | `refuse_args` | no | Top-level argument names a call may not use (any value but `null` or `""` blocks) |
 
 ### Semantics
@@ -650,26 +654,34 @@ validation error and, at runtime, a block.
    not an object blocks):
 
    1. Collect the values at every `at` path. `null` counts as absent. A
-      string is one value; a list of strings is its items. An absent
-      path is skipped. Any other shape (an object, a number, a nested
-      list) blocks.
+      string or a number is one value; a list of them is its items. An
+      absent path is skipped. Any other shape (a boolean, an object, a
+      nested list) blocks: `<path>: a pinned value must be a string, a
+      number, or a list of them`.
    2. If no value was collected across all the paths, block: `<tool>
-      names no recipient at <paths>`.
+      names no pinned value at <paths>`.
    3. Read every `<bound>: <value>` line in `bindings/<capability>.md`.
       The key may repeat; each line adds one allowed value. With no such
       line, block: `no <bound> line in bindings; re-run setup's tools
       step`. If any of them is not a bare value (see Field identity),
       block: `<bound> must be a bare value`.
    4. Each collected value, trimmed and lowercased, must equal one bound
-      value, trimmed and lowercased. A display-name form (`Owner
+      value, trimmed and lowercased. A number also matches a numerically
+      equal bound value: a value is numeric when it is a JSON number or
+      a string matching `^[+-]?[0-9]+(\.[0-9]+)?$` (ASCII digits), and
+      numbers compare exactly as decimals, with the bound values parsed
+      the same way (`10`, `10.0` and `"10"` are equal; a non-finite
+      number never matches). A display-name form (`Owner
       <owner@example.com>`) is not unwrapped and does not match: it
-      fails closed. Otherwise block: `<value> is not a pinned recipient
+      fails closed. Otherwise block: `<value> is not a pinned value
       (<bound>)`.
 
-   A `recipients` entry limits a send to values the operator confirmed
-   at setup. For an exempt capability, `guard.sh` also requires the
-   bindings file to match its pushed copy, so an edit to the file does
-   not take effect until it is pushed (see Guard hook).
+   A `recipients` entry limits a call to values the operator confirmed
+   at setup: a send's recipients, or the size of a scrape. `guard.sh`
+   also requires the bindings file to match its pushed copy, for an
+   exempt capability and for every bound tool whose policy has a
+   `recipients` entry, so an edit to the file does not take effect until
+   it is pushed (see Guard hook).
 
 3. **Writes.** The matching entries are the `writes` entries whose
    `tools` match the call's tool name, using the same suffix matching as
@@ -910,7 +922,9 @@ policy. `--agent <guard.yaml> [label] [--exempt <server_match>]...` and
 `--check --agent <guard.yaml>` do the same for the agent guard policy.
 Two query modes serve `guard.sh`: `--exempt-caps <guard.yaml>` prints each
 `exempt` capability of an agent policy, and `--covers <guard.yaml>`
-prints each `covers` id of a tool policy. It never prints a traceback.
+prints each `covers` id of a tool policy, and `--pins <guard.yaml>` prints
+each `bound` key of a tool policy's `recipients` entries (nothing when it
+pins none). It never prints a traceback.
 
 Inside an instance of the agent (source mode included), for an MCP
 call, `guard.sh` first runs the agent guard policy when `guard.yaml`
@@ -939,10 +953,20 @@ The call is also blocked unless `bindings/<capability>.md` is a regular
 file, not a symlink, whose bytes equal the upstream (`@{u}`) copy at
 `bindings/<capability>.md`, root-relative, so the instance must be the
 repository root: `bindings/<capability>.md must be committed and pushed
-before <capability> can send (it differs from the upstream copy, is
+before <capability> can run (it differs from the upstream copy, is
 untracked, or the instance has no git upstream); re-run setup's tools
 step, then commit and push`. The block is prefixed `Blocked by <agent>
-agent guard policy:`. `git` runs with every transport refused, lazy fetch
+agent guard policy:`.
+
+**Pinned values.** The same pushed-copy check, with the same message,
+also runs for every bound tool whose policy pins values (a `recipients`
+entry, listed by `--pins`), exempt or not, whatever the invariant. The
+bind loop reads the tool's `guard.yaml` once into private scratch and
+runs `--pins` on that copy; a `--pins` that fails blocks the call. When
+the policy pins values, the engine then reads a private copy of the
+verified upstream bindings blob, not the working-tree file, so the bytes
+that were checked are the bytes that decide. A policy that pins nothing
+needs no pushed bindings. `git` runs with every transport refused, lazy fetch
 off, replace objects off, system config ignored, fsmonitor off, stdin from
 `/dev/null` and its output discarded, and the upstream blob's bytes are read
 directly, so no diff driver or clean filter runs.
@@ -1130,15 +1154,19 @@ invariants:
 
 - A `no_external_send` invariant must also be in the agent guard policy's
   `covers`.
-- An `owner_only_send` capability needs the bindings to hold at least one
-  line for every `recipients` `bound` key of the bound tool
-  (`<capability>: bindings/<capability>.md has no <key> line ...`), each
-  a bare value (`<capability>: bindings/<capability>.md <key> must be a
-  bare value ...`), and
-  the agent guard policy must list the capability in `exempt`
-  (`owner_only_send needs the agent guard policy to list <capability> in
-  exempt`). The gate does not check that the bindings file is pushed; the
-  guard does that on every send.
+- An `owner_only_send` or `pinned_inputs` capability needs the bindings
+  to hold at least one line for every `recipients` `bound` key of the
+  bound tool (`<capability>: bindings/<capability>.md has no <key> line
+  (the <provider> tool pins values to it) ...`), each a bare value
+  (`<capability>: bindings/<capability>.md <key> must be a bare value
+  (the <provider> tool pins values to it) ...`).
+- An `owner_only_send` capability also needs the agent guard policy to
+  list it in `exempt` (`owner_only_send needs the agent guard policy to
+  list <capability> in exempt`). A `pinned_inputs` capability needs no
+  exemption.
+
+  The gate does not check that the bindings file is pushed; the guard
+  does that on every call that depends on it.
 
 An invariant the contract marks
 `(acceptable)` and `instance.yaml` lists in `accept_instruction_only`
@@ -1230,7 +1258,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.1"`.
+- `agent.yaml` exists, and its `standard` is `"7.2"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -1247,8 +1275,9 @@ The validator checks:
   passes `tool_check.py` (the validator loads the template's copy): the
   identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
   and `guard.yaml` rules in Tools above, and
-  `guard.yaml` covering `no_external_send` or `owner_only_send` when the
-  contract has it, with the extra `owner_only_send` rules (`allow` list,
+  `guard.yaml` covering `no_external_send`, `owner_only_send` or
+  `pinned_inputs` when the contract has it, with the extra
+  `owner_only_send` and `pinned_inputs` rules (an exact `allow` list,
   `recipients`).
 - A `guard.yaml` at the package root parses as an agent guard policy.
   When any contract has `no_external_send`, it must exist and its `covers` must
@@ -1260,7 +1289,8 @@ The validator checks:
   counts): `<tool folder> is wrapped in n8n, so guard.yaml at the root
   must deny <tool>`.
 - No contract marks `no_external_send`, `owner_only_send`,
-  `append_only_events` or `no_schema_change` `(acceptable)`:
+  `append_only_events`, `no_schema_change` or `pinned_inputs`
+  `(acceptable)`:
   `<invariant> cannot be marked (acceptable)`.
 - No contract lists `no_send`: `no_send was renamed no_external_send`.
   No contract lists both `no_external_send` and `owner_only_send`
