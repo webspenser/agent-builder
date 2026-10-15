@@ -253,8 +253,9 @@ def agent_exempt():
         raise CheckError(f"guard.yaml: {err}")
 
 
-def recipient_keys(folder):
-    """The bound keys a tool's guard.yaml pins recipients to."""
+def pinned_keys(folder):
+    """(bound key, must be a number) for each key a tool's guard.yaml takes values from: its recipients
+    and its limits; a limits key must be a number."""
     policy = folder / "guard.yaml"
     if not policy.is_file():
         return []
@@ -262,7 +263,9 @@ def recipient_keys(folder):
         parsed = guard_policy.parse(policy.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, guard_policy.PolicyError) as err:
         raise CheckError(f"{folder.name}/guard.yaml: {err}")
-    return sorted({entry["bound"] for entry in parsed.get("recipients", [])})
+    numeric = {entry["bound"] for entry in parsed.get("limits", [])}
+    keys = {entry["bound"] for key in ("recipients", "limits") for entry in parsed.get(key, [])}
+    return [(key, key in numeric) for key in sorted(keys)]
 
 
 def ledger_binding_problems(instance, cap):
@@ -428,19 +431,23 @@ def expected(instance, repo=None):
                 except CheckError as err:
                     entry["problems"].append(f"{cap}: {err}")
                     continue
-                if "owner_only_send" in invs:
+                if set(tool_check.PIN_INVARIANTS) & set(invs):
                     bfile = pathlib.Path(instance) / "bindings" / f"{cap}.md"
                     try:
                         have = guard_policy.read_bindings(str(bfile)) if bfile.is_file() else {}
-                        for key in recipient_keys(folder):
+                        for key, numeric in pinned_keys(folder):
                             if not have.get(key):
                                 entry["problems"].append(
                                     f"{cap}: bindings/{cap}.md has no {key} line (the {provider} tool pins "
-                                    "recipients to it); re-run setup's tools step")
+                                    "values to it); re-run setup's tools step")
                             elif not all(guard_policy.BARE_VALUE.match(v) for v in have[key]):
                                 entry["problems"].append(
                                     f"{cap}: bindings/{cap}.md {key} must be a bare value (the {provider} tool "
-                                    "pins recipients to it); re-run setup's tools step")
+                                    "pins values to it); re-run setup's tools step")
+                            elif numeric and any(guard_policy._as_number(v) is None for v in have[key]):
+                                entry["problems"].append(
+                                    f"{cap}: bindings/{cap}.md {key} must be a number (the {provider} tool "
+                                    "limits a value with it); re-run setup's tools step")
                     except (OSError, UnicodeDecodeError, CheckError, guard_policy.PolicyError) as err:
                         entry["problems"].append(f"{cap}: {err}")
                 if "append_only_events" in invs:

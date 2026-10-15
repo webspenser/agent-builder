@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.1"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.2"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
@@ -405,7 +405,7 @@ echo "-- ledger bindings"
 LP="$W/lpkg"; mkdir -p "$LP/hooks" "$LP/capabilities/ledger"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$LP/hooks/"
 cp -R _ledger/contract.md _ledger/tables.md _ledger/tools "$LP/capabilities/ledger/"
-printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.1"' 'catalog: webspenser' \
+printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.2"' 'catalog: webspenser' \
   'catalog_repo: webspenser/agent-library' 'capabilities: ledger' 'activity_log: ledger' > "$LP/agent.yaml"
 LSC="$LP/hooks/schedule_check.py"
 lbind() { # lbind <instance> [schema] [drop-field]: bind ledger to airtable with every writable field
@@ -431,5 +431,38 @@ lbind "$W/l-tbl"; sed -i.bak '/^table_events/d' "$W/l-tbl/bindings/ledger.md"; O
 expect 1 "missing table_events fails" "bindings/ledger.md has no table_events line"
 lbind "$W/l-none"; rm "$W/l-none/bindings/ledger.md"; OUT=$(python3 -B "$LSC" check "$W/l-none" --repo acme/led 2>&1); RC=$?
 expect 1 "no bindings file fails" "bindings/ledger.md has no base_id line"
+
+echo "-- pinned_inputs bindings"
+PP="$W/ppkg"; mkdir -p "$PP/hooks" "$PP/capabilities/scraping/tools/apify"
+cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PP/hooks/"
+printf '%s\n' 'name: pin-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.2"' 'catalog: webspenser' \
+  'catalog_repo: webspenser/agent-library' 'capabilities: scraping' 'activity_scrape: scraping' > "$PP/agent.yaml"
+printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PP/capabilities/scraping/contract.md"
+printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$PP/capabilities/scraping/tools/apify/identity.yaml"
+printf '%s\n' '# Apify' '' '- `find_businesses` — apify:run-maps' '' '## Probe' '' 'Call apify:list-tools.' > "$PP/capabilities/scraping/tools/apify/usage.md"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' > "$PP/capabilities/scraping/tools/apify/guard.yaml"
+PI2="$W/pin-ok"; mkdir -p "$PI2/bindings"
+printf '%s\n' 'agent: pin-agent' 'mode: plugin' 'bind_scraping: apify' > "$PI2/instance.yaml"
+printf '%s\n' 'timezone: UTC' 'schedule_scrape: "daily 06:00"' > "$PI2/schedules.yaml"
+printf '%s\n' 'max_places: 60' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 0 "scraping with max_places passes" "PASS  pin-agent: scrape (pin)"
+printf '%s\n' 'other: 1' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "scraping without max_places fails" "bindings/scraping.md has no max_places line (the apify tool pins values to it)"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' \
+  'limits:' '  - tools: [run-maps]' '    at: [startUrls]' '    bound: max_sites' '    kind: count' > "$PP/capabilities/scraping/tools/apify/guard.yaml"
+printf '%s\n' 'max_places: 60' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "a limits bound without its line fails" "bindings/scraping.md has no max_sites line (the apify tool pins values to it)"
+printf '%s\n' 'max_places: 60' 'max_sites: two urls' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "a non-bare limits bound fails" "bindings/scraping.md max_sites must be a bare value (the apify tool pins values to it)"
+printf '%s\n' 'max_places: 60' 'max_sites: abc' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 1 "a non-numeric limits bound fails" "bindings/scraping.md max_sites must be a number (the apify tool limits a value with it)"
+printf '%s\n' 'max_places: 60' 'max_sites: 2' > "$PI2/bindings/scraping.md"
+OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
+expect 0 "both bound lines present passes" "PASS  pin-agent: scrape (pin)"
 
 finish

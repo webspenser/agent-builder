@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.1. It is in active development: agents track
+The standard is 7.2. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.1"`.
+`agent.yaml`, and the validator requires `standard: "7.2"`.
 
 ## Directory layout
 
@@ -232,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.1"                # the Agent Standard version followed
+standard: "7.2"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -348,8 +348,11 @@ mailbox. The package describes it in two layers:
   `(acceptable)`, and a contract may not list both. The id `no_send`
   was renamed `no_external_send` in 7.0 and is an error.
   Two more ids are reserved for the ledger: `append_only_events` and
-  `no_schema_change` (see Ledger). None of the four can be marked
-  `(acceptable)`.
+  `no_schema_change` (see Ledger). A fifth, `pinned_inputs`, is reserved
+  for limits on a call's size: every input that limits a call's size
+  (a result count, a page size, a budget) comes only from values pinned
+  in `bindings/<capability>.md` at interactive setup. None of the five
+  can be marked `(acceptable)`.
 - `capabilities/<capability>/tools/<tool>/` — one folder per system
   (see Tools).
 
@@ -421,7 +424,8 @@ exits 0 (OK), 1 (FAIL lines) or 2 (ERROR: unreadable input). Its checks:
   `guard.yaml` exists and covers it; a contract with `no_send` fails
   (`no_send was renamed no_external_send`), and one with both send
   invariants fails;
-- when the contract has `owner_only_send`, `guard.yaml` also has an
+- when the contract has `owner_only_send` or `pinned_inputs` and the
+  policy covers it, `guard.yaml` also has an
   `allow` list and at least one `recipients` entry. Each `allow` entry
   is an exact tool name (no `*`, `?` or `[`), and is either pinned by a
   `recipients` entry (the engine's case-insensitive match over its
@@ -574,6 +578,39 @@ recipients:
 refuse_args: [draftId, replyToMessageId]
 ```
 
+A tool that scrapes names the arguments it accepts, and caps how much
+one call may ask for:
+
+```yaml
+# capabilities/scraping/tools/apify/guard.yaml
+covers: [pinned_inputs]
+allow: [crawl]
+only_keys:
+  - tools: [crawl]
+    at: ["$"]
+    keys: [startUrls, maxRequests]
+  - tools: [crawl]
+    at: ["startUrls[]"]
+    keys: [url]
+limits:
+  - tools: [crawl]
+    at: [startUrls]
+    bound: max_sites
+    kind: count
+    required: true
+  - tools: [crawl]
+    at: [maxRequests]
+    bound: max_requests
+    kind: max
+```
+
+An allowlist (`only_keys`) is the recommended way to restrict arguments:
+a deny list (`refuse_args`) only stops the keys it names, so any other
+key the vendor accepts (a `requestsFromUrl` that loads a whole URL list,
+`headers`, `userData`) passes. Use `refuse_args` for a value that must
+never appear in an argument the tool otherwise takes. A cap that must
+not be skipped by leaving the argument out takes `required: true`.
+
 ### Grammar
 
 The policy is a strict subset of YAML. Anything outside it is a
@@ -593,14 +630,16 @@ validation error and, at runtime, a block.
   scalar may not contain its own quote character, and a double-quoted
   one may not contain a backslash. A list item is one scalar
   (`["a" "b"]` is an error).
-- The exceptions are `rules:`, `writes:` and `recipients:`, whose values
+- The exceptions are `rules:`, `writes:`, `recipients:`, `limits:` and `only_keys:`, whose values
   are block lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `create:`,
   `update:`, `any:`, or `field:` plus `forbid: true` or `forbid: update`;
   `forbid` takes no other value and is never combined with `create`,
   `update` or `any`. A `writes` item holds `kind:`, `tools:`
-  and `at:`, the last two as flow lists. A `recipients` item holds
-  `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A flow list in an item may
+  and `at:`, the last two as flow lists. A `recipients` item
+  holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A `limits` item
+  holds the same and `kind:`, a scalar (`count` or `max`), and optionally `required: true`. An `only_keys` item
+  holds `tools:`, `at:` and `keys:`, all flow lists. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
@@ -619,8 +658,10 @@ validation error and, at runtime, a block.
 | `refuse_keys` | no | Key shapes refused in attribute maps: `uuid` |
 | `bound_keys_only` | no | `true`: every key in a write map must be an ID recorded in a `field_<name>` binding |
 | `rules` | no | Field rules |
-| `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Every value at those paths must equal a `<bound>: <value>` line in bindings |
-| `refuse_args` | no | Top-level argument names a call may not use (any value but `null` or `""` blocks) |
+| `recipients` | no | A list of `{tools, at, bound}` entries. `tools`: tool-name globs; `at`: argument paths (the `writes` path grammar); `bound`: a `snake_case` binding key. Pins argument values (text or numbers) to values recorded in bindings: every value at those paths must equal a `<bound>: <value>` line |
+| `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required; `required` may only be `true`). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed, unless the entry says `required: true`, which makes a path that is not supplied block (see Semantics) |
+| `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, spelled exactly (no case, `_` or `-` folding; the path is walked with exact names too). Recommended over `refuse_args` for restricting arguments |
+| `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
 
 ### Semantics
 
@@ -633,7 +674,7 @@ validation error and, at runtime, a block.
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
-2. **Recipients and refused arguments.** These run after `allow` and
+2. **Recipients, limits, allowed keys and refused arguments.** These run after `allow` and
    `deny`. Every problem they find is reported, and any one blocks the
    call before writes are read.
 
@@ -645,31 +686,98 @@ validation error and, at runtime, a block.
    included) is blocked: `<tool> may not use <arg>`, with `<arg>` as the
    call sent it.
 
+   A `refuse_args` entry that is a path (anything but a plain name) is
+   walked through the call's input. Each segment is compared with the
+   key the way a plain name is (lowercased, `_` and `-` removed), and
+   every key that matches counts. A value found at the path that is not
+   `null` and not `""` blocks: `<tool> may not use <path>`, with
+   `<path>` as the policy wrote it. A `null` where an object or list is
+   expected holds nothing. Any other wrong shape (a scalar where a list
+   or object is expected, a list item that is not an object) blocks:
+   `<path>: unexpected shape`; a mismatch never raises. With a path
+   entry present, a call whose input is not an object blocks.
+
+   *Allowed keys.* For each `only_keys` entry whose `tools` match the
+   call (a matching call whose input is not an object blocks), for each
+   `at` path, find the values there (`$` is the tool input itself; other
+   paths are walked as for nested `refuse_args`; an absent path is
+   skipped, and so is `null`). Each must be an object, else block:
+   `<path>: expected an object`; a wrong shape on the way blocks:
+   `<path>: unexpected shape`. Every key of the object must equal one
+   of the entry's `keys` exactly, whatever its value (a `null` value
+   does not excuse it); otherwise block: `<tool> may not use
+   <path>.<key>`, or `<tool> may not use <key>` for `$`, with `<key>` as
+   the call sent it. The comparison is exact on purpose: a folded one
+   would let `start_urls` or `StartUrls` pass an allowlist for
+   `startUrls` while `recipients` and `writes` paths, which match keys
+   exactly, never see its value.
+
    *Recipients.* For each `recipients` entry whose `tools` match the
    call (suffix matching as in step 1; a matching call whose input is
    not an object blocks):
 
    1. Collect the values at every `at` path. `null` counts as absent. A
-      string is one value; a list of strings is its items. An absent
-      path is skipped. Any other shape (an object, a number, a nested
-      list) blocks.
+      string or a number is one value; a list of them is its items. An
+      absent path is skipped. Any other shape (a boolean, an object, a
+      nested list) blocks: `<path>: a pinned value must be a string, a
+      number, or a list of them`.
    2. If no value was collected across all the paths, block: `<tool>
-      names no recipient at <paths>`.
+      names no pinned value at <paths>`.
    3. Read every `<bound>: <value>` line in `bindings/<capability>.md`.
       The key may repeat; each line adds one allowed value. With no such
       line, block: `no <bound> line in bindings; re-run setup's tools
       step`. If any of them is not a bare value (see Field identity),
       block: `<bound> must be a bare value`.
    4. Each collected value, trimmed and lowercased, must equal one bound
-      value, trimmed and lowercased. A display-name form (`Owner
+      value, trimmed and lowercased. A number also matches a numerically
+      equal bound value: a value is numeric when it is a JSON number or
+      a string matching `^[+-]?[0-9]+(\.[0-9]+)?$` (ASCII digits), and
+      numbers compare exactly as decimals, with the bound values parsed
+      the same way (`10`, `10.0` and `"10"` are equal; a non-finite
+      number never matches). A display-name form (`Owner
       <owner@example.com>`) is not unwrapped and does not match: it
-      fails closed. Otherwise block: `<value> is not a pinned recipient
+      fails closed. Otherwise block: `<value> is not a pinned value
       (<bound>)`.
 
-   A `recipients` entry limits a send to values the operator confirmed
-   at setup. For an exempt capability, `guard.sh` also requires the
-   bindings file to match its pushed copy, so an edit to the file does
-   not take effect until it is pushed (see Guard hook).
+   A `recipients` entry limits a call to values the operator confirmed
+   at setup: a send's recipients, or the size of a scrape. `guard.sh`
+   also requires the bindings file to match its pushed copy, for an
+   exempt capability and for every bound tool whose policy has a
+   `recipients` or `limits` entry, so an edit to the file does not take
+   effect until it is pushed (see Guard hook).
+
+   *Limits.* For each `limits` entry whose `tools` match the call (a
+   matching call whose input is not an object blocks):
+
+   1. Read every `<bound>: <value>` line in the bindings. With none,
+      block: `no <bound> line in bindings; re-run setup's tools step`.
+      The lines must agree on one number, parsed as in Recipients step 4;
+      more than one distinct number, or a value that is not a number,
+      blocks: `<bound> must be one number`.
+   2. Collect the values at every `at` path, with segments compared as
+      for nested `refuse_args` (folded, which only makes a cap stricter).
+      `null` is skipped, and so is a path the call does not have: limits
+      cap, they do not require, unless the entry has `required: true`.
+      Then each `at` path must be supplied, else block: `<tool> names no
+      <path>`. The check walks the path with exact key names, so a
+      variant spelling (`StartUrls` for `startUrls`) does not satisfy it,
+      though that spelling is still capped by the folded check above.
+      A value of `null` is not supplied, and for kind `count` neither is
+      `[]`: the list needs at least one item. For a path ending in `[]`,
+      an empty list yields no values at all, so it blocks the same way.
+      A wrong shape
+      on the way (a scalar where an object or list is expected) blocks as
+      `cannot check this call`.
+   3. Kind `count`: the value must be a list, else block: `<path>:
+      expected a list`. A list holding a list blocks: `<path>: a counted
+      list may not contain lists`. Its length is the count.
+      Kind `max`: the value must be a number or a string that is numeric
+      as in Recipients step 4 (not a boolean, list or object), else
+      block: `<path>: expected a number`. Below 1 (zero or negative)
+      blocks: `<path>: must be at least 1`, since many APIs read those
+      as unlimited. The number is the count.
+   4. A count above the bound blocks: `<tool> exceeds <bound> at <path>
+      (<count> > <bound value>)`.
 
 3. **Writes.** The matching entries are the `writes` entries whose
    `tools` match the call's tool name, using the same suffix matching as
@@ -749,8 +857,18 @@ Each is an invalid policy, and fails closed.
 - A `writes` entry has an unknown key.
 - A `recipients` entry has an unknown key, or no `bound`, or a `bound`
   that is not `snake_case`; or `recipients:` has no items.
-- `refuse_args` is empty, or holds a name that is not a plain argument
-  name (`^[A-Za-z_][A-Za-z0-9_]*$`).
+- A `limits` entry is invalid in the same ways as a `recipients` entry
+  (unknown key, no `bound`, a `bound` that is not `snake_case`, a missing
+  or empty `tools` or `at`, a bad `at` path), or has no `kind`, or a
+  `kind` other than `count` or `max`, or a `required` other than `true`;
+  or `limits:` has no items.
+- An `only_keys` entry has an unknown key, a missing or empty `tools`,
+  `at` or `keys`, an `at` that is neither `$` nor a valid path, or a
+  `keys` item that is not a plain argument name; or `only_keys:` has no
+  items.
+- `refuse_args` is empty, or holds an entry that is neither a plain
+  argument name (`^[A-Za-z_][A-Za-z0-9_]*$`) nor a path like `a.b` or
+  `a[].b` (the `writes` path grammar).
 - `rules`, `refuse_keys` or `bound_keys_only` is present without `writes`.
 - `bound_keys_only` is not `true`.
 - `forbid` is not `true` or `update`.
@@ -833,7 +951,7 @@ has `owner_only_send`; the validator rejects any other.
   next (case-insensitive; the rule `allow` uses). A match anywhere else
   in the name does not count. Nothing else is skipped: the `bind_` loop
   still runs the tool's own policy, which must pass the call (`allow`,
-  `recipients`, `refuse_args`). A `server_match` that is not
+  `recipients`, `limits`, `only_keys`, `refuse_args`). A `server_match` that is not
   `[a-z0-9_-]+` blocks.
 
 Globs match names, not behaviour: a connector whose send tool has an
@@ -910,7 +1028,9 @@ policy. `--agent <guard.yaml> [label] [--exempt <server_match>]...` and
 `--check --agent <guard.yaml>` do the same for the agent guard policy.
 Two query modes serve `guard.sh`: `--exempt-caps <guard.yaml>` prints each
 `exempt` capability of an agent policy, and `--covers <guard.yaml>`
-prints each `covers` id of a tool policy. It never prints a traceback.
+prints each `covers` id of a tool policy, and `--pins <guard.yaml>` prints
+each `bound` key of a tool policy's `recipients` entries and then its
+`limits` entries, each key once (nothing when it pins none). It never prints a traceback.
 
 Inside an instance of the agent (source mode included), for an MCP
 call, `guard.sh` first runs the agent guard policy when `guard.yaml`
@@ -939,10 +1059,24 @@ The call is also blocked unless `bindings/<capability>.md` is a regular
 file, not a symlink, whose bytes equal the upstream (`@{u}`) copy at
 `bindings/<capability>.md`, root-relative, so the instance must be the
 repository root: `bindings/<capability>.md must be committed and pushed
-before <capability> can send (it differs from the upstream copy, is
+before <capability> can run (it differs from the upstream copy, is
 untracked, or the instance has no git upstream); re-run setup's tools
 step, then commit and push`. The block is prefixed `Blocked by <agent>
-agent guard policy:`. `git` runs with every transport refused, lazy fetch
+agent guard policy:`.
+
+**Pinned values.** The same pushed-copy check, with the same message,
+also runs for every bound tool whose policy pins values (a `recipients`
+or `limits` entry, listed by `--pins`), exempt or not, whatever the invariant. The
+bind loop reads the tool's `guard.yaml` once into private scratch and
+runs `--pins` on that copy; a `--pins` that fails blocks the call. When
+the policy pins values, the engine then reads a private copy of the
+verified upstream bindings blob, not the working-tree file, so the bytes
+that were checked are the bytes that decide. A policy that pins nothing
+needs no pushed bindings. On this path the block is prefixed `Blocked by
+<agent> guard policy (<capability>/<provider>):`, not the agent-policy
+prefix of the exempt path.
+
+In both paths `git` runs with every transport refused, lazy fetch
 off, replace objects off, system config ignored, fsmonitor off, stdin from
 `/dev/null` and its output discarded, and the upstream blob's bytes are read
 directly, so no diff driver or clean filter runs.
@@ -1019,13 +1153,15 @@ Setup's tools step binds each capability:
   probe records.
 - Refuse to bind when the contract has `no_external_send` or
   `owner_only_send` and the tool's `covers` lacks it.
-- For `owner_only_send`: ask for each pinned value the tool's `usage.md`
-  `## Setup` lists, repeat each back, write `<bound>: <value>` lines to
+- For `owner_only_send` or `pinned_inputs`: ask for each pinned value the
+  tool's `usage.md` `## Setup` lists (offering the defaults it lists),
+  repeat each back, write bare `<bound>: <value>` lines to
   `bindings/<capability>.md` after the operator confirms, then commit and
-  push the instance. Owner sends are refused until
-  `bindings/<capability>.md` matches the pushed copy. Then offer one test
-  notification to the pinned recipient, sent only after the operator
-  confirms.
+  push the instance. Do not bind the capability if the file cannot be
+  pushed. Owner sends are refused, and a `pinned_inputs` capability
+  cannot run, until `bindings/<capability>.md` matches the pushed copy.
+  For `owner_only_send` only, then offer one test notification to the
+  pinned recipient, sent only after the operator confirms.
 - Write `bind_<capability>: <provider>` to `instance.yaml`.
 - In source mode, add the `PreToolUse` guard hook to
   `.claude/settings.json`.
@@ -1125,20 +1261,26 @@ lines for it.
 An entry may be scheduled only if it passes the gate. For the entry's
 activity and its `then` activities, every capability used must be
 bound, and every invariant of each capability's contract must be in the
-bound tool's `guard.yaml` `covers`. Two rules apply to the send
-invariants:
+bound tool's `guard.yaml` `covers`. These further rules apply to
+the send and pinning invariants:
 
 - A `no_external_send` invariant must also be in the agent guard policy's
   `covers`.
-- An `owner_only_send` capability needs the bindings to hold at least one
-  line for every `recipients` `bound` key of the bound tool
-  (`<capability>: bindings/<capability>.md has no <key> line ...`), each
-  a bare value (`<capability>: bindings/<capability>.md <key> must be a
-  bare value ...`), and
-  the agent guard policy must list the capability in `exempt`
-  (`owner_only_send needs the agent guard policy to list <capability> in
-  exempt`). The gate does not check that the bindings file is pushed; the
-  guard does that on every send.
+- An `owner_only_send` or `pinned_inputs` capability needs the bindings
+  to hold at least one line for every `recipients` and `limits` `bound` key of the
+  bound tool (`<capability>: bindings/<capability>.md has no <key> line
+  (the <provider> tool pins values to it) ...`), each a bare value
+  (`<capability>: bindings/<capability>.md <key> must be a bare value
+  (the <provider> tool pins values to it) ...`); a `limits` `bound` key
+  must also be a number (`<capability>: bindings/<capability>.md <key>
+  must be a number (the <provider> tool limits a value with it) ...`).
+- An `owner_only_send` capability also needs the agent guard policy to
+  list it in `exempt` (`owner_only_send needs the agent guard policy to
+  list <capability> in exempt`). A `pinned_inputs` capability needs no
+  exemption.
+
+The gate does not check that the bindings file is pushed; the guard
+does that on every call that depends on it.
 
 An invariant the contract marks
 `(acceptable)` and `instance.yaml` lists in `accept_instruction_only`
@@ -1230,7 +1372,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.1"`.
+- `agent.yaml` exists, and its `standard` is `"7.2"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -1248,8 +1390,12 @@ The validator checks:
   identity, `usage.md` (including `## Setup` when `bootstrap.py` exists)
   and `guard.yaml` rules in Tools above, and
   `guard.yaml` covering `no_external_send` or `owner_only_send` when the
-  contract has it, with the extra `owner_only_send` rules (`allow` list,
-  `recipients`).
+  contract has it. When a policy covers `owner_only_send` or
+  `pinned_inputs`, the extra pin rules apply (an exact `allow` list,
+  `recipients`). A contract's `pinned_inputs` need not be covered for
+  the package to validate, but an uncovered one fails the unattended
+  gate, which requires every contract invariant to be covered or
+  accepted.
 - A `guard.yaml` at the package root parses as an agent guard policy.
   When any contract has `no_external_send`, it must exist and its `covers` must
   include `no_external_send`. Each name in its `exempt` must be a listed
@@ -1260,7 +1406,8 @@ The validator checks:
   counts): `<tool folder> is wrapped in n8n, so guard.yaml at the root
   must deny <tool>`.
 - No contract marks `no_external_send`, `owner_only_send`,
-  `append_only_events` or `no_schema_change` `(acceptable)`:
+  `append_only_events`, `no_schema_change` or `pinned_inputs`
+  `(acceptable)`:
   `<invariant> cannot be marked (acceptable)`.
 - No contract lists `no_send`: `no_send was renamed no_external_send`.
   No contract lists both `no_external_send` and `owner_only_send`

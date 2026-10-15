@@ -8,7 +8,7 @@ GUARD="$PWD/_template/hooks/guard.sh"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; TD="$PKG/capabilities/crm/tools/demo"; mkdir -p "$TD" "$PKG/hooks"
 cp _template/hooks/guard_policy.py "$PKG/hooks/"
-printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.1"' > "$PKG/agent.yaml"
+printf '%s\n' 'name: demo-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.2"' > "$PKG/agent.yaml"
 printf '%s\n' 'capability: crm' 'provider: demo' 'server_match: democrm' > "$TD/identity.yaml"
 write_policy() {
   printf '%s\n' 'covers: [draft_only]' 'allow: [list-*, get-*, update-entry]' 'deny: ["*delete*", "*merge*"]' \
@@ -200,14 +200,14 @@ git init -q --bare "$W/notify-remote.git"
 git -C "$X" init -q; git -C "$X" add instance.yaml bindings/owner_notify.md; git -C "$X" commit -q -m init
 git -C "$X" remote add origin "$W/notify-remote.git"; git -C "$X" push -q -u origin HEAD 2>/dev/null
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "owner send passes"
-run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "other recipient blocked by tool policy" "lead@x.com is not a pinned recipient"
+run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "other recipient blocked by tool policy" "lead@x.com is not a pinned value"
 mkpin() { # mkpin <dir> [no-bindings]: instance repo pushed to its own bare remote
   mkdir -p "$1/bindings"; cp "$X/instance.yaml" "$1/"
   [ -n "${2:-}" ] || cp "$X/bindings/owner_notify.md" "$1/bindings/"
   git init -q --bare "$1-remote.git"; git -C "$1" init -q; git -C "$1" add -A; git -C "$1" commit -q -m init
   git -C "$1" remote add origin "$1-remote.git"; git -C "$1" push -q -u origin HEAD 2>/dev/null
 }
-PINMSG="bindings/owner_notify.md must be committed and pushed before owner_notify can send"
+PINMSG="bindings/owner_notify.md must be committed and pushed before owner_notify can run"
 echo 'recipient_email: lead@x.com' >> "$X/bindings/owner_notify.md"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "uncommitted bindings edit: blocked" "$PINMSG"
 git -C "$X" checkout -q -- bindings/owner_notify.md
@@ -300,5 +300,54 @@ run_guard "$U" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com
 printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' > "$PKG/guard.yaml"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no exempt key: no exemption" "agent guard policy: send-email is denied"
 rm -rf "$PKG/capabilities/owner_notify"
+
+echo "-- pinned values need the pushed copy (non-exempt capability)"
+ST="$PKG/capabilities/scraping/tools/apify"; mkdir -p "$ST"
+printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PKG/capabilities/scraping/contract.md"
+printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$ST/identity.yaml"
+printf '%s\n' '`find_businesses`' '## Probe' 'x' > "$ST/usage.md"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places' > "$ST/guard.yaml"
+S="$W/scrape"; mkdir -p "$S/bindings"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_crm: demo' 'bind_scraping: apify' > "$S/instance.yaml"
+printf '%s\n' 'max_places: 60' > "$S/bindings/scraping.md"
+SMSG="bindings/scraping.md must be committed and pushed before scraping can run"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "no git: blocked" "$SMSG"
+git -C "$S" init -q; git -C "$S" add -A; git -C "$S" commit -q -m init
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "no upstream: blocked" "$SMSG"
+git init -q --bare "$W/scrape-remote.git"; git -C "$S" remote add origin "$W/scrape-remote.git"; git -C "$S" push -q -u origin HEAD 2>/dev/null
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "pushed and in limit: passes"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          expect 2 "pushed, over limit: blocked" "5000 is not a pinned value (max_places)"
+printf '%s\n' 'max_places: 5000' > "$S/bindings/scraping.md"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          expect 2 "edited limit, not pushed: blocked" "$SMSG"
+git -C "$S" commit -q -am raise
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          expect 2 "committed, not pushed: blocked" "$SMSG"
+git -C "$S" reset -q --hard origin/HEAD 2>/dev/null || git -C "$S" reset -q --hard HEAD~1
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "restored: passes"
+run_guard "$S" "$(call mcp__claude_ai_Attio__list-records '{}')";             expect 0 "other servers are unaffected"
+
+echo "-- pinned values: snapshots, symlinks, custom tools"
+cp "$ST/guard.yaml" "$W/apify-guard.good"
+printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps' > "$ST/guard.yaml"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "policy --pins cannot parse: blocked" "cannot check this call"
+cp "$W/apify-guard.good" "$ST/guard.yaml"
+SHIM="$W/shim"; mkdir -p "$SHIM"; REAL_PY=$(command -v python3)
+printf '%s\n' '#!/bin/sh' "printf '%s\\n' \"\$*\" >> \"$W/py.log\"" "exec \"$REAL_PY\" \"\$@\"" > "$SHIM/python3"; chmod +x "$SHIM/python3"
+: > "$W/py.log"
+OUT=$(printf '%s' "$(call mcp__apify__run-maps '{"maxPlaces":60}')" | PATH="$SHIM:$PATH" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$S" bash "$GUARD" 2>&1); RC=$?
+expect 0 "engine run with pushed copy: passes"
+ENGINE_LINE=$(grep -F "guard policy (scraping/apify)" "$W/py.log" | head -1)
+if [ -n "$ENGINE_LINE" ] && ! printf '%s\n' "$ENGINE_LINE" | grep -qF "$ST/guard.yaml" && ! printf '%s\n' "$ENGINE_LINE" | grep -qF "$S/bindings/scraping.md"; then
+  _report ok "engine reads private copies, not the policy or bindings in place"; else _report no "engine args name the original files: $ENGINE_LINE"; fi
+sleep 1; touch "$S/bindings/scraping.md"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "same bytes, newer mtime: passes"
+cp "$S/bindings/scraping.md" "$W/scraping.real"; rm "$S/bindings/scraping.md"; ln -s "$W/scraping.real" "$S/bindings/scraping.md"
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 2 "symlinked bindings file: blocked" "$SMSG"
+rm "$S/bindings/scraping.md"; git -C "$S" checkout -q -- bindings/scraping.md
+run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "symlink removed: passes"
+SC="$W/scrape-custom"; mkdir -p "$SC/bindings" "$SC/custom-tools/scraping"
+cp "$ST/identity.yaml" "$SC/custom-tools/scraping/identity.yaml"; cp "$ST/guard.yaml" "$SC/custom-tools/scraping/guard.yaml"
+printf '%s\n' 'agent: demo-agent' 'mode: plugin' 'bind_scraping: custom' > "$SC/instance.yaml"
+printf '%s\n' 'max_places: 60' > "$SC/bindings/scraping.md"
+run_guard "$SC" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";           expect 2 "custom pinning tool, bindings not pushed: blocked" "$SMSG"
 
 finish

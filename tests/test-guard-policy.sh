@@ -293,11 +293,11 @@ run 0 "case and spaces ignored" mcp__resend__send-email '{"to":[" Owner@ACME.com
 run 0 "string to, not a list" mcp__resend__send-email '{"to":"ops@acme.com","from":"no-reply@acme.com"}' "" "$W/b.md"
 run 0 "null cc counts as absent" mcp__resend__send-email '{"to":["owner@acme.com"],"cc":null,"from":"no-reply@acme.com"}' "" "$W/b.md"
 run 0 "backtick-quoted binding matches" mcp__resend__send-email '{"to":["ops@acme.com"],"from":"no-reply@acme.com"}' "" "$W/b.md"
-run 2 "other recipient blocked" mcp__resend__send-email '{"to":["lead@prospect.com"],"from":"no-reply@acme.com"}' "lead@prospect.com is not a pinned recipient (recipient_email)" "$W/b.md"
-run 2 "extra bcc blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"bcc":["lead@prospect.com"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
-run 2 "display-name form blocked" mcp__resend__send-email '{"to":["Owner <owner@acme.com>"],"from":"no-reply@acme.com"}' "is not a pinned recipient" "$W/b.md"
-run 2 "other sender blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"me@acme.com"}' "me@acme.com is not a pinned recipient (sender_email)" "$W/b.md"
-run 2 "no recipient blocked" mcp__resend__send-email '{"from":"no-reply@acme.com"}' "send-email names no recipient at to, cc, bcc" "$W/b.md"
+run 2 "other recipient blocked" mcp__resend__send-email '{"to":["lead@prospect.com"],"from":"no-reply@acme.com"}' "lead@prospect.com is not a pinned value (recipient_email)" "$W/b.md"
+run 2 "extra bcc blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"bcc":["lead@prospect.com"],"from":"no-reply@acme.com"}' "is not a pinned value" "$W/b.md"
+run 2 "display-name form blocked" mcp__resend__send-email '{"to":["Owner <owner@acme.com>"],"from":"no-reply@acme.com"}' "is not a pinned value" "$W/b.md"
+run 2 "other sender blocked" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"me@acme.com"}' "me@acme.com is not a pinned value (sender_email)" "$W/b.md"
+run 2 "no recipient blocked" mcp__resend__send-email '{"from":"no-reply@acme.com"}' "send-email names no pinned value at to, cc, bcc" "$W/b.md"
 run 2 "object recipient blocked" mcp__resend__send-email '{"to":{"email":"owner@acme.com"},"from":"no-reply@acme.com"}' "cannot check this call" "$W/b.md"
 run 2 "no binding line blocks" mcp__resend__send-email '{"to":["owner@acme.com"],"from":"no-reply@acme.com"}' "no recipient_email line in bindings" -
 printf '%s\n' 'recipient_email: Owner <owner@acme.com>' 'sender_email: no-reply@acme.com' > "$W/b2.md"
@@ -329,8 +329,145 @@ run 0 "snake_case draft_id null passes" mcp__gmail__send_message '{"draft_id":nu
 run 2 "numeric zero refused arg blocked" mcp__gmail__send_message '{"draftId":0,"to":["owner@acme.com"]}' "send_message may not use draftId" "$W/r.md"
 run 2 "boolean false refused arg blocked" mcp__gmail__send_message '{"draftId":false,"to":["owner@acme.com"]}' "send_message may not use draftId" "$W/r.md"
 policy 'covers: [x]' 'refuse_args: []';        parses 1 "empty refuse_args"
-policy 'covers: [x]' 'refuse_args: [a.b]';     parses 1 "refuse_args entry is not a plain name"
+policy 'covers: [x]' 'refuse_args: [a.b]';     parses 0 "refuse_args entry may be a dotted path"
+policy 'covers: [x]' 'refuse_args: ["a[].b"]';  parses 0 "refuse_args entry may be a list path"
+policy 'covers: [x]' 'refuse_args: ["bad path!"]'; parses 1 "refuse_args entry is neither a name nor a path"
+policy 'covers: [x]' 'refuse_args: ["a..b"]';   parses 1 "refuse_args path with an empty segment"
+policy 'covers: [x]' 'refuse_args: ["a.[]"]';   parses 1 "refuse_args path with a bare []"
 policy 'covers: [x]' 'refuse_args: draftId';   parses 1 "refuse_args given a scalar"
+
+echo "-- nested refuse_args, limits and only_keys"
+policy 'covers: [pinned_inputs]' 'allow: [crawl, list-actors]' 'refuse_args: ["startUrls[].payload", "startUrls[].method", proxyConfig]' \
+  'limits:' '  - tools: [crawl]' '    at: [startUrls]' '    bound: max_sites' '    kind: count'
+parses 0 "nested refuse_args and limits parse"
+LB2="$W/lim.md"; printf '%s\n' 'max_sites: 2' > "$LB2"
+C=mcp__apify__crawl
+HUGE=$(python3 -c 'print("9"*400)')
+run 0 "one plain URL passes" $C '{"startUrls":[{"url":"https://a.test"}]}' "" "$LB2"
+run 2 "method refused" $C '{"startUrls":[{"url":"https://a.test","method":"POST"}]}' "crawl may not use startUrls[].method" "$LB2"
+run 2 "payload refused" $C '{"startUrls":[{"url":"https://a.test","payload":"x"}]}' "crawl may not use startUrls[].payload" "$LB2"
+run 0 "empty payload passes" $C '{"startUrls":[{"url":"https://a.test","payload":""}]}' "" "$LB2"
+run 0 "null payload passes" $C '{"startUrls":[{"url":"https://a.test","payload":null}]}' "" "$LB2"
+run 2 "payload on the second item refused" $C '{"startUrls":[{"url":"https://a.test"},{"url":"https://b.test","payload":"x"}]}' "may not use startUrls[].payload" "$LB2"
+run 2 "segment case folded" $C '{"startUrls":[{"url":"https://a.test","Method":"GET"}]}' "may not use startUrls[].method" "$LB2"
+run 2 "segment case and snake folded" $C '{"start_urls":[{"url":"https://a.test","PAYLOAD":"x"}]}' "may not use startUrls[].payload" "$LB2"
+run 2 "false payload refused" $C '{"startUrls":[{"url":"https://a.test","payload":false}]}' "may not use startUrls[].payload" "$LB2"
+run 2 "proxyConfig object refused" $C '{"proxyConfig":{"useApifyProxy":true}}' "crawl may not use proxyConfig" "$LB2"
+run 0 "null proxyConfig passes" $C '{"proxyConfig":null}' "" "$LB2"
+run 2 "scalar where the list is expected blocks" $C '{"startUrls":"https://a.test"}' "startUrls[].payload: unexpected shape" "$LB2"
+run 2 "scalar item under a nested refuse path blocks" $C '{"startUrls":["https://a.test"]}' "startUrls[].payload: unexpected shape" "$LB2"
+run 0 "null startUrls passes" $C '{"startUrls":null}' "" "$LB2"
+run 0 "no startUrls passes" $C '{}' "" "$LB2"
+run 2 "three URLs exceed the bound" $C '{"startUrls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "crawl exceeds max_sites at startUrls (3 > 2)" "$LB2"
+run 0 "two URLs pass" $C '{"startUrls":[{"url":"a"},{"url":"b"}]}' "" "$LB2"
+run 2 "count path folds the name" $C '{"start_urls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites at startUrls (3 > 2)" "$LB2"
+run 2 "count: a nested list blocks" $C '{"startUrls":[[{"url":"a"},{"url":"b"},{"url":"c"}]]}' "startUrls: a counted list may not contain lists" "$LB2"
+run 2 "count: an object blocks" $C '{"startUrls":{"url":"a"}}' "startUrls: expected a list" "$LB2"
+run 2 "count: a string blocks" $C '{"startUrls":"abc"}' "startUrls: expected a list" "$LB2"
+run 2 "no max_sites line blocks" $C '{"startUrls":[{"url":"a"}]}' "no max_sites line in bindings" -
+printf '%s\n' 'max_sites: 2' 'max_sites: 3' > "$W/lim2.md"
+run 2 "two different max_sites values block" $C '{"startUrls":[{"url":"a"}]}' "max_sites must be one number" "$W/lim2.md"
+printf '%s\n' 'max_sites: 2' 'max_sites: 2.0' > "$W/lim3.md"
+run 0 "two equal max_sites values pass" $C '{"startUrls":[{"url":"a"}]}' "" "$W/lim3.md"
+printf '%s\n' 'max_sites: two' > "$W/lim4.md"
+run 2 "a non-numeric max_sites blocks" $C '{"startUrls":[{"url":"a"}]}' "max_sites must be one number" "$W/lim4.md"
+run 2 "a bad bound blocks even without the path" $C '{}' "max_sites must be one number" "$W/lim4.md"
+run 0 "a tool outside the limits entry is not capped" mcp__apify__list-actors '{"startUrls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "" "$LB2"
+policy 'covers: [pinned_inputs]' 'allow: [run]' 'limits:' '  - tools: [run]' '    at: [n]' '    bound: max_n' '    kind: max'
+printf '%s\n' 'max_n: 5' > "$W/n.md"
+run 0 "max equal to the bound passes" mcp__apify__run '{"n":5}' "" "$W/n.md"
+run 0 "max of 1 passes" mcp__apify__run '{"n":1}' "" "$W/n.md"
+run 2 "max over the bound blocks" mcp__apify__run '{"n":6}' "run exceeds max_n at n (6 > 5)" "$W/n.md"
+run 2 "max: zero blocks" mcp__apify__run '{"n":0}' "n: must be at least 1" "$W/n.md"
+run 2 "max: negative blocks" mcp__apify__run '{"n":-1}' "n: must be at least 1" "$W/n.md"
+run 2 "max: negative string blocks" mcp__apify__run '{"n":"-3"}' "n: must be at least 1" "$W/n.md"
+run 2 "max: a one-item list blocks" mcp__apify__run '{"n":[100]}' "n: expected a number" "$W/n.md"
+run 2 "max: an object blocks" mcp__apify__run '{"n":{"v":3}}' "n: expected a number" "$W/n.md"
+run 2 "max: boolean blocks" mcp__apify__run '{"n":true}' "n: expected a number" "$W/n.md"
+run 0 "max: numeric string passes" mcp__apify__run '{"n":"5"}' "" "$W/n.md"
+run 2 "max: numeric string over the bound blocks" mcp__apify__run '{"n":"6"}' "(6 > 5)" "$W/n.md"
+run 2 "max: scientific string blocks" mcp__apify__run '{"n":"6e0"}' "n: expected a number" "$W/n.md"
+run 2 "max: NaN blocks" mcp__apify__run '{"n":NaN}' "n: expected a number" "$W/n.md"
+run 2 "max: Infinity blocks" mcp__apify__run '{"n":Infinity}' "n: expected a number" "$W/n.md"
+run 2 "max: huge integer blocks" mcp__apify__run "{\"n\":$HUGE}" "exceeds max_n at n" "$W/n.md"
+run 0 "max: null passes" mcp__apify__run '{"n":null}' "" "$W/n.md"
+run 0 "max: absent value passes" mcp__apify__run '{}' "" "$W/n.md"
+run 2 "tool_input that is not an object blocks" mcp__apify__run '[1]' "cannot check this call" "$W/n.md"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: count'; parses 0 "limits kind count"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max';   parses 0 "limits kind max"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m';                    parses 1 "limits entry without kind"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: min';   parses 1 "limits kind other than count or max"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    kind: max';                   parses 1 "limits entry without bound"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: Bad-Key' '    kind: max'; parses 1 "limits bound not snake_case"
+policy 'covers: [x]' 'limits:' '  - at: [n]' '    bound: m' '    kind: max';                     parses 1 "limits entry without tools"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: ["bad path!"]' '    bound: m' '    kind: max'; parses 1 "limits bad path"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    extra: 1'; parses 1 "unknown limits key"
+policy 'covers: [x]' 'limits:';                                                                    parses 1 "empty limits"
+policy 'covers: [x]' 'limits: [a]';                                                                parses 1 "limits given a list"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: r' '    kind: max'; parses 1 "recipients entry has no kind"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    required: true'; parses 0 "limits required: true"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    required: yes'; parses 1 "limits required: yes"
+policy 'covers: [x]' 'limits:' '  - tools: [s]' '    at: [n]' '    bound: m' '    kind: max' '    required: false'; parses 1 "limits required: false"
+policy 'covers: [x]' 'recipients:' '  - tools: [s]' '    at: [to]' '    bound: r' '    required: true'; parses 1 "recipients has no required"
+policy 'covers: [pinned_inputs]' 'allow: [crawl]' 'limits:' '  - tools: [crawl]' '    at: [startUrls]' '    bound: max_sites' '    kind: count' '    required: true'
+run 2 "required: an absent path blocks" $C '{}' "crawl names no startUrls" "$LB2"
+run 2 "required: a null path blocks" $C '{"startUrls":null}' "crawl names no startUrls" "$LB2"
+run 0 "required: a present path passes" $C '{"startUrls":[{"url":"a"}]}' "" "$LB2"
+run 2 "required count: an empty list blocks" $C '{"startUrls":[]}' "crawl names no startUrls" "$LB2"
+run 2 "required: a variant spelling does not satisfy it" $C '{"StartUrls":[{"url":"a"}]}' "crawl names no startUrls" "$LB2"
+run 2 "required: a snake-case spelling does not satisfy it" $C '{"start_urls":[{"url":"a"}]}' "crawl names no startUrls" "$LB2"
+run 2 "required: a variant spelling is still capped" $C '{"start_urls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites at startUrls (3 > 2)" "$LB2"
+run 0 "required: the exact spelling beside a variant passes the presence check" $C '{"startUrls":[{"url":"a"}],"StartUrls":[{"url":"b"}]}' "" "$LB2"
+run 2 "required: an over-bound list still blocks" $C '{"startUrls":[{"url":"a"},{"url":"b"},{"url":"c"}]}' "exceeds max_sites" "$LB2"
+policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: [a, b]' '    bound: max_sites' '    kind: max' '    required: true'
+run 2 "required: every path is required" $C '{"a":1}' "crawl names no b" "$LB2"
+policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: ["urls[]"]' '    bound: max_sites' '    kind: max' '    required: true'
+run 2 "required: a path ending in [] with an empty list blocks" $C '{"urls":[]}' "crawl names no urls[]" "$LB2"
+run 0 "required: a path ending in [] with an item passes" $C '{"urls":[1]}' "" "$LB2"
+policy 'covers: [x]' 'limits:' '  - tools: [crawl]' '    at: [n]' '    bound: max_sites' '    kind: max' '    required: true'
+run 0 "required max: a value passes" $C '{"n":2}' "" "$LB2"
+run 2 "required max: absent blocks" $C '{}' "crawl names no n" "$LB2"
+run 2 "required max: null blocks" $C '{"n":null}' "crawl names no n" "$LB2"
+run 2 "required max: a variant spelling does not satisfy it" $C '{"N":2}' "crawl names no n" "$LB2"
+policy 'covers: [x]' 'refuse_args: ["a.b"]'
+run 2 "tool_input that is not an object blocks a nested refuse path" mcp__apify__run '[1]' "cannot check this call" -
+
+echo "-- only_keys"
+policy 'covers: [pinned_inputs]' 'allow: [crawl, list-actors]' 'only_keys:' '  - tools: [crawl]' '    at: ["$"]' '    keys: [startUrls, maxRequests]' \
+  '  - tools: [crawl]' '    at: ["startUrls[]"]' '    keys: [url]'
+parses 0 "only_keys parses"
+run 0 "root keys allowed" $C '{"startUrls":[],"maxRequests":3}' "" -
+run 2 "root key not listed" $C '{"startUrls":[],"proxyConfig":{}}' "crawl may not use proxyConfig" -
+run 2 "root keys are exact: other case blocks" $C '{"StartUrls":[]}' "crawl may not use StartUrls" -
+run 2 "root keys are exact: snake case blocks" $C '{"start_urls":[]}' "crawl may not use start_urls" -
+run 2 "root keys are exact: snake maxRequests blocks" $C '{"max_requests":3}' "crawl may not use max_requests" -
+run 0 "root key spelled exactly passes" $C '{"startUrls":[]}' "" -
+run 0 "empty input passes" $C '{}' "" -
+run 2 "root key with a null value is still not listed" $C '{"proxyConfig":null}' "may not use proxyConfig" -
+run 2 "tool_input that is not an object blocks" $C '[1]' "cannot check this call" -
+run 0 "item keys allowed" $C '{"startUrls":[{"url":"a"}]}' "" -
+run 2 "item keys are exact: other case blocks" $C '{"startUrls":[{"URL":"a"}]}' "crawl may not use startUrls[].URL" -
+run 2 "requestsFromUrl refused" $C '{"startUrls":[{"url":"a","requestsFromUrl":"b"}]}' "crawl may not use startUrls[].requestsFromUrl" -
+run 2 "headers refused" $C '{"startUrls":[{"url":"a","headers":{}}]}' "crawl may not use startUrls[].headers" -
+run 2 "userData null still refused" $C '{"startUrls":[{"url":"a","userData":null}]}' "may not use startUrls[].userData" -
+run 2 "bad second item refused" $C '{"startUrls":[{"url":"a"},{"url":"b","method":"POST"}]}' "may not use startUrls[].method" -
+run 2 "scalar item is not an object" $C '{"startUrls":["a"]}' "startUrls[]: expected an object" -
+run 2 "string where the list is expected" $C '{"startUrls":"a"}' "startUrls[]: unexpected shape" -
+run 0 "null startUrls passes" $C '{"startUrls":null}' "" -
+run 0 "a tool outside the entry is not checked" mcp__apify__list-actors '{"proxyConfig":{}}' "" -
+policy 'covers: [x]' 'allow: [crawl]' 'only_keys:' '  - tools: [crawl]' '    at: [opts]' '    keys: [inner]' '  - tools: [crawl]' '    at: [opts.inner]' '    keys: [k]'
+run 0 "exact dotted path passes" $C '{"opts":{"inner":{"k":1}}}' "" -
+run 2 "exact dotted path: a variant parent key blocks" $C '{"opts":{"Inner":{"zzz":1}}}' "crawl may not use opts.Inner" -
+run 2 "exact dotted path: a bad inner key blocks" $C '{"opts":{"inner":{"zzz":1}}}' "crawl may not use opts.inner.zzz" -
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a.b]' '    keys: [k]'; parses 0 "only_keys dotted path"
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]';                      parses 1 "only_keys without keys"
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    keys: [k]';                    parses 1 "only_keys without at"
+policy 'covers: [x]' 'only_keys:' '  - at: [a]' '    keys: [k]';                      parses 1 "only_keys without tools"
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: ["bad path!"]' '    keys: [k]'; parses 1 "only_keys bad path"
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: [a.b]';  parses 1 "only_keys key that is not a plain name"
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: []';     parses 1 "only_keys empty keys"
+policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: [k]' '    bound: b'; parses 1 "only_keys has no bound"
+policy 'covers: [x]' 'only_keys:';                                                    parses 1 "empty only_keys"
 
 echo "-- agent exempt"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'; aparses 0 "exempt parses"
@@ -376,5 +513,45 @@ for t in delete_records_for_table create_field update_field create_table update_
 done
 run 0 "read records" ${A}list_records_for_table "{$R}" "" "$LB" airtable
 run 0 "read schema" ${A}list_tables_for_base '{"baseId":"appAAAAAAAAAAAAAA"}' "" "$LB" airtable
+
+echo "-- pinned values (numbers)"
+policy 'covers: [pinned_inputs]' 'allow: [run-maps]' 'recipients:' '  - tools: [run-maps]' '    at: [maxPlaces]' '    bound: max_places'
+PB="$W/pins.md"; printf '%s\n' 'max_places: 60' > "$PB"
+run 0 "number equal to binding"   mcp__apify__run-maps '{"maxPlaces":60}'    "" "$PB"
+run 0 "float equal to binding"    mcp__apify__run-maps '{"maxPlaces":60.0}'  "" "$PB"
+run 0 "numeric string"            mcp__apify__run-maps '{"maxPlaces":"60"}'  "" "$PB"
+run 0 "numeric string, spaces"    mcp__apify__run-maps '{"maxPlaces":" 60 "}' "" "$PB"
+run 2 "larger number blocks"      mcp__apify__run-maps '{"maxPlaces":5000}'  "5000 is not a pinned value (max_places)" "$PB"
+run 2 "boolean blocks"            mcp__apify__run-maps '{"maxPlaces":true}'  "a pinned value must be a string, a number, or a list of them" "$PB"
+printf '%s\n' 'max_places: 1' > "$W/pins1.md"
+run 2 "true never equals 1"       mcp__apify__run-maps '{"maxPlaces":true}'  "a pinned value must be a string, a number, or a list of them" "$W/pins1.md"
+run 2 "object blocks"             mcp__apify__run-maps '{"maxPlaces":{"n":60}}' "a pinned value must be a string, a number, or a list of them" "$PB"
+run 2 "nested list blocks"        mcp__apify__run-maps '{"maxPlaces":[[60]]}' "a pinned value must be a string, a number, or a list of them" "$PB"
+run 0 "list of equal numbers"     mcp__apify__run-maps '{"maxPlaces":[60, 60.0]}' "" "$PB"
+run 2 "missing argument blocks"   mcp__apify__run-maps '{}'                  "run-maps names no pinned value at maxPlaces" "$PB"
+printf '%s\n' 'max_places: sixty' > "$W/pinsx.md"
+run 2 "non-numeric binding never equals a number" mcp__apify__run-maps '{"maxPlaces":60}' "60 is not a pinned value (max_places)" "$W/pinsx.md"
+run 2 "scientific string blocks"  mcp__apify__run-maps '{"maxPlaces":"6e1"}' "6e1 is not a pinned value (max_places)" "$PB"
+run 2 "underscore string blocks"  mcp__apify__run-maps '{"maxPlaces":"6_0"}' "6_0 is not a pinned value (max_places)" "$PB"
+run 0 "signed string passes"      mcp__apify__run-maps '{"maxPlaces":"+60"}' "" "$PB"
+run 2 "Arabic-Indic digits block" mcp__apify__run-maps '{"maxPlaces":"٦٠"}'  "is not a pinned value (max_places)" "$PB"
+run 2 "list with a larger number blocks" mcp__apify__run-maps '{"maxPlaces":[60, 5000]}' "5000 is not a pinned value" "$PB"
+run 2 "NaN blocks"                mcp__apify__run-maps '{"maxPlaces":NaN}'   "is not a pinned value (max_places)" "$PB"
+run 2 "Infinity blocks"           mcp__apify__run-maps '{"maxPlaces":Infinity}' "is not a pinned value (max_places)" "$PB"
+printf '%s\n' 'max_places: 9007199254740992' > "$W/pinsbig.md"
+run 2 "distinct large integers stay distinct" mcp__apify__run-maps '{"maxPlaces":9007199254740993}' "9007199254740993 is not a pinned value" "$W/pinsbig.md"
+run 0 "equal large integer passes" mcp__apify__run-maps '{"maxPlaces":9007199254740992}' "" "$W/pinsbig.md"
+HUGE=$(python3 -c 'print("9"*400)')
+run 2 "400-digit integer blocks"  mcp__apify__run-maps "{\"maxPlaces\":$HUGE}" "is not a pinned value (max_places)" "$PB"
+echo "-- --pins"
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); [ "$OUT" = "max_places" ] && _report ok "--pins prints the bound key" || _report no "--pins: $OUT"
+policy 'covers: [x]' 'deny: ["*a*"]'
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins prints nothing without recipients" || _report no "--pins empty (rc=$rc): $OUT"
+policy 'covers: [x]' 'recipients:' '  - tools: [a]' '    at: [p]' '    bound: max_places' '  - tools: [b]' '    at: [q]' '    bound: max_places'
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); [ "$OUT" = "max_places" ] && _report ok "--pins prints a shared bound key once" || _report no "--pins shared: $OUT"
+policy 'covers: [x]' 'limits:' '  - tools: [b]' '    at: [q]' '    bound: max_sites' '    kind: count' '  - tools: [c]' '    at: [r]' '    bound: max_places' '    kind: max' 'recipients:' '  - tools: [a]' '    at: [p]' '    bound: max_places'
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); [ "$OUT" = $'max_places\nmax_sites' ] && _report ok "--pins prints recipients keys then limits keys, once each" || _report no "--pins limits: $OUT"
+printf 'covers: [x\n' > "$W/guard.yaml"
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 1 ] && printf '%s' "$OUT" | grep -q '^FAIL:' && _report ok "--pins on a bad policy fails" || _report no "--pins bad (rc=$rc): $OUT"
 
 finish

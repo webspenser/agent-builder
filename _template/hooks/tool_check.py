@@ -34,6 +34,7 @@ OPERATION = re.compile(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`")
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
 ACCEPTABLE = re.compile(r"^[-*]\s+`([^`]+)`\s+\(acceptable\)")
 SEND_INVARIANTS = {"no_external_send", "owner_only_send"}
+PIN_INVARIANTS = ("owner_only_send", "pinned_inputs")
 N8N_TRIGGER = "@n8n/n8n-nodes-langchain.mcpTrigger"
 N8N_AUTH = ("n8nOAuth2", "bearerAuth", "headerAuth")
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -421,23 +422,24 @@ def check_tool(folder, cap, ops, invariants, custom=False, label=None):
             fails.append(f"{label}: the contract has {inv}, so guard.yaml must cover it")
         elif covers is not None and inv not in covers:
             fails.append(f"{label}/guard.yaml: covers must include {inv}")
-    if "owner_only_send" in invariants and parsed:
-        fails.extend(check_owner_only(parsed, folder, label))
+    for inv in PIN_INVARIANTS:
+        if inv in invariants and parsed and inv in (covers or []):
+            fails.extend(check_pinned(parsed, folder, label, inv))
     ledger_covered = [inv for inv in LEDGER_INVARIANTS if inv in invariants and inv in (covers or [])]
     if ledger_covered and parsed:
         fails.extend(check_ledger_guard(parsed, ledger_covered, label))
     return fails, identity
 
 
-def check_owner_only(parsed, folder, label):
-    """owner_only_send: an allow list of exact tool names (no wildcards), at least one recipients
+def check_pinned(parsed, folder, label, inv):
+    """owner_only_send and pinned_inputs: an allow list of exact tool names (no wildcards), at least one recipients
     entry, and every allowed name either pinned by a recipients entry or named as a whole token
     in usage.md's ## Probe as a read."""
     fails = []
     if "allow" not in parsed:
-        fails.append(f"{label}/guard.yaml: guard.yaml must have an allow list for owner_only_send")
+        fails.append(f"{label}/guard.yaml: guard.yaml must have an allow list for {inv}")
     if not parsed.get("recipients"):
-        fails.append(f"{label}/guard.yaml: guard.yaml must pin recipients (a recipients entry) for owner_only_send")
+        fails.append(f"{label}/guard.yaml: must pin values (a recipients entry) for {inv}")
     if fails:
         return fails
     # the engine's own test (guard_policy._matches): case-insensitive fnmatch of the name against an entry's tools
@@ -449,7 +451,7 @@ def check_owner_only(parsed, folder, label):
         probe = ""  # reported by the usage check
     for pattern in parsed["allow"]:
         if any(ch in pattern for ch in "*?["):
-            fails.append(f"{label}/guard.yaml: {pattern} must be an exact tool name for owner_only_send (no wildcards)")
+            fails.append(f"{label}/guard.yaml: {pattern} must be an exact tool name for {inv} (no wildcards)")
             continue
         if pins(pattern) or re.search(r"(?<![\w-])" + re.escape(pattern) + r"(?![\w-])", probe):
             continue

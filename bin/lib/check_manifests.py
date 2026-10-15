@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "7.1"
+CURRENT_STANDARD = "7.2"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -37,7 +37,7 @@ REFERENCE_ADD_TOOL = TEMPLATE_HOOKS.parent / "skills" / "add-tool" / "SKILL.md"
 LEDGER_REFERENCE = TEMPLATE_HOOKS.parents[1] / "_ledger"
 LEDGER_FILES = ("contract.md", "tools/airtable/identity.yaml", "tools/airtable/usage.md",
                 "tools/airtable/guard.yaml", "tools/airtable/bootstrap.py")
-RESERVED_INVARIANTS = ("no_external_send", "owner_only_send", "append_only_events", "no_schema_change")
+RESERVED_INVARIANTS = ("no_external_send", "owner_only_send", "append_only_events", "no_schema_change", "pinned_inputs")
 ACTIVITY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 GUARD_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"'
 GUARD_MATCHER = "mcp__.*"

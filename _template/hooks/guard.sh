@@ -4,7 +4,9 @@
 # guard policy (package-root guard.yaml, deny-only) applies to every MCP call
 # (it may exempt the server of one owner_only_send capability, which its own
 # tool policy then still enforces); then every bound tool whose server_match appears in the tool name gets its
-# guard policy (guard.yaml) enforced by hooks/guard_policy.py. Exit 2 blocks the
+# guard policy (guard.yaml) enforced by hooks/guard_policy.py. A bound tool whose
+# policy pins values, and the exempted owner_only_send tool, also need their
+# bindings file to equal its pushed (git upstream) copy. Exit 2 blocks the
 # call and shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
@@ -18,6 +20,32 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 block() { printf 'Blocked by %s guard: %s\n' "$name" "$1" >&2; exit 2; }
 pblock() { printf 'Blocked by %s guard policy (%s/%s): %s\n' "$name" "$cap" "$provider" "$1" >&2; exit 2; }
 ablock() { printf 'Blocked by %s agent guard policy: %s\n' "$name" "$1" >&2; exit 2; }
+
+# Git for the pushed-copy check: system config off, replace objects off,
+# fsmonitor off, lazy fetch off and every transport refused (an empty
+# GIT_ALLOW_PROTOCOL overrides every protocol.* config key, on any git
+# version); blobs are read directly (no diff drivers or clean filters).
+ugit() { GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false -c protocol.allow=never "$@" </dev/null; }
+# pushed <cap>: the agent can write bindings/, so values a tool policy pins
+# must equal the upstream (pushed) copy. This stops edits and unpushed
+# commits. It does not stop an agent that edits .git itself (tracking refs,
+# upstream/remote config, core.worktree, a .git gitfile, alternates). The
+# engine is then given the verified upstream bytes, not the working file.
+pushed() {
+  _bp="bindings/$1.md"
+  [ -f "$instance/$_bp" ] && [ ! -L "$instance/$_bp" ] || return 1
+  command -v git >/dev/null 2>&1 || return 1
+  ugit rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 || return 1
+  ugit cat-file -e "@{u}:$_bp" >/dev/null 2>&1 || return 1
+  ugit cat-file blob "@{u}:$_bp" 2>/dev/null | cmp -s - "$instance/$_bp"
+}
+pushed_msg() { printf '%s' "bindings/$1.md must be committed and pushed before $1 can run (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"; }
+
+# Private scratch for the bind loop (policy snapshot, verified bindings copy);
+# removed on every exit path, including the early exit 2 blocks.
+tmp=""
+trap '[ -z "$tmp" ] || rm -rf "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
 
 name=$(yaml_get "$root/agent.yaml" name)
 [ -n "$name" ] || exit 0
@@ -77,24 +105,7 @@ if [ -e "$apolicy" ] || [ -L "$apolicy" ]; then
     [ -f "$etdir/guard.yaml" ] && [ ! -L "$etdir/guard.yaml" ] || continue
     python3 "$engine" --covers "$etdir/guard.yaml" 2>/dev/null | grep -qx owner_only_send || continue
     case "$rest_lc" in *"$ematch"*) ;; *) continue ;; esac
-    # The agent can write bindings/, so the pinned values the tool policy
-    # trusts must equal the upstream (pushed) copy: this stops edits and
-    # unpushed commits. Git runs with system config off, replace objects off,
-    # fsmonitor off, lazy fetch off and every transport refused (an empty
-    # GIT_ALLOW_PROTOCOL overrides every protocol.* config key, on any git
-    # version), and reads the upstream blob's bytes directly (no diff drivers
-    # or clean filters). It does not stop an agent that edits .git itself:
-    # rewriting tracking refs or the branch's upstream/remote config,
-    # core.worktree, a .git gitfile pointing elsewhere, or
-    # objects/info/alternates can still defeat it.
-    bpath="bindings/$ecap.md"
-    bmsg="$bpath must be committed and pushed before $ecap can send (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"
-    [ -f "$instance/$bpath" ] && [ ! -L "$instance/$bpath" ] || ablock "$bmsg"
-    command -v git >/dev/null 2>&1 || ablock "$bmsg"
-    ugit() { GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false -c protocol.allow=never "$@" </dev/null; }
-    ugit rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 || ablock "$bmsg"
-    ugit cat-file -e "@{u}:$bpath" >/dev/null 2>&1 || ablock "$bmsg"
-    ugit cat-file blob "@{u}:$bpath" 2>/dev/null | cmp -s - "$instance/$bpath" || ablock "$bmsg"
+    pushed "$ecap" || ablock "$(pushed_msg "$ecap")"
     set -- "$@" --exempt "$ematch"
   done
   printf '%s' "$input" | python3 "$engine" "$@"; rc=$?
@@ -145,9 +156,28 @@ while IFS= read -r line || [ -n "$line" ]; do
   engine="$root/hooks/guard_policy.py"
   [ -f "$engine" ] || pblock "the guard policy engine is missing from $name"
   command -v python3 >/dev/null 2>&1 || pblock "python3 is required to run the guard policy"
+  # The tool policy and the pinned bindings can be agent-writable (source mode,
+  # custom-tools/, bindings/): read each once into private scratch, so the
+  # checks below and the engine see the same bytes.
+  if [ -z "$tmp" ]; then
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/guard.XXXXXX" 2>/dev/null) || { tmp=""; pblock "cannot check this call (no private temporary directory)"; }
+  fi
+  cat "$tdir/guard.yaml" > "$tmp/policy" 2>/dev/null || pblock "cannot check this call (the guard policy cannot be read)"
+  pins=$(python3 "$engine" --pins "$tmp/policy" 2>&1); prc=$?
+  if [ "$prc" -ne 0 ]; then
+    case "$pins" in
+      "FAIL: "*) pblock "cannot check this call (${pins#FAIL: })" ;;
+      *) pblock "the guard policy engine failed (exit $prc)" ;;
+    esac
+  fi
   bfile="$instance/bindings/$cap.md"
   [ -f "$bfile" ] || bfile=-
-  printf '%s' "$input" | python3 "$engine" "$tdir/guard.yaml" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
+  if [ -n "$pins" ]; then
+    pushed "$cap" || pblock "$(pushed_msg "$cap")"
+    ugit cat-file blob "@{u}:bindings/$cap.md" > "$tmp/bindings" 2>/dev/null || pblock "$(pushed_msg "$cap")"
+    bfile="$tmp/bindings"
+  fi
+  printf '%s' "$input" | python3 "$engine" "$tmp/policy" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?
   [ "$rc" -eq 0 ] && continue
   [ "$rc" -eq 2 ] && exit 2
   pblock "the guard policy engine failed (exit $rc)"

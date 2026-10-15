@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 7.1. Agent Builder 7.1.0, sales-partner 7.0.0 (7.1.0 in progress).
+Current: standard 7.2. Agent Builder 7.2.0, sales-partner 7.1.0 (7.2.0 in progress).
 
 ## In plain words
 
@@ -206,7 +206,7 @@ different moment.
 flowchart TD
   S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
   V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>skill and subagent format"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 7.1<br/>four host manifests agree"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 7.2<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]
@@ -504,6 +504,11 @@ base the business owns. The guard lets the agent add rows to that record
 but never change or delete one, and never change the base's structure,
 so the record works as an audit trail (see the spec's stated limits for
 what it does not prevent).
+
+A tool can also pin the size of what it asks for: a scraper's result
+limit, for example, is set once at setup and pushed with the instance.
+The guard refuses a bigger request, and refuses every request while the
+pinned values differ from the pushed copy.
 
 A policy's `writes:` list tells the engine where in each tool call the
 values sit (for example `createRequest.objects[].properties` for a
