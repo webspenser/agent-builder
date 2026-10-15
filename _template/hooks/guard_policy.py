@@ -505,7 +505,8 @@ def _supplied(args, path, kind):
 
 def _limit_problems(shown, entry, args, bindings):
     """limits: kind count caps a list's length, kind max caps a number (at least 1), both at the one number
-    bound to entry["bound"]. A path the call does not have is fine: limits cap, they do not require."""
+    bound to entry["bound"]. A path the call does not have is fine unless the entry says `required: true`,
+    which also blocks a call that leaves the path out."""
     bound = entry["bound"]
     lines = bindings.get(bound) or set()
     if not lines:

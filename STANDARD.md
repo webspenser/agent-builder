@@ -1153,13 +1153,15 @@ Setup's tools step binds each capability:
   probe records.
 - Refuse to bind when the contract has `no_external_send` or
   `owner_only_send` and the tool's `covers` lacks it.
-- For `owner_only_send`: ask for each pinned value the tool's `usage.md`
-  `## Setup` lists, repeat each back, write `<bound>: <value>` lines to
+- For `owner_only_send` or `pinned_inputs`: ask for each pinned value the
+  tool's `usage.md` `## Setup` lists (offering the defaults it lists),
+  repeat each back, write bare `<bound>: <value>` lines to
   `bindings/<capability>.md` after the operator confirms, then commit and
-  push the instance. Owner sends are refused until
-  `bindings/<capability>.md` matches the pushed copy. Then offer one test
-  notification to the pinned recipient, sent only after the operator
-  confirms.
+  push the instance. Do not bind the capability if the file cannot be
+  pushed. Owner sends are refused, and a `pinned_inputs` capability
+  cannot run, until `bindings/<capability>.md` matches the pushed copy.
+  For `owner_only_send` only, then offer one test notification to the
+  pinned recipient, sent only after the operator confirms.
 - Write `bind_<capability>: <provider>` to `instance.yaml`.
 - In source mode, add the `PreToolUse` guard hook to
   `.claude/settings.json`.

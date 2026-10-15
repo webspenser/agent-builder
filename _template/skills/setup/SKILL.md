@@ -104,15 +104,18 @@ skill, if this agent has one.
       guarded call.
    4. If the contract has a `no_external_send` or `owner_only_send`
       invariant and the tool's `guard.yaml` does not list it in
-      `covers`, refuse to bind it and say why. For `owner_only_send`,
-      ask the user for each pinned value the tool's `usage.md`
-      `## Setup` lists (for example `recipient_email`), repeat each
-      back, and write them as plain `<key>: <value>` lines to
-      `bindings/<capability>.md` only after the user confirms. Owner
-      sends are refused until that file matches the pushed copy: on a
-      first setup step 10 commits and pushes it, and step 11 offers the
-      test notification. On a re-run, when the instance already has a
-      git upstream, commit and push the file now. If the tool leaves an
+      `covers`, refuse to bind it and say why. For `owner_only_send` or
+      `pinned_inputs`, ask the user for each pinned value the tool's
+      `usage.md` `## Setup` lists (for example `recipient_email`, or a
+      cap such as `max_places_per_search`), offering the defaults it
+      lists, repeat each back, and write them as plain `<key>: <value>`
+      lines to `bindings/<capability>.md` only after the user confirms.
+      Owner sends and pinned calls are refused until that file matches
+      the pushed copy: on a first setup step 10 commits and pushes it.
+      For `owner_only_send` only, step 11 offers the test notification.
+      On a re-run, when the instance already has a
+      git upstream, commit and push the file now. If it cannot be
+      pushed, do not bind the capability. If the tool leaves an
       invariant uncovered that the contract marks `(acceptable)`, explain in plain words what the
       guard will not enforce and what could happen, and add it to
       `accept_instruction_only:` in `instance.yaml` only after the user
@@ -133,8 +136,9 @@ skill, if this agent has one.
 10. **Version control.** Offer `git init`, a first commit, and a
    private GitHub repository for the instance, pushed with
    `git push -u origin <branch>`. Scheduled runs clone that repository,
-   and a capability with `owner_only_send` cannot send until its
-   `bindings/<capability>.md` is pushed; if the user declines, say both.
+   and a capability with `owner_only_send` cannot send, and one with
+   `pinned_inputs` cannot run, until its `bindings/<capability>.md` is
+   pushed; if the user declines, say both.
    Remind the user that credentials belong in the
    host (connectors, MCP settings, environment variables), never in
    these files.

@@ -60,6 +60,8 @@ done
 S=_template/skills/setup/SKILL.md
 tools_step=$(awk '/^9\. \*\*Tools\.\*\*/,/^10\. \*\*Version control/' "$S")
 after_tools=$(awk '/^10\. \*\*Version control/,0' "$S")
+printf '%s' "$tools_step" | grep -qF 'pinned_inputs' || { echo "FAIL: setup's tools step does not collect pinned_inputs values"; STATUS=1; }
+printf '%s' "$after_tools" | grep -qF 'pinned_inputs' || { echo "FAIL: setup's version control step does not push pinned_inputs bindings"; STATUS=1; }
 printf '%s' "$tools_step" | grep -qF 'offer one test notification' && { echo "FAIL: setup offers the test notification before version control"; STATUS=1; }
 printf '%s' "$tools_step" | grep -qF 'step 10' || { echo "FAIL: setup's tools step does not point at step 10 for the push"; STATUS=1; }
 printf '%s' "$after_tools" | grep -qF 'git push -u' || { echo "FAIL: setup's version control step does not push"; STATUS=1; }

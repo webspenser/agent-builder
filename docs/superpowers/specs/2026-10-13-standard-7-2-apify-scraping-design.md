@@ -273,3 +273,24 @@ Results go in the probe notes file.
 - `bin/validate-agent.sh` passes sales-partner 7.2.0 and fails a
   contract that marks `pinned_inputs` `(acceptable)`.
 - B4 steps 2 and 3 pass, recorded in the notes.
+
+## As built (addendum)
+
+The body above is the design as approved. The shipped 7.2 differs in these
+deliberate ways, each settled by a ruling during the build:
+
+- **Seven scraping bindings, not three.** `bindings/scraping.md` pins
+  `max_places_per_search`, `max_pages_per_site`, `max_crawl_depth`,
+  `max_pages_per_call`, `max_search_terms`, `max_sites_per_call` and
+  `max_dataset_items`. The acceptance line "passes with all three" now reads
+  "passes with all seven".
+- **A larger engine grammar.** `guard.yaml` gained `limits` (entries of kind
+  `count` or `max`, each capped at one bound number, with an optional
+  `required: true`), `only_keys` (the exact argument names a tool accepts, at
+  `$` or a nested path such as `startUrls[]`), and nested paths in
+  `refuse_args`. All three are validated at parse time and documented in
+  STANDARD.md.
+- **An allowlist guard, not a deny list.** The Apify policy names the accepted
+  arguments with `only_keys` instead of refusing the paid add-ons one by one,
+  so an option the vendor adds later stays blocked. The probe notes' Refused
+  lists are background only.

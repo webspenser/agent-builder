@@ -85,8 +85,11 @@ with `python3`.
    schedule. If the contract has `no_external_send` or `owner_only_send`,
    do not continue until `guard.yaml` covers it; for `owner_only_send` it
    also needs an `allow` list and a `recipients` entry pinning every send
-   tool. The policy format is in the Agent Standard
-   ("Guard policy").
+   tool. If the contract has `pinned_inputs`, cover it too (an uncovered
+   one keeps the capability off schedules): name the arguments the tool
+   accepts with `only_keys` and cap them with `limits` entries whose
+   `bound` keys the instance pins. The policy format is in the Agent
+   Standard ("Guard policy").
 7. **Check.** Run `python3 <checker> <tool folder> <package>/capabilities/<cap>/contract.md`
    (add `--custom` for the instance target). Fix every `FAIL` line and run
    it again until it prints `OK`. For the package target, also run the
@@ -94,7 +97,14 @@ with `python3`.
    runs it on the pull request.
 8. **Bind (instance target only).**
    1. Run the `## Probe` calls. On failure, say what failed and stop.
-   2. Write what they found to `bindings/<cap>.md`, as plain lines.
+   2. Write what they found to `bindings/<cap>.md`, as plain lines. If
+      the contract has `owner_only_send` or `pinned_inputs`, also ask for
+      each pinned value the tool's `usage.md` `## Setup` lists (offering
+      the defaults it lists), repeat each back, and write bare
+      `<key>: <value>` lines after the user confirms. Then commit and
+      push the instance; do not bind the capability if the file cannot
+      be pushed, because the guard refuses calls until it matches the
+      pushed copy.
    3. Set `bind_<cap>: custom` in `instance.yaml`, replacing any earlier
       `bind_<cap>:` line.
    4. For each invariant, say whether it is covered or instruction-only,

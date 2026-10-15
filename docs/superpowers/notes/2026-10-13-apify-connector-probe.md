@@ -5,6 +5,14 @@ connector added by the operator at
 `https://mcp.apify.com?tools=compass/crawler-google-places,vdrmota/contact-info-scraper`
 on the operator's own Apify account (monthly usage limit set by the operator).
 
+> **Superseded by the guard as shipped.** The "Refused" lists below describe
+> the probe-time plan to block add-ons with `refuse_args`. The shipped guard
+> instead uses `only_keys` allowlists (the accepted argument names at `$` and
+> `url` only inside `startUrls[]`), so any argument not listed is blocked,
+> including options the vendor adds later. Read the Refused lists as
+> background on what the extra options cost, not as the enforced rule. See
+> `capabilities/scraping/tools/apify/guard.yaml` in sales-partner.
+
 ## Server prefix
 
 Tool names appear as `mcp__claude_ai_Apify__<tool>`. The server segment,
@@ -96,8 +104,10 @@ Nothing was written to the CRM.
   the spec did not name.
 - **Query (allowed):** `startUrls` (array of `{url}`, at most 10 per call by
   instruction), `mergeContacts`, `considerChildFrames`, `sameDomain`,
-  `waitUntil`, `proxyConfig` (required by the schema; default
-  `{useApifyProxy: true}`), `waitSecs`. `sameDomain` cannot be pinned: pinned
+  `waitUntil`, `proxyConfig` (not required: the live schema
+  requires only `startUrls`, and `proxyConfig` has a default,
+  `{useApifyProxy: true}`; the shipped allowlist does not admit it, so the
+  agent leaves it out), `waitSecs`. `sameDomain` cannot be pinned: pinned
   values are text or numbers, and true/false fail closed. The pinned
   `maxRequests` bounds an off-domain crawl.
 - **Refused:** `maximumLeadsEnrichmentRecords`, `leadsEnrichmentDepartments`,
@@ -142,7 +152,7 @@ branch. The operator limited it to one query. The guard blocked nothing.
 - **Ledger:** three rows with seq 1–3: `run_started` (7-day spend $0.00 of
   the $20 cap), one `step` with subject `plumber|Alameda, CA`, items 14 in and
   8 out, cost $0.056 estimated (14 × $0.004), and `run_finished`.
-- **CRM:** 9 new leads at Scored (one 80, six 50, one 37.5, two 35) and
+- **CRM:** 9 new leads at Scored (one 80, five 50, one 37.5, two 35) and
   1 Disqualified (Roto-Rooter, a national chain). Two existing leads were left
   untouched, and two duplicate listings were merged. The 80 is a plumber whose
   Maps listing has no website (buying trigger #3).
