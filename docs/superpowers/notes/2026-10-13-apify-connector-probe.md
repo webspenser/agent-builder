@@ -129,3 +129,27 @@ Nothing was written to the CRM.
 | (new) | `maxRequests` → `max_pages_per_call` (default 30 = 10 sites × 3 pages) |
 | `<REFUSED_ARGS>` | the union of the two Refused lists above |
 | cost field | none; estimate as above, `detail` marked `estimated` |
+
+## Live acceptance (Task 8, interactive, 2026-10-15)
+
+The instance `live-agents/webspenser-sales-partner` ran an interactive prospect
+activity (run `prospect-20261015T1543Z`), with the plugin loaded from the 7.2
+branch. The operator limited it to one query. The guard blocked nothing.
+
+- **Apify:** run `3ynSGmg2fLzpWX0fY` (Maps, `plumber` in Alameda, CA, with the
+  structured city fields): `SUCCEEDED` in 73.7 s, 0.082 compute units,
+  14 items. Every result was in Alameda, which confirms the probe finding.
+- **Ledger:** three rows with seq 1–3: `run_started` (7-day spend $0.00 of
+  the $20 cap), one `step` with subject `plumber|Alameda, CA`, items 14 in and
+  8 out, cost $0.056 estimated (14 × $0.004), and `run_finished`.
+- **CRM:** 9 new leads at Scored (one 80, six 50, one 37.5, two 35) and
+  1 Disqualified (Roto-Rooter, a national chain). Two existing leads were left
+  untouched, and two duplicate listings were merged. The 80 is a plumber whose
+  Maps listing has no website (buying trigger #3).
+- **Gaps:**
+  - The agent counted 8 new Scored leads in the ledger, but Attio has 9.
+  - `agent_version` reads 7.1.0 until the release bumps it.
+  - At prospecting, the trigger and decision-maker criteria score 0 unless the
+    listing has no website. So 50 is the usual ceiling, and only no-website
+    listings clear `research_threshold` 60. That is for the goal-driven
+    prospecting spec.
