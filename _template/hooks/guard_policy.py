@@ -24,7 +24,9 @@ count a non-empty list); `only_keys:` allows an object
 at a path only the keys it lists, spelled exactly (no case or `_`/`-` folding, so it agrees with the
 exact-key `recipients` paths); `refuse_args:` refuses an argument, or a nested value at a path like
 "startUrls[].payload" (names there are folded, which only makes it stricter); an only_keys allowlist is
-the recommended way to restrict arguments); see STANDARD.md "Guard policy".
+the recommended way to restrict arguments); `fixed:` requires an exact JSON value (true, false, null, a
+number, or a quoted string; equal in type too) at a path, and with `required: true` also blocks a call that
+leaves the path out (found by exact name); see STANDARD.md "Guard policy".
 """
 import decimal
 import fnmatch
@@ -35,7 +37,7 @@ import sys
 import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
-        "rules", "recipients", "limits", "only_keys", "refuse_args")
+        "rules", "recipients", "limits", "only_keys", "refuse_args", "fixed")
 AGENT_KEYS = ("covers", "deny", "exempt")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys", "refuse_args")
 ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -44,6 +46,7 @@ WRITE_KEYS = ("kind", "tools", "at")
 RECIPIENT_KEYS = ("tools", "at", "bound")
 LIMIT_KEYS = ("tools", "at", "bound", "kind", "required")
 ONLY_KEYS_KEYS = ("tools", "at", "keys")
+FIXED_KEYS = ("tools", "at", "value", "required")
 LIMIT_KINDS = ("count", "max")
 ROOT = "$"  # an only_keys path naming the whole tool input
 REFUSE_PRESETS = {
@@ -105,6 +108,25 @@ def _scalar(token, lineno):
     return token
 
 
+def _typed_scalar(token, lineno):
+    """A `fixed` value as the JSON value it stands for: unquoted true/false → bool, null → None, a strict
+    decimal (the _as_number grammar) → Decimal; a quoted token → str. Any other unquoted token is an error,
+    so a string must be quoted and its type is never a guess."""
+    token = token.strip()
+    if token.startswith("["):
+        raise PolicyError(f"line {lineno}: a fixed value is one scalar, not a list")
+    text = _scalar(token, lineno)  # every quoting rule of a plain value still applies
+    if token[0] in "'\"":
+        return text
+    if text in ("true", "false"):
+        return text == "true"
+    if text == "null":
+        return None
+    if NUMERIC.match(text):
+        return decimal.Decimal(text)
+    raise PolicyError(f"line {lineno}: fixed value {text!r} is not true, false, null or a number; quote a string")
+
+
 def _flow_list(text, lineno):
     text = text.strip()
     if not (text.startswith("[") and text.endswith("]")):
@@ -130,7 +152,8 @@ def _flow_list(text, lineno):
     return [_scalar(item, lineno) for item in items]
 
 
-def _parse_items(lines, i, name, allowed):
+def _parse_items(lines, i, name, allowed, typed=()):
+    """A block list of entries; a key in typed keeps its JSON type (see _typed_scalar)."""
     items = []
     while i < len(lines):
         lineno = i + 1
@@ -159,7 +182,9 @@ def _parse_items(lines, i, name, allowed):
         if key in items[-1]:
             raise PolicyError(f"line {lineno}: duplicate {name} key '{key}'")
         i += 1
-        if value.startswith("["):
+        if key in typed:
+            items[-1][key] = _typed_scalar(value, lineno)
+        elif value.startswith("["):
             while not value.endswith("]"):
                 if i >= len(lines):
                     raise PolicyError(f"line {lineno}: unclosed '['")
@@ -235,6 +260,19 @@ def _validate(policy):
         for name in entry["keys"]:
             if not ARG_NAME.match(name):
                 raise PolicyError(f"only_keys: '{name}' is not a plain argument name")
+    for entry in policy.get("fixed", []):
+        for k in ("tools", "at"):
+            if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
+                raise PolicyError(f"fixed: each entry needs a non-empty {k} list")
+        for path in entry["at"]:
+            if not PATH.match(path):
+                raise PolicyError(f"fixed: {path} is not a path like personalData or \"a[].b\"")
+        if "value" not in entry:
+            raise PolicyError("fixed: each entry needs a value")
+        if type(entry["value"]) not in (bool, type(None), decimal.Decimal, str):
+            raise PolicyError("fixed: value must be true, false, null, a number or a quoted string")
+        if entry.get("required", "false") not in ("true", "false"):
+            raise PolicyError("fixed: required may only be true or false")
     if "refuse_args" in policy:
         if not policy["refuse_args"]:
             raise PolicyError("refuse_args must name at least one argument")
@@ -311,12 +349,13 @@ def _read(text, keys):
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
         i += 1
-        if key in ("rules", "writes", "recipients", "limits", "only_keys"):
+        if key in ("rules", "writes", "recipients", "limits", "only_keys", "fixed"):
             if value:
                 raise PolicyError(f"line {lineno}: {key}: takes '  - ...' items on the following lines")
             allowed = {"rules": RULE_KEYS, "writes": WRITE_KEYS, "recipients": RECIPIENT_KEYS,
-                       "limits": LIMIT_KEYS, "only_keys": ONLY_KEYS_KEYS}[key]
-            policy[key], i = _parse_items(lines, i, key, allowed)
+                       "limits": LIMIT_KEYS, "only_keys": ONLY_KEYS_KEYS, "fixed": FIXED_KEYS}[key]
+            typed = ("value",) if key == "fixed" else ()
+            policy[key], i = _parse_items(lines, i, key, allowed, typed)
             continue
         if not value:
             raise PolicyError(f"line {lineno}: {key} has no value")
@@ -546,6 +585,42 @@ def _limit_problems(shown, entry, args, bindings):
     return found
 
 
+def _same_value(want, got):
+    """got is the fixed value want, in type as well: false is not 0 or "false", 5 is 5.0, text is exact."""
+    if want is None or isinstance(want, bool):
+        return got is want
+    if isinstance(want, decimal.Decimal):
+        if isinstance(got, bool) or not isinstance(got, (int, float)):
+            return False  # a numeric string is not a number here
+        number = _as_number(got)
+        return number is not None and number == want
+    return isinstance(got, str) and got == want
+
+
+def _json_text(value):
+    if isinstance(value, decimal.Decimal):
+        return format(value, "f")
+    return json.dumps(value)
+
+
+def _fixed_problems(shown, entry, args):
+    """fixed: every value at the paths (segments folded, which only makes it stricter) is the entry's value.
+    A path the call does not have is fine unless the entry says `required: true`; then the exact name must
+    be present (null counts as present, and is checked like any value)."""
+    want = entry["value"]
+    found = []
+    for path in entry["at"]:
+        nodes, mismatch = _walk_folded(args, path)
+        if mismatch:
+            found.append(f"{path}: unexpected shape")
+        if entry.get("required") == "true" and not _walk_folded(args, path, exact=True)[0]:
+            found.append(f"{shown} names no {path}")
+        for node in nodes:
+            if not _same_value(want, node):
+                found.append(f"{shown} must send {path} = {_json_text(want)} (got {_printable(_json_text(node))})")
+    return found
+
+
 def _leaves(value, unwrap):
     if isinstance(value, list):
         return [leaf for item in value for leaf in _leaves(item, unwrap)]
@@ -657,6 +732,12 @@ def problems(policy, event, bindings, server_match=None):
         if not isinstance(args, dict):
             raise PolicyError("tool_input is not an object")
         early.extend(_only_keys_problems(shown, entry, args))
+    for entry in policy.get("fixed", []):
+        if not _matches(names, entry["tools"]):
+            continue
+        if not isinstance(args, dict):
+            raise PolicyError("tool_input is not an object")
+        early.extend(_fixed_problems(shown, entry, args))
     if early:
         return early
     rules = policy.get("rules", [])

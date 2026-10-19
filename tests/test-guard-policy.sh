@@ -469,6 +469,87 @@ policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: []';
 policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: [k]' '    bound: b'; parses 1 "only_keys has no bound"
 policy 'covers: [x]' 'only_keys:';                                                    parses 1 "empty only_keys"
 
+echo "-- fixed"
+policy 'covers: [pinned_inputs]' 'allow: [t, other]' 'fixed:' \
+  '  - tools: [t]' '    at: [personalData]' '    value: false' '    required: true' \
+  '  - tools: [t]' '    at: [onlyTotal]' '    value: true' \
+  '  - tools: [t]' '    at: [n]' '    value: 5' \
+  '  - tools: [t]' '    at: [sel]' "    value: 'script, style'  # a comment" \
+  '  - tools: [t]' '    at: ["a[].b"]' '    value: false'
+parses 0 "fixed parses"
+FT=mcp__apify__t
+run 0 "fixed: false passes" $FT '{"personalData":false}' "" -
+run 2 "fixed: true blocks" $FT '{"personalData":true}' "t must send personalData = false (got true)" -
+run 2 "fixed: 0 is not false" $FT '{"personalData":0}' "t must send personalData = false (got 0)" -
+run 2 'fixed: "false" is not false' $FT '{"personalData":"false"}' 't must send personalData = false (got "false")' -
+run 2 "fixed: null is not false" $FT '{"personalData":null}' "t must send personalData = false (got null)" -
+run 2 "fixed: an object is not false" $FT '{"personalData":{"v":false}}' "t must send personalData = false (got {" -
+run 2 "fixed: a list is not false" $FT '{"personalData":[false]}' "t must send personalData = false (got [false])" -
+run 2 "fixed required: omitted blocks" $FT '{}' "t names no personalData" -
+run 2 "fixed required: a variant spelling does not satisfy it" $FT '{"PersonalData":false}' "t names no personalData" -
+run 2 "fixed: a variant spelling is still checked" $FT '{"personalData":false,"personal_data":true}' "t must send personalData = false (got true)" -
+run 0 "fixed not required: omitted passes" $FT '{"personalData":false}' "" -
+run 0 "fixed: true passes" $FT '{"personalData":false,"onlyTotal":true}' "" -
+run 2 "fixed: false is not true" $FT '{"personalData":false,"onlyTotal":false}' "t must send onlyTotal = true (got false)" -
+run 2 "fixed: 1 is not true" $FT '{"personalData":false,"onlyTotal":1}' "t must send onlyTotal = true (got 1)" -
+run 2 "fixed not required: null is still checked" $FT '{"personalData":false,"onlyTotal":null}' "t must send onlyTotal = true (got null)" -
+run 0 "fixed: 5 passes" $FT '{"personalData":false,"n":5}' "" -
+run 0 "fixed: 5.0 passes" $FT '{"personalData":false,"n":5.0}' "" -
+run 2 'fixed: "5" is not 5' $FT '{"personalData":false,"n":"5"}' 't must send n = 5 (got "5")' -
+run 2 "fixed: 6 is not 5" $FT '{"personalData":false,"n":6}' "t must send n = 5 (got 6)" -
+run 2 "fixed: NaN is not 5" $FT '{"personalData":false,"n":NaN}' "t must send n = 5 (got NaN)" -
+run 0 "fixed: the exact string passes" $FT '{"personalData":false,"sel":"script, style"}' "" -
+run 2 "fixed: strings are case-sensitive" $FT '{"personalData":false,"sel":"Script, style"}' 't must send sel = "script, style" (got "Script, style")' -
+run 2 "fixed: a trailing space blocks" $FT '{"personalData":false,"sel":"script, style "}' "t must send sel" -
+run 0 "fixed: a[].b all false passes" $FT '{"personalData":false,"a":[{"b":false},{"b":false}]}' "" -
+run 2 "fixed: a[].b with one true blocks" $FT '{"personalData":false,"a":[{"b":false},{"b":true}]}' "t must send a[].b = false (got true)" -
+run 2 "fixed: a scalar where the list is expected blocks" $FT '{"personalData":false,"a":"x"}' "a[].b: unexpected shape" -
+run 0 "fixed: null a passes (not required)" $FT '{"personalData":false,"a":null}' "" -
+run 0 "fixed: a tool outside the entries is not checked" mcp__apify__other '{"personalData":true}' "" -
+run 2 "fixed: tool_input that is not an object blocks" $FT '[1]' "cannot check this call" -
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins lists no fixed entries" || _report no "--pins fixed (rc=$rc): $OUT"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: [k]' '    value: null' '    required: true' \
+  '  - tools: [t]' '    at: [s]' "    value: 'null'" '  - tools: [t]' '    at: [z]' '    value: 0' '  - tools: [t]' '    at: [d]' '    value: -1.50'
+run 0 "fixed null: null passes" $FT '{"k":null}' "" -
+run 2 "fixed null required: absent blocks" $FT '{}' "t names no k" -
+run 2 "fixed null: false is not null" $FT '{"k":false}' "t must send k = null (got false)" -
+run 2 "fixed: a quoted 'null' is a string" $FT '{"k":null,"s":null}' 't must send s = "null" (got null)' -
+run 0 "fixed: the string null passes" $FT '{"k":null,"s":"null"}' "" -
+run 2 "fixed: false is not 0" $FT '{"k":null,"z":false}' "t must send z = 0 (got false)" -
+run 0 "fixed: -0 is 0" $FT '{"k":null,"z":-0}' "" -
+run 0 "fixed: -1.5 is -1.50" $FT '{"k":null,"d":-1.5}' "" -
+run 2 "fixed: -1.51 is not -1.50" $FT '{"k":null,"d":-1.51}' "t must send d = -1.50 (got -1.51)" -
+FX() { policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: [k]' "$@"; }
+FX '    value: false';                          parses 0 "fixed entry parses"
+FX '    value: false' '    required: false';    parses 0 "fixed required: false"
+FX "    value: 'yes'";                          parses 0 "fixed quoted word is a string"
+FX '    value: "5"';                            parses 0 "fixed double-quoted number is a string"
+FX "    value: ''";                             parses 0 "fixed quoted empty string"
+FX '    value: +5';                             parses 0 "fixed signed number"
+FX '    value: yes';                            parses 1 "fixed unquoted yes"
+FX '    value: False';                          parses 1 "fixed unquoted False"
+FX '    value: TRUE';                           parses 1 "fixed unquoted TRUE"
+FX '    value: Null';                           parses 1 "fixed unquoted Null"
+FX '    value: abc';                            parses 1 "fixed unquoted word"
+FX '    value: 1e3';                            parses 1 "fixed scientific number"
+FX '    value: 5.';                             parses 1 "fixed number with a bare point"
+FX '    value: 0x10';                           parses 1 "fixed hex number"
+FX '    value: ٥';                              parses 1 "fixed non-ASCII digit"
+FX '    value:';                                parses 1 "fixed empty value"
+FX '    value: [false]';                        parses 1 "fixed list value"
+FX '    value: false' '    required: yes';      parses 1 "fixed required: yes"
+FX '    value: false' '    bound: b';           parses 1 "fixed unknown entry key"
+FX '    value: false' '    value: true';        parses 1 "fixed duplicate value"
+FX;                                             parses 1 "fixed entry without a value"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    value: false';                     parses 1 "fixed entry without at"
+policy 'covers: [x]' 'fixed:' '  - at: [k]' '    value: false';                        parses 1 "fixed entry without tools"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: []' '    value: false';        parses 1 "fixed empty at"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: ["bad path!"]' '    value: false'; parses 1 "fixed bad path"
+policy 'covers: [x]' 'fixed:';                                                        parses 1 "empty fixed"
+policy 'covers: [x]' 'fixed: [a]';                                                    parses 1 "fixed given a list"
+FX '    value: yes'
+run 2 "fixed: an invalid policy blocks every call" $FT '{"k":"yes"}' "cannot check this call" -
+
 echo "-- agent exempt"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'; aparses 0 "exempt parses"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [Owner-Notify]'; aparses 1 "exempt not snake_case"

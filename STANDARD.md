@@ -630,7 +630,7 @@ validation error and, at runtime, a block.
   scalar may not contain its own quote character, and a double-quoted
   one may not contain a backslash. A list item is one scalar
   (`["a" "b"]` is an error).
-- The exceptions are `rules:`, `writes:`, `recipients:`, `limits:` and `only_keys:`, whose values
+- The exceptions are `rules:`, `writes:`, `recipients:`, `limits:`, `only_keys:` and `fixed:`, whose values
   are block lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `create:`,
   `update:`, `any:`, or `field:` plus `forbid: true` or `forbid: update`;
@@ -639,7 +639,9 @@ validation error and, at runtime, a block.
   and `at:`, the last two as flow lists. A `recipients` item
   holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A `limits` item
   holds the same and `kind:`, a scalar (`count` or `max`), and optionally `required: true`. An `only_keys` item
-  holds `tools:`, `at:` and `keys:`, all flow lists. A flow list in an item may
+  holds `tools:`, `at:` and `keys:`, all flow lists. A `fixed` item holds
+  `tools:` and `at:`, as flow lists, `value:`, one typed scalar (see Semantics),
+  and optionally `required:` (`true` or `false`). A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
@@ -662,6 +664,7 @@ validation error and, at runtime, a block.
 | `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required; `required` may only be `true`). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed, unless the entry says `required: true`, which makes a path that is not supplied block (see Semantics) |
 | `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, spelled exactly (no case, `_` or `-` folding; the path is walked with exact names too). Recommended over `refuse_args` for restricting arguments |
 | `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
+| `fixed` | no | A list of `{tools, at, value, required}` entries (`value` required; `required` is `true` or `false`, default `false`). Every value at each `at` path (the `writes` path grammar) must be exactly `value`, in type too: unquoted `true`, `false`, `null` or a number, or a quoted string. For a tool's safety settings, not operator choices: it reads no bindings and `--pins` does not list it. A path the call does not have is allowed, unless the entry says `required: true` (see Semantics) |
 
 ### Semantics
 
@@ -674,7 +677,7 @@ validation error and, at runtime, a block.
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
-2. **Recipients, limits, allowed keys and refused arguments.** These run after `allow` and
+2. **Recipients, limits, allowed keys, fixed values and refused arguments.** These run after `allow` and
    `deny`. Every problem they find is reported, and any one blocks the
    call before writes are read.
 
@@ -779,6 +782,46 @@ validation error and, at runtime, a block.
    4. A count above the bound blocks: `<tool> exceeds <bound> at <path>
       (<count> > <bound value>)`.
 
+   *Fixed values.* A `fixed` entry's `value` is one scalar, read as the
+   JSON value it stands for:
+
+   - unquoted `true` or `false`: a boolean;
+   - unquoted `null`: null;
+   - an unquoted number matching `^[+-]?[0-9]+(\.[0-9]+)?$` (ASCII
+     digits, as in Recipients step 4): a number;
+   - a quoted scalar: that string (`'script, style'`, `'false'`, `'5'`).
+
+   Any other unquoted token (`yes`, `False`, `TRUE`, `1e3`, a bare word)
+   is a parse error, so a string must be quoted and its type is never a
+   guess. For each `fixed` entry whose `tools` match the call (a
+   matching call whose input is not an object blocks), for each `at`
+   path:
+
+   1. Collect the values at the path, with segments compared as for
+      nested `refuse_args` (folded, which only makes the check stricter).
+      A `null` where an object or list is expected holds nothing; a
+      `null` value is a value, and is checked. Any other wrong shape on
+      the way blocks: `<path>: unexpected shape`.
+   2. With `required: true`, the path must be present under its exact
+      key names, else block: `<tool> names no <path>`. A variant spelling
+      (`PersonalData` for `personalData`) does not satisfy it, though it
+      is still checked by step 3. A `null` there is present (and fails
+      step 3 unless `value` is `null`). Without `required: true`, a path
+      the call does not have is allowed.
+   3. Each value must equal `value` exactly and in type, else block:
+      `<tool> must send <path> = <value> (got <got>)`, both shown as
+      JSON. Boolean `false` is not `0` and not `"false"`; `null` is not
+      `false`; a number equals a JSON number of the same value, compared
+      exactly as decimals (`5` equals `5.0`; the string `"5"` does not,
+      nor does a non-finite number); a string matches only the identical
+      string, case and spaces included, since these are protocol values,
+      not names.
+
+   Fixed values are a tool's safety settings (a scraper's
+   `personalData: false`), not operator choices: they read no bindings,
+   `--pins` does not list them, and they change only with the agent's
+   release.
+
 3. **Writes.** The matching entries are the `writes` entries whose
    `tools` match the call's tool name, using the same suffix matching as
    `allow` and `deny`. For each matching entry, collect the value maps
@@ -866,6 +909,11 @@ Each is an invalid policy, and fails closed.
   `at` or `keys`, an `at` that is neither `$` nor a valid path, or a
   `keys` item that is not a plain argument name; or `only_keys:` has no
   items.
+- A `fixed` entry has an unknown key, a missing or empty `tools` or
+  `at`, a bad `at` path, no `value`, a `value` that is empty, a list, or
+  an unquoted token other than `true`, `false`, `null` or a number (see
+  Semantics), or a `required` other than `true` or `false`; or `fixed:`
+  has no items.
 - `refuse_args` is empty, or holds an entry that is neither a plain
   argument name (`^[A-Za-z_][A-Za-z0-9_]*$`) nor a path like `a.b` or
   `a[].b` (the `writes` path grammar).
