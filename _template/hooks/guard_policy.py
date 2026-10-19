@@ -54,11 +54,14 @@ FIXED_KEYS = ("tools", "at", "value", "required")
 URL_KEYS = ("tools", "at", "schemes", "hosts", "path", "query", "fragment", "required")
 URL_SCHEMES = {"https": 443, "http": 80}  # each allowed scheme and its default port
 URL_MAX = 2048
-URL_SCHEME = re.compile(r"^[a-z]+$")
-URL_PORT = re.compile(r"^(0|[1-9][0-9]{0,4})$")  # no sign, no padding, ASCII digits only
-URL_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")  # LDH, 1-63, no edge hyphen
-URL_PREFIX = re.compile(r"^(/[A-Za-z0-9._~-]+)+$")
-URL_LOCAL = (".localhost", ".local", ".internal", ".lan", ".home.arpa", ".test")
+URL_HOST_MAX = 253
+# URL_* patterns are used with fullmatch only: `$` would also match before a trailing newline.
+URL_SCHEME = re.compile(r"[a-z]+")
+URL_PORT = re.compile(r"0|[1-9][0-9]{0,4}")  # no sign, no padding, ASCII digits only
+URL_LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")  # LDH, 1-63, no edge hyphen
+URL_PREFIX = re.compile(r"(/[A-Za-z0-9._~-]+)+")
+URL_LOCAL = (".localhost", ".local", ".internal", ".lan", ".home.arpa", ".test",
+             ".localdomain", ".svc", ".corp", ".home", ".intranet")
 LIMIT_KINDS = ("count", "max")
 ROOT = "$"  # an only_keys path naming the whole tool input
 REFUSE_PRESETS = {
@@ -338,7 +341,7 @@ def _validate_url_entry(entry):
         raise PolicyError("urls: each entry needs hosts, a list of hostnames or the word public")
     path = entry.get("path")
     if not isinstance(path, str) or not (path in ("root", "any") or (
-            URL_PREFIX.match(path) and ".." not in path and "." not in path.split("/"))):
+            URL_PREFIX.fullmatch(path) and ".." not in path and "." not in path.split("/"))):
         raise PolicyError("urls: path must be root, any or a prefix like '/pages' (no trailing /, no . or ..)")
     for k in ("query", "fragment"):
         if entry.get(k, "forbid") not in ("forbid", "allow"):
@@ -686,6 +689,23 @@ def _json_text(value):
     return json.dumps(value)
 
 
+def _found_at(shown, entry, args, path):
+    """(values at path, problems) for a fixed or urls entry. Values are found with segments folded (which
+    only makes the check stricter); a wrong shape on the way is `<path>: unexpected shape`. With
+    `required: true` the path must be supplied under its exact names by every item of every list on the
+    way (_required_everywhere): absent is `<tool> names no <path>`, and a shape problem is reported once."""
+    found = []
+    nodes, mismatch = _walk_folded(args, path)
+    if mismatch:
+        found.append(f"{path}: unexpected shape")
+    why = _required_everywhere(args, path) if entry.get("required") == "true" else None
+    if why == "absent":
+        found.append(f"{shown} names no {path}")
+    elif why == "shape" and not mismatch:
+        found.append(f"{path}: unexpected shape")
+    return nodes, found
+
+
 def _fixed_problems(shown, entry, args):
     """fixed: every value at the paths (segments folded, which only makes it stricter) is the entry's value.
     A path the call does not have is fine unless the entry says `required: true`; then the path must be
@@ -694,14 +714,8 @@ def _fixed_problems(shown, entry, args):
     want = entry["value"]
     found = []
     for path in entry["at"]:
-        nodes, mismatch = _walk_folded(args, path)
-        if mismatch:
-            found.append(f"{path}: unexpected shape")
-        why = _required_everywhere(args, path) if entry.get("required") == "true" else None
-        if why == "absent":
-            found.append(f"{shown} names no {path}")
-        elif why == "shape" and not mismatch:
-            found.append(f"{path}: unexpected shape")
+        nodes, problems_here = _found_at(shown, entry, args, path)
+        found.extend(problems_here)
         for node in nodes:
             if not _same_value(want, node):
                 found.append(f"{shown} must send {path} = {_json_text(want)} (got {_printable(_json_text(node))})")
@@ -723,6 +737,8 @@ def _host_reason(host):
     host = host.lower()
     if host.endswith("."):
         return "the host ends with a dot"
+    if len(host) > URL_HOST_MAX:
+        return f"the host is longer than {URL_HOST_MAX} characters"
     labels = host.split(".")
     if host.startswith("[") or labels[-1].isdigit() or any(label.startswith("0x") for label in labels):
         return "the host is an IP address"
@@ -736,7 +752,7 @@ def _host_reason(host):
     if len(labels) < 2:
         return "the host needs at least two labels"
     for label in labels:
-        if not URL_LABEL.match(label):
+        if not URL_LABEL.fullmatch(label):
             return (f"host label {_printable(label)!r} is not 1 to 63 letters, digits or hyphens"
                     " that start and end with a letter or digit")
     return None
@@ -758,7 +774,7 @@ def _parse_url(s):
     if at < 0:
         return shape
     scheme, rest = s[:at], s[at + 3:]
-    if not URL_SCHEME.match(scheme):
+    if not URL_SCHEME.fullmatch(scheme):
         return "the scheme must be lowercase" if scheme.isascii() and scheme.isalpha() else shape
     end = min([i for i in (rest.find("/"), rest.find("?"), rest.find("#")) if i >= 0] or [len(rest)])
     authority, tail = rest[:end], rest[end:]
@@ -769,7 +785,7 @@ def _parse_url(s):
     host, port = authority, None
     if ":" in authority:
         host, _, digits = authority.rpartition(":")
-        if not URL_PORT.match(digits) or int(digits) > 65535:
+        if not URL_PORT.fullmatch(digits) or int(digits) > 65535:
             return "the port is not a plain number"
         port = int(digits)
     why = _host_reason(host)
@@ -822,14 +838,8 @@ def _url_problems(shown, entry, args):
     list on the way (see _required_everywhere)."""
     found = []
     for path in entry["at"]:
-        nodes, mismatch = _walk_folded(args, path)
-        if mismatch:
-            found.append(f"{path}: unexpected shape")
-        why = _required_everywhere(args, path) if entry.get("required") == "true" else None
-        if why == "absent":
-            found.append(f"{shown} names no {path}")
-        elif why == "shape" and not mismatch:
-            found.append(f"{path}: unexpected shape")
+        nodes, problems_here = _found_at(shown, entry, args, path)
+        found.extend(problems_here)
         for node in nodes:
             if not isinstance(node, str):
                 found.append(f"{path} must be a URL string")

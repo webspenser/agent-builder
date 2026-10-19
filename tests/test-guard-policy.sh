@@ -614,6 +614,15 @@ u1 2 "a .lan name" '"https://a.lan"' "t startUrls[].url: host a.lan is local"
 u1 2 "a .home.arpa name" '"https://a.home.arpa"' "t startUrls[].url: host a.home.arpa is local"
 u1 2 "a .test name" '"https://a.test"' "t startUrls[].url: host a.test is local"
 u1 2 "an uppercase local name" '"https://FOO.LOCAL"' "t startUrls[].url: host foo.local is local"
+u1 2 "localhost.localdomain" '"https://localhost.localdomain"' "t startUrls[].url: host localhost.localdomain is local"
+u1 2 "a cluster .svc name" '"https://kubernetes.default.svc"' "t startUrls[].url: host kubernetes.default.svc is local"
+u1 2 "a .corp name" '"https://a.corp"' "t startUrls[].url: host a.corp is local"
+u1 2 "a .home name" '"https://nas.home"' "t startUrls[].url: host nas.home is local"
+u1 2 "an .intranet name" '"https://wiki.intranet"' "t startUrls[].url: host wiki.intranet is local"
+H253=$(python3 -c 'print(".".join(["a" * 63] * 3) + "." + "b" * 61)')
+H254=$(python3 -c 'print(".".join(["a" * 63] * 3) + "." + "b" * 62)')
+u1 0 "a 253-character host" "\"https://$H253\""
+u1 2 "a 254-character host" "\"https://$H254\"" "t startUrls[].url: the host is longer than 253 characters"
 u1 2 "one label" '"https://intranet"' "t startUrls[].url: the host needs at least two labels"
 u1 2 "a trailing dot" '"https://example.com."' "t startUrls[].url: the host ends with a dot"
 u1 2 "an empty label" '"https://example..com"' "t startUrls[].url: host label '' is not"
@@ -674,6 +683,10 @@ run 2 "urls R3: %2e%2e" $UT "{$S,\"doc\":\"https://docs.example.com/pages/%2e%2e
 run 2 "urls R3: %5C" $UT "{$S,\"doc\":\"https://docs.example.com/pages/%5C..%5Cadmin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
 run 2 "urls R3: a case change in the path" $UT "{$S,\"doc\":\"https://docs.example.com/Pages/x\"}" "t doc: the path is not under /pages" -
 run 2 "urls R3: a fragment (forbidden by default)" $UT "{$S,\"doc\":\"https://docs.example.com/pages#x\"}" "t doc: a fragment is not allowed" -
+L2048=$(python3 -c 'p = "http://docs.example.com/pages?q="; print(p + "a" * (2048 - len(p)))')
+L2049=$(python3 -c 'p = "http://docs.example.com/pages?q="; print(p + "a" * (2049 - len(p)))')
+run 0 "urls R3: exactly 2048 characters passes" $UT "{$S,\"doc\":\"$L2048\"}" "" -
+run 2 "urls R3: 2049 characters blocks" $UT "{$S,\"doc\":\"$L2049\"}" "t doc: is longer than 2048 characters" -
 run 0 "urls R4: an xn-- host in an exact list, with a fragment allowed" $UT "{$S,\"idn\":\"https://xn--e1afmkfd.com/#a\"}" "" -
 run 0 "urls: a tool outside the entries is not checked" mcp__apify__other '{"page":"https://evil.com"}' "" -
 run 2 "urls: tool_input that is not an object blocks" $UT '[1]' "cannot check this call" -

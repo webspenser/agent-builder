@@ -643,8 +643,9 @@ validation error and, at runtime, a block.
   `tools:` and `at:`, as flow lists, `value:`, one typed scalar (see Semantics),
   and optionally `required:` (`true` or `false`). A `urls` item holds
   `tools:`, `at:` and `schemes:`, as flow lists, `hosts:`, a flow list or
-  the scalar `public`, `path:`, a scalar (`root`, `any` or a quoted prefix
-  such as `'/pages'`), and optionally `query:`, `fragment:` (`forbid` or
+  the scalar `public`, `path:`, a scalar (`root`, `any` or a prefix
+  starting with `/`, quoted or not: `'/pages'` and `/pages` are the same),
+  and optionally `query:`, `fragment:` (`forbid` or
   `allow`) and `required: true`. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
@@ -669,7 +670,7 @@ validation error and, at runtime, a block.
 | `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, spelled exactly (no case, `_` or `-` folding; the path is walked with exact names too). Recommended over `refuse_args` for restricting arguments |
 | `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
 | `fixed` | no | A list of `{tools, at, value, required}` entries (`value` required; `required` is `true` or `false`, default `false`). Every value at each `at` path (the `writes` path grammar) must be exactly `value`, in type too: unquoted `true`, `false`, `null` or a number, or a quoted string. For a tool's safety settings, not operator choices: it reads no bindings and `--pins` does not list it. A path the call does not have is allowed, unless the entry says `required: true` (see Semantics) |
-| `urls` | no | A list of `{tools, at, schemes, hosts, path, query, fragment, required}` entries. Every value at each `at` path (the `writes` path grammar) must be a URL string that parses strictly and passes the always-on refusals (see Semantics), with a scheme in `schemes` (a non-empty list from `https`, `http`), a host in `hosts` (a non-empty list of exact hostnames, or the word `public`: any host that passes the always-on checks), and a path that satisfies `path` (`root`: empty or `/`; `any`; or a quoted prefix like `'/pages'`, matched on segment boundaries). `query` and `fragment` are `forbid` (default) or `allow`. `required` may only be `true`. Reads no bindings; `--pins` does not list it |
+| `urls` | no | A list of `{tools, at, schemes, hosts, path, query, fragment, required}` entries. Every value at each `at` path (the `writes` path grammar) must be a URL string that parses strictly and passes the always-on refusals (see Semantics), with a scheme in `schemes` (a non-empty list from `https`, `http`), a host in `hosts` (a non-empty list of exact hostnames, or the word `public`: any host that passes the always-on checks), and a path that satisfies `path` (`root`: empty or `/`; `any`; or a prefix like `'/pages'`, quoted or not, matched on segment boundaries). `query` and `fragment` are `forbid` (default) or `allow`. `required` may only be `true`. Reads no bindings; `--pins` does not list it |
 
 ### Semantics
 
@@ -875,11 +876,14 @@ validation error and, at runtime, a block.
         which is a host whose last label is all digits (`1.2.3.4`,
         `2130706433`, `017700000001`, `127.1`) or that has a label
         starting `0x` (`0x7f.0.0.1`), or that `ipaddress` accepts;
-      - the host ends with a dot, has fewer than two labels, or has a
-        label that is not ASCII letters, digits and hyphens, 1 to 63
-        characters, starting and ending with a letter or digit;
+      - the host ends with a dot, is longer than 253 characters, has
+        fewer than two labels, or has a label that is not ASCII letters,
+        digits and hyphens, 1 to 63 characters, starting and ending with
+        a letter or digit;
       - the host (lowercased) is `localhost`, or ends `.localhost`,
-        `.local`, `.internal`, `.lan`, `.home.arpa` or `.test`;
+        `.local`, `.internal`, `.lan`, `.home.arpa`, `.test`,
+        `.localdomain`, `.svc`, `.corp`, `.home` or `.intranet`
+        (`localhost.localdomain`, `kubernetes.default.svc`);
       - with `hosts: public`, a label starts `xn--` (a punycode name is
         allowed only by listing it in an exact `hosts` list);
       - with an exact `hosts` list, the lowercased host is not one of
