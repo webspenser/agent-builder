@@ -26,10 +26,14 @@ exact-key `recipients` paths); `refuse_args:` refuses an argument, or a nested v
 "startUrls[].payload" (names there are folded, which only makes it stricter); an only_keys allowlist is
 the recommended way to restrict arguments); `fixed:` requires an exact JSON value (true, false, null, a
 number, or a quoted string; equal in type too) at a path, and with `required: true` also blocks a call that
-leaves the path out (found by exact name); see STANDARD.md "Guard policy".
+leaves the path out (found by exact name); `urls:` requires every value at a path to be a URL string that
+passes a strict parser (never urllib.parse) and the entry's schemes, hosts, path, query and fragment rules,
+on top of always-on refusals (user info, non-default ports, IP literals, local and single-label hosts,
+non-ASCII hosts); see STANDARD.md "Guard policy".
 """
 import decimal
 import fnmatch
+import ipaddress
 import json
 import math
 import re
@@ -37,7 +41,7 @@ import sys
 import unicodedata
 
 KEYS = ("covers", "allow", "deny", "writes", "unwrap", "unknown_writes", "refuse_keys", "bound_keys_only",
-        "rules", "recipients", "limits", "only_keys", "refuse_args", "fixed")
+        "rules", "recipients", "limits", "only_keys", "refuse_args", "fixed", "urls")
 AGENT_KEYS = ("covers", "deny", "exempt")
 LIST_KEYS = ("covers", "allow", "deny", "unwrap", "refuse_keys", "refuse_args")
 ARG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -47,6 +51,14 @@ RECIPIENT_KEYS = ("tools", "at", "bound")
 LIMIT_KEYS = ("tools", "at", "bound", "kind", "required")
 ONLY_KEYS_KEYS = ("tools", "at", "keys")
 FIXED_KEYS = ("tools", "at", "value", "required")
+URL_KEYS = ("tools", "at", "schemes", "hosts", "path", "query", "fragment", "required")
+URL_SCHEMES = {"https": 443, "http": 80}  # each allowed scheme and its default port
+URL_MAX = 2048
+URL_SCHEME = re.compile(r"^[a-z]+$")
+URL_PORT = re.compile(r"^(0|[1-9][0-9]{0,4})$")  # no sign, no padding, ASCII digits only
+URL_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")  # LDH, 1-63, no edge hyphen
+URL_PREFIX = re.compile(r"^(/[A-Za-z0-9._~-]+)+$")
+URL_LOCAL = (".localhost", ".local", ".internal", ".lan", ".home.arpa", ".test")
 LIMIT_KINDS = ("count", "max")
 ROOT = "$"  # an only_keys path naming the whole tool input
 REFUSE_PRESETS = {
@@ -273,6 +285,8 @@ def _validate(policy):
             raise PolicyError("fixed: value must be true, false, null, a number or a quoted string")
         if entry.get("required", "false") not in ("true", "false"):
             raise PolicyError("fixed: required may only be true or false")
+    for entry in policy.get("urls", []):
+        _validate_url_entry(entry)
     if "refuse_args" in policy:
         if not policy["refuse_args"]:
             raise PolicyError("refuse_args must name at least one argument")
@@ -297,6 +311,40 @@ def _validate(policy):
             for k in lists:
                 if not isinstance(rule[k], list) or not rule[k]:
                     raise PolicyError(f"rule for {rule['field']}: {k} must be a non-empty list")
+
+
+def _validate_url_entry(entry):
+    for k in ("tools", "at"):
+        if not isinstance(entry.get(k), list) or not entry[k] or not all(entry[k]):
+            raise PolicyError(f"urls: each entry needs a non-empty {k} list")
+    for path in entry["at"]:
+        if not PATH.match(path):
+            raise PolicyError(f"urls: {path} is not a path like url or \"startUrls[].url\"")
+    schemes = entry.get("schemes")
+    if not isinstance(schemes, list) or not schemes:
+        raise PolicyError("urls: each entry needs a non-empty schemes list")
+    for scheme in schemes:
+        if scheme not in URL_SCHEMES:
+            raise PolicyError(f"urls: scheme '{scheme}' is not https or http")
+    hosts = entry.get("hosts")
+    if isinstance(hosts, list):
+        if not hosts:
+            raise PolicyError("urls: hosts must list at least one host, or be public")
+        for host in hosts:
+            why = _host_reason(host)
+            if why:
+                raise PolicyError(f"urls: hosts item '{host}' is not an exact public hostname ({why})")
+    elif hosts != "public":
+        raise PolicyError("urls: each entry needs hosts, a list of hostnames or the word public")
+    path = entry.get("path")
+    if not isinstance(path, str) or not (path in ("root", "any") or (
+            URL_PREFIX.match(path) and ".." not in path and "." not in path.split("/"))):
+        raise PolicyError("urls: path must be root, any or a prefix like '/pages' (no trailing /, no . or ..)")
+    for k in ("query", "fragment"):
+        if entry.get(k, "forbid") not in ("forbid", "allow"):
+            raise PolicyError(f"urls: {k} may only be forbid or allow")
+    if "required" in entry and entry["required"] != "true":
+        raise PolicyError("urls: required may only be true")
 
 
 def parse(text):
@@ -349,11 +397,12 @@ def _read(text, keys):
         if key in policy:
             raise PolicyError(f"line {lineno}: duplicate key '{key}'")
         i += 1
-        if key in ("rules", "writes", "recipients", "limits", "only_keys", "fixed"):
+        if key in ("rules", "writes", "recipients", "limits", "only_keys", "fixed", "urls"):
             if value:
                 raise PolicyError(f"line {lineno}: {key}: takes '  - ...' items on the following lines")
             allowed = {"rules": RULE_KEYS, "writes": WRITE_KEYS, "recipients": RECIPIENT_KEYS,
-                       "limits": LIMIT_KEYS, "only_keys": ONLY_KEYS_KEYS, "fixed": FIXED_KEYS}[key]
+                       "limits": LIMIT_KEYS, "only_keys": ONLY_KEYS_KEYS, "fixed": FIXED_KEYS,
+                       "urls": URL_KEYS}[key]
             typed = ("value",) if key == "fixed" else ()
             policy[key], i = _parse_items(lines, i, key, allowed, typed)
             continue
@@ -659,6 +708,138 @@ def _fixed_problems(shown, entry, args):
     return found
 
 
+def _host_reason(host):
+    """Why host fails the always-on host checks, or None. It must be ASCII before it is lowercased (a
+    full-width letter, an ideographic full stop or a Kelvin sign is refused, never mapped the way IDNA would
+    map it), hold no %, and be neither an IP literal nor a local name. The IP pre-check refuses what any
+    URL parser reads as IPv4 (a last label of digits: dotted, decimal, octal and short forms; a 0x label),
+    then ipaddress has the last word."""
+    if not host:
+        return "the host is empty"
+    if "%" in host:
+        return "the host has a %"
+    if not host.isascii():
+        return "the host is not ASCII"
+    host = host.lower()
+    if host.endswith("."):
+        return "the host ends with a dot"
+    labels = host.split(".")
+    if host.startswith("[") or labels[-1].isdigit() or any(label.startswith("0x") for label in labels):
+        return "the host is an IP address"
+    try:
+        ipaddress.ip_address(host)
+        return "the host is an IP address"
+    except ValueError:
+        pass
+    if host == "localhost" or host.endswith(URL_LOCAL):
+        return f"host {_printable(host)} is local"
+    if len(labels) < 2:
+        return "the host needs at least two labels"
+    for label in labels:
+        if not URL_LABEL.match(label):
+            return (f"host label {_printable(label)!r} is not 1 to 63 letters, digits or hyphens"
+                    " that start and end with a letter or digit")
+    return None
+
+
+def _parse_url(s):
+    """(scheme, host, port, path, query, fragment) from a strict left-to-right read of
+    scheme://authority[path][?query][#fragment], or the reason it is refused. Never urllib.parse: a lenient
+    parse could see a different host than the HTTP client that fetches the URL. Anything a WHATWG parser
+    would repair or reinterpret (a backslash, whitespace, a control character, one slash, user info,
+    an empty port) is refused instead. The host comes back lowercased; port is an int or None; query and
+    fragment are None when absent and "" for a lone ? or #."""
+    if len(s) > URL_MAX:
+        return f"is longer than {URL_MAX} characters"
+    if any(ch == "\\" or ch.isspace() or unicodedata.category(ch)[0] == "C" for ch in s):
+        return "has a control character, whitespace or a backslash"
+    shape = "is not scheme://host[path][?query][#fragment]"
+    at = s.find("://")
+    if at < 0:
+        return shape
+    scheme, rest = s[:at], s[at + 3:]
+    if not URL_SCHEME.match(scheme):
+        return "the scheme must be lowercase" if scheme.isascii() and scheme.isalpha() else shape
+    end = min([i for i in (rest.find("/"), rest.find("?"), rest.find("#")) if i >= 0] or [len(rest)])
+    authority, tail = rest[:end], rest[end:]
+    if "@" in authority:
+        return "user info (@) is not allowed"
+    if authority.startswith("["):
+        return "the host is an IP address"
+    host, port = authority, None
+    if ":" in authority:
+        host, _, digits = authority.rpartition(":")
+        if not URL_PORT.match(digits) or int(digits) > 65535:
+            return "the port is not a plain number"
+        port = int(digits)
+    why = _host_reason(host)
+    if why:
+        return why
+    path, query, fragment = tail, None, None
+    if "#" in path:
+        path, fragment = path.split("#", 1)
+    if "?" in path:
+        path, query = path.split("?", 1)
+    return scheme, host.lower(), port, path, query, fragment
+
+
+def _url_reason(entry, s):
+    """Why the URL string s breaks the urls entry, or None."""
+    parsed = _parse_url(s)
+    if isinstance(parsed, str):
+        return parsed
+    scheme, host, port, path, query, fragment = parsed
+    if scheme not in entry["schemes"]:
+        return f"scheme {scheme} is not allowed"
+    if port is not None and port != URL_SCHEMES[scheme]:
+        return f"port {port} is not the default for {scheme}"
+    if entry["hosts"] == "public":
+        if any(label.startswith("xn--") for label in host.split(".")):
+            return "an xn-- label needs an exact hosts list"
+    elif host not in {h.lower() for h in entry["hosts"]}:
+        return f"host {_printable(host)} is not in the hosts list"
+    rule = entry["path"]
+    if rule != "any":
+        folded = path.lower()
+        # %2E is a dot to a WHATWG parser (%2e%2e is ..) and %5C a backslash to some servers
+        if ".." in path or any(code in folded for code in ("%2f", "%2e", "%5c")):
+            return "the path holds .., %2F, %2E or %5C"
+        if rule == "root":
+            if path not in ("", "/"):
+                return "only the site root is allowed"
+        elif path != rule and not path.startswith(rule + "/"):
+            return f"the path is not under {rule}"
+    if query is not None and entry.get("query", "forbid") != "allow":
+        return "a query is not allowed"
+    if fragment is not None and entry.get("fragment", "forbid") != "allow":
+        return "a fragment is not allowed"
+    return None
+
+
+def _url_problems(shown, entry, args):
+    """urls: every value at the paths (segments folded, which only makes it stricter) is a URL string the
+    entry accepts. `required: true` works as in fixed: supplied under exact names by every item of every
+    list on the way (see _required_everywhere)."""
+    found = []
+    for path in entry["at"]:
+        nodes, mismatch = _walk_folded(args, path)
+        if mismatch:
+            found.append(f"{path}: unexpected shape")
+        why = _required_everywhere(args, path) if entry.get("required") == "true" else None
+        if why == "absent":
+            found.append(f"{shown} names no {path}")
+        elif why == "shape" and not mismatch:
+            found.append(f"{path}: unexpected shape")
+        for node in nodes:
+            if not isinstance(node, str):
+                found.append(f"{path} must be a URL string")
+                continue
+            reason = _url_reason(entry, node)
+            if reason:
+                found.append(f"{shown} {path}: {reason}")
+    return found
+
+
 def _leaves(value, unwrap):
     if isinstance(value, list):
         return [leaf for item in value for leaf in _leaves(item, unwrap)]
@@ -776,6 +957,12 @@ def problems(policy, event, bindings, server_match=None):
         if not isinstance(args, dict):
             raise PolicyError("tool_input is not an object")
         early.extend(_fixed_problems(shown, entry, args))
+    for entry in policy.get("urls", []):
+        if not _matches(names, entry["tools"]):
+            continue
+        if not isinstance(args, dict):
+            raise PolicyError("tool_input is not an object")
+        early.extend(_url_problems(shown, entry, args))
     if early:
         return early
     rules = policy.get("rules", [])

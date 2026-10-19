@@ -567,6 +567,154 @@ policy 'covers: [x]' 'fixed: [a]';                                              
 FX '    value: yes'
 run 2 "fixed: an invalid policy blocks every call" $FT '{"k":"yes"}' "cannot check this call" -
 
+echo "-- urls"
+policy 'covers: [pinned_inputs]' 'allow: [t, other]' 'urls:' \
+  "  - tools: [t]" "    at: ['startUrls[].url']" '    schemes: [https]' '    hosts: public' '    path: root' '    required: true' \
+  '  - tools: [t]' '    at: [page]' '    schemes: [https]' '    hosts: [facebook.com, www.facebook.com]' '    path: any' \
+  '  - tools: [t]' '    at: [doc]' '    schemes: [https, http]' '    hosts: [docs.example.com]' "    path: '/pages'" '    query: allow' \
+  '  - tools: [t]' '    at: [idn]' '    schemes: [https]' '    hosts: [xn--e1afmkfd.com]' '    path: any' '    fragment: allow'
+parses 0 "urls parses"
+UT=mcp__apify__t; S='"startUrls":[{"url":"https://a.com"}]'
+u1() { run "$1" "urls R1: $2" $UT "{\"startUrls\":[{\"url\":$3}]}" "${4:-}" -; }
+u1 0 "a bare host passes" '"https://example.com"'
+u1 0 "a root / passes" '"https://example.com/"'
+u1 0 "the default port passes" '"https://example.com:443/"'
+u1 0 "an uppercase host is lowercased" '"https://Example.com"'
+u1 0 "a hyphen inside a label passes" '"https://my-shop.co.uk"'
+u1 2 "a path under root" '"https://example.com/contact"' "t startUrls[].url: only the site root is allowed"
+u1 2 "a query" '"https://example.com?a=1"' "t startUrls[].url: a query is not allowed"
+u1 2 "a lone ?" '"https://example.com/?"' "t startUrls[].url: a query is not allowed"
+u1 2 "a fragment" '"https://example.com/#x"' "t startUrls[].url: a fragment is not allowed"
+u1 2 "a lone #" '"https://example.com#"' "t startUrls[].url: a fragment is not allowed"
+u1 2 "http when only https" '"http://example.com"' "t startUrls[].url: scheme http is not allowed"
+u1 2 "an uppercase scheme" '"HTTPS://example.com"' "t startUrls[].url: the scheme must be lowercase"
+u1 2 "a mixed-case scheme" '"Https://example.com"' "t startUrls[].url: the scheme must be lowercase"
+u1 2 "user info" '"https://user@example.com"' "t startUrls[].url: user info (@) is not allowed"
+u1 2 "user info with a password" '"https://example.com:x@evil.com"' "t startUrls[].url: user info (@) is not allowed"
+u1 2 "a non-default port" '"https://example.com:8443"' "t startUrls[].url: port 8443 is not the default for https"
+u1 2 "the http port under https" '"https://example.com:80"' "t startUrls[].url: port 80 is not the default for https"
+u1 2 "an empty port" '"https://example.com:/"' "t startUrls[].url: the port is not a plain number"
+u1 2 "a zero-padded port" '"https://example.com:0443"' "t startUrls[].url: the port is not a plain number"
+u1 2 "a port past 65535" '"https://example.com:65536"' "t startUrls[].url: the port is not a plain number"
+u1 2 "a non-ASCII digit port" '"https://example.com:٤٤٣"' "t startUrls[].url: the port is not a plain number"
+u1 2 "dotted IPv4" '"https://1.2.3.4"' "t startUrls[].url: the host is an IP address"
+u1 2 "decimal IPv4" '"https://2130706433"' "t startUrls[].url: the host is an IP address"
+u1 2 "hex IPv4" '"https://0x7f.0.0.1"' "t startUrls[].url: the host is an IP address"
+u1 2 "octal IPv4" '"https://017700000001"' "t startUrls[].url: the host is an IP address"
+u1 2 "short IPv4" '"https://127.1"' "t startUrls[].url: the host is an IP address"
+u1 2 "a 0x label" '"https://0x7f.example.com"' "t startUrls[].url: the host is an IP address"
+u1 2 "IPv6" '"https://[::1]"' "t startUrls[].url: the host is an IP address"
+u1 2 "IPv4-mapped IPv6" '"https://[::ffff:127.0.0.1]"' "t startUrls[].url: the host is an IP address"
+u1 2 "IPv6 with a port" '"https://[::1]:443"' "t startUrls[].url: the host is an IP address"
+u1 2 "localhost" '"https://localhost"' "t startUrls[].url: host localhost is local"
+u1 2 "a .localhost name" '"https://a.localhost"' "t startUrls[].url: host a.localhost is local"
+u1 2 "a .local name" '"https://foo.local"' "t startUrls[].url: host foo.local is local"
+u1 2 "an .internal name" '"https://x.internal"' "t startUrls[].url: host x.internal is local"
+u1 2 "a .lan name" '"https://a.lan"' "t startUrls[].url: host a.lan is local"
+u1 2 "a .home.arpa name" '"https://a.home.arpa"' "t startUrls[].url: host a.home.arpa is local"
+u1 2 "a .test name" '"https://a.test"' "t startUrls[].url: host a.test is local"
+u1 2 "an uppercase local name" '"https://FOO.LOCAL"' "t startUrls[].url: host foo.local is local"
+u1 2 "one label" '"https://intranet"' "t startUrls[].url: the host needs at least two labels"
+u1 2 "a trailing dot" '"https://example.com."' "t startUrls[].url: the host ends with a dot"
+u1 2 "an empty label" '"https://example..com"' "t startUrls[].url: host label '' is not"
+u1 2 "a leading hyphen" '"https://-a.com"' "t startUrls[].url: host label '-a' is not"
+u1 2 "a trailing hyphen" '"https://a-.com"' "t startUrls[].url: host label 'a-' is not"
+u1 2 "an underscore" '"https://a_b.com"' "t startUrls[].url: host label 'a_b' is not"
+u1 2 "a 64-character label" "\"https://$(printf 'a%.0s' $(seq 64)).com\"" "is not 1 to 63"
+u1 0 "a 63-character label" "\"https://$(printf 'a%.0s' $(seq 63)).com\""
+u1 2 "a percent-encoded host" '"https://exa%6dple.com"' "t startUrls[].url: the host has a %"
+u1 2 "an empty host" '"https:///example.com"' "t startUrls[].url: the host is empty"
+u1 2 "a backslash" '"https://example.com\\@evil.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "one slash" '"https:/example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "no scheme" '"//example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "no slashes" '"https:example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "a scheme with a digit" '"h2://example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "a space" '"https://exa mple.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a tab" '"https://exa\tmple.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a newline" '"https://example.com\n"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a NUL" '"https://example.com\u0000"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a zero-width space" '"https://exa​mple.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "an ideographic space" '"https://example.com　"' "t startUrls[].url: has a control character, whitespace or a backslash"
+LONG=$(python3 -c 'print("https://example.com/?" + "a" * (2049 - 21))')
+u1 2 "a 2049-character URL" "\"$LONG\"" "t startUrls[].url: is longer than 2048 characters"
+u1 2 "an xn-- label under public" '"https://xn--e1afmkfd.com"' "t startUrls[].url: an xn-- label needs an exact hosts list"
+u1 2 "an uppercase XN-- label under public" '"https://XN--e1afmkfd.com"' "t startUrls[].url: an xn-- label needs an exact hosts list"
+u1 2 "an ideographic full stop" '"https://example。com"' "t startUrls[].url: the host is not ASCII"
+u1 2 "full-width letters" '"https://ｅxample.com"' "t startUrls[].url: the host is not ASCII"
+u1 2 "a Kelvin sign that lowercases to k" '"https://Ka.com"' "t startUrls[].url: the host is not ASCII"
+u1 2 "a number" '5' "startUrls[].url must be a URL string"
+u1 2 "null" 'null' "startUrls[].url must be a URL string"
+u1 2 "a list" '["https://a.com"]' "startUrls[].url must be a URL string"
+run 2 "urls R1 required: omitted blocks" $UT '{}' "t names no startUrls[].url" -
+run 2 "urls R1 required: [] blocks" $UT '{"startUrls":[]}' "t names no startUrls[].url" -
+run 2 "urls R1 required: [null] blocks" $UT '{"startUrls":[null]}' "t names no startUrls[].url" -
+run 2 "urls R1 required: an item without url blocks" $UT '{"startUrls":[{"url":"https://a.com"},{}]}' "t names no startUrls[].url" -
+run 2 "urls R1 required: a variant spelling does not satisfy it" $UT '{"startUrls":[{"URL":"https://a.com"}]}' "t names no startUrls[].url" -
+run 2 "urls R1: a variant spelling is still checked" $UT '{"startUrls":[{"url":"https://a.com","Url":"https://a.com/x"}]}' "t startUrls[].url: only the site root is allowed" -
+run 2 "urls R1: a scalar where the list is expected blocks" $UT '{"startUrls":"https://a.com"}' "startUrls[].url: unexpected shape" -
+run 2 "urls R1: the second item bad blocks" $UT '{"startUrls":[{"url":"https://a.com"},{"url":"https://a.com/x"}]}' "t startUrls[].url: only the site root is allowed" -
+run 0 "urls R1: every item good passes" $UT '{"startUrls":[{"url":"https://a.com"},{"url":"https://b.org/"}]}' "" -
+run 0 "urls R2: an exact host with a page path passes" $UT "{$S,\"page\":\"https://www.facebook.com/somepage\"}" "" -
+run 0 "urls R2: an exact host matches case-insensitively" $UT "{$S,\"page\":\"https://WWW.Facebook.com/somepage\"}" "" -
+run 0 "urls R2: path any allows .." $UT "{$S,\"page\":\"https://facebook.com/a/../b\"}" "" -
+run 2 "urls R2: a host outside the list" $UT "{$S,\"page\":\"https://evil.com/somepage\"}" "t page: host evil.com is not in the hosts list" -
+run 2 "urls R2: a query" $UT "{$S,\"page\":\"https://www.facebook.com/somepage?ref=x\"}" "t page: a query is not allowed" -
+run 2 "urls R2: a subdomain outside the list" $UT "{$S,\"page\":\"https://m.facebook.com/somepage\"}" "t page: host m.facebook.com is not in the hosts list" -
+run 2 "urls R2: a suffix lookalike" $UT "{$S,\"page\":\"https://facebook.com.evil.com/x\"}" "t page: host facebook.com.evil.com is not in the hosts list" -
+run 2 "urls R2: an always-on refusal still applies to an exact host" $UT "{$S,\"page\":\"https://user@www.facebook.com/x\"}" "t page: user info (@) is not allowed" -
+run 0 "urls R3: http with a query under the prefix passes" $UT "{$S,\"doc\":\"http://docs.example.com/pages/x?a=1\"}" "" -
+run 0 "urls R3: the prefix itself passes" $UT "{$S,\"doc\":\"https://docs.example.com/pages\"}" "" -
+run 0 "urls R3: http's default port passes" $UT "{$S,\"doc\":\"http://docs.example.com:80/pages\"}" "" -
+run 2 "urls R3: https on port 80" $UT "{$S,\"doc\":\"https://docs.example.com:80/pages\"}" "t doc: port 80 is not the default for https" -
+run 2 "urls R3: no segment boundary" $UT "{$S,\"doc\":\"https://docs.example.com/pagesx\"}" "t doc: the path is not under /pages" -
+run 2 "urls R3: the root" $UT "{$S,\"doc\":\"https://docs.example.com/\"}" "t doc: the path is not under /pages" -
+run 2 "urls R3: .." $UT "{$S,\"doc\":\"https://docs.example.com/pages/../admin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: %2F" $UT "{$S,\"doc\":\"https://docs.example.com/pages%2Fx\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: %2e%2e" $UT "{$S,\"doc\":\"https://docs.example.com/pages/%2e%2e/admin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: %5C" $UT "{$S,\"doc\":\"https://docs.example.com/pages/%5C..%5Cadmin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: a case change in the path" $UT "{$S,\"doc\":\"https://docs.example.com/Pages/x\"}" "t doc: the path is not under /pages" -
+run 2 "urls R3: a fragment (forbidden by default)" $UT "{$S,\"doc\":\"https://docs.example.com/pages#x\"}" "t doc: a fragment is not allowed" -
+run 0 "urls R4: an xn-- host in an exact list, with a fragment allowed" $UT "{$S,\"idn\":\"https://xn--e1afmkfd.com/#a\"}" "" -
+run 0 "urls: a tool outside the entries is not checked" mcp__apify__other '{"page":"https://evil.com"}' "" -
+run 2 "urls: tool_input that is not an object blocks" $UT '[1]' "cannot check this call" -
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins lists no urls entries" || _report no "--pins urls (rc=$rc): $OUT"
+UX() { policy 'covers: [x]' 'urls:' '  - tools: [t]' '    at: [u]' "$@"; }
+UX '    schemes: [https]' '    hosts: public' '    path: root';                     parses 0 "urls entry parses"
+UX '    schemes: [https, http]' '    hosts: [a.com]' "    path: '/a/b'" '    query: allow' '    fragment: forbid' '    required: true'; parses 0 "urls entry with every key"
+UX '    schemes: [https]' '    hosts: public' '    path: /pages';                   parses 0 "urls unquoted prefix"
+UX '    schemes: []' '    hosts: public' '    path: root';                         parses 1 "urls empty schemes"
+UX '    schemes: [ftp]' '    hosts: public' '    path: root';                        parses 1 "urls unknown scheme"
+UX '    schemes: [HTTPS]' '    hosts: public' '    path: root';                      parses 1 "urls uppercase scheme"
+UX '    schemes: https' '    hosts: public' '    path: root';                        parses 1 "urls schemes given a scalar"
+UX '    hosts: public' '    path: root';                                             parses 1 "urls without schemes"
+UX '    schemes: [https]' '    hosts: []' '    path: root';                          parses 1 "urls empty hosts"
+UX '    schemes: [https]' '    hosts: everyone' '    path: root';                    parses 1 "urls hosts neither a list nor public"
+UX '    schemes: [https]' '    hosts: [public]' '    path: root';                    parses 1 "urls hosts [public] is not the word public"
+UX '    schemes: [https]' '    hosts: [localhost]' '    path: root';                 parses 1 "urls hosts lists a local host"
+UX '    schemes: [https]' '    hosts: [1.2.3.4]' '    path: root';                   parses 1 "urls hosts lists an IP"
+UX '    schemes: [https]' '    hosts: ["*.example.com"]' '    path: root';           parses 1 "urls hosts wildcard"
+UX '    schemes: [https]' '    path: root';                                          parses 1 "urls without hosts"
+UX '    schemes: [https]' '    hosts: public' '    path: rootish';                   parses 1 "urls path rootish"
+UX '    schemes: [https]' '    hosts: public' '    path: pages';                     parses 1 "urls path without a /"
+UX '    schemes: [https]' '    hosts: public' "    path: '/'";                       parses 1 "urls path /"
+UX '    schemes: [https]' '    hosts: public' "    path: '/a/'";                     parses 1 "urls path with a trailing /"
+UX '    schemes: [https]' '    hosts: public' "    path: '/a/../b'";                 parses 1 "urls path with .."
+UX '    schemes: [https]' '    hosts: public' "    path: '/./a'";                    parses 1 "urls path with a . segment"
+UX '    schemes: [https]' '    hosts: public' "    path: '/a%2Fb'";                  parses 1 "urls path with %"
+UX '    schemes: [https]' '    hosts: public' '    path: [root]';                    parses 1 "urls path given a list"
+UX '    schemes: [https]' '    hosts: public';                                       parses 1 "urls without path"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    query: maybe';   parses 1 "urls query maybe"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    fragment: yes';  parses 1 "urls fragment yes"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    required: yes';  parses 1 "urls required yes"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    bound: b';       parses 1 "urls unknown entry key"
+policy 'covers: [x]' 'urls:' '  - tools: [t]' '    at: []' '    schemes: [https]' '    hosts: public' '    path: root'; parses 1 "urls empty at"
+policy 'covers: [x]' 'urls:' '  - tools: [t]' '    at: ["bad path!"]' '    schemes: [https]' '    hosts: public' '    path: root'; parses 1 "urls bad path"
+policy 'covers: [x]' 'urls:' '  - at: [u]' '    schemes: [https]' '    hosts: public' '    path: root'; parses 1 "urls without tools"
+policy 'covers: [x]' 'urls:';                                                          parses 1 "empty urls"
+policy 'covers: [x]' 'urls: [a]';                                                      parses 1 "urls given a list"
+UX '    schemes: [https]' '    hosts: everyone' '    path: root'
+run 2 "urls: an invalid policy blocks every call" $UT '{"u":"https://a.com"}' "cannot check this call" -
+
 echo "-- agent exempt"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'; aparses 0 "exempt parses"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [Owner-Notify]'; aparses 1 "exempt not snake_case"
