@@ -802,12 +802,20 @@ validation error and, at runtime, a block.
       A `null` where an object or list is expected holds nothing; a
       `null` value is a value, and is checked. Any other wrong shape on
       the way blocks: `<path>: unexpected shape`.
-   2. With `required: true`, the path must be present under its exact
-      key names, else block: `<tool> names no <path>`. A variant spelling
+   2. With `required: true`, the path must be supplied under its exact
+      key names, and supplied everywhere: through each `[]` segment,
+      every item the walk reaches must carry the rest of the path down to
+      the end. So for `"a[].b"`, every item of `a` must hold `b`. A
+      missing key, a `null` item or object on the way, or an empty or
+      `null` list blocks: `<tool> names no <path>`. A non-null item or
+      value on the way that is not an object, or a `[]` value that is not
+      a list, blocks: `<path>: unexpected shape`. A variant spelling
       (`PersonalData` for `personalData`) does not satisfy it, though it
-      is still checked by step 3. A `null` there is present (and fails
-      step 3 unless `value` is `null`). Without `required: true`, a path
-      the call does not have is allowed.
+      is still checked by step 3. A `null` at the end of the path is
+      present (and fails step 3 unless `value` is `null`). Without
+      `required: true`, a path the call does not have is allowed. (This
+      is stricter than `limits`' `required`, which one supplied value
+      satisfies.)
    3. Each value must equal `value` exactly and in type, else block:
       `<tool> must send <path> = <value> (got <got>)`, both shown as
       JSON. Boolean `false` is not `0` and not `"false"`; `null` is not

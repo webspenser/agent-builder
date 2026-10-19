@@ -585,6 +585,40 @@ def _limit_problems(shown, entry, args, bindings):
     return found
 
 
+def _required_everywhere(obj, path):
+    """Why a required path is not supplied everywhere, or None when it is. The path is walked with exact
+    key names, and through each `[]` segment every item must carry the rest of the path: "absent" when a
+    key is missing, an item or an object on the way is null, or a list has no items (zero values);
+    "shape" when a non-null value on the way is not an object, or a `[]` value is not a list. A null at the
+    end of the path is present (the caller checks its value)."""
+    nodes, why = [obj], None
+    for part in path.split("."):
+        many = part.endswith("[]")
+        name = part[:-2] if many else part
+        nxt = []
+        for node in nodes:
+            if node is None:
+                why = why or "absent"
+                continue
+            if not isinstance(node, dict):
+                why = "shape"
+                continue
+            if name not in node:
+                why = why or "absent"
+                continue
+            value = node[name]
+            if not many:
+                nxt.append(value)
+            elif value is None or value == []:
+                why = why or "absent"
+            elif not isinstance(value, list):
+                why = "shape"
+            else:
+                nxt.extend(value)
+        nodes = nxt
+    return why
+
+
 def _same_value(want, got):
     """got is the fixed value want, in type as well: false is not 0 or "false", 5 is 5.0, text is exact."""
     if want is None or isinstance(want, bool):
@@ -605,16 +639,20 @@ def _json_text(value):
 
 def _fixed_problems(shown, entry, args):
     """fixed: every value at the paths (segments folded, which only makes it stricter) is the entry's value.
-    A path the call does not have is fine unless the entry says `required: true`; then the exact name must
-    be present (null counts as present, and is checked like any value)."""
+    A path the call does not have is fine unless the entry says `required: true`; then the path must be
+    supplied under its exact names, by every item of every list on the way (see _required_everywhere; a
+    null at the end counts as present, and is checked like any value)."""
     want = entry["value"]
     found = []
     for path in entry["at"]:
         nodes, mismatch = _walk_folded(args, path)
         if mismatch:
             found.append(f"{path}: unexpected shape")
-        if entry.get("required") == "true" and not _walk_folded(args, path, exact=True)[0]:
+        why = _required_everywhere(args, path) if entry.get("required") == "true" else None
+        if why == "absent":
             found.append(f"{shown} names no {path}")
+        elif why == "shape" and not mismatch:
+            found.append(f"{path}: unexpected shape")
         for node in nodes:
             if not _same_value(want, node):
                 found.append(f"{shown} must send {path} = {_json_text(want)} (got {_printable(_json_text(node))})")

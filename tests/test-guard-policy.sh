@@ -519,6 +519,23 @@ run 2 "fixed: false is not 0" $FT '{"k":null,"z":false}' "t must send z = 0 (got
 run 0 "fixed: -0 is 0" $FT '{"k":null,"z":-0}' "" -
 run 0 "fixed: -1.5 is -1.50" $FT '{"k":null,"d":-1.5}' "" -
 run 2 "fixed: -1.51 is not -1.50" $FT '{"k":null,"d":-1.51}' "t must send d = -1.50 (got -1.51)" -
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: ["a[].b"]' '    value: true' '    required: true' \
+  '  - tools: [u]' '    at: ["a[].b[].c"]' '    value: true' '    required: true'
+run 2 "fixed required []: an item missing the key blocks" $FT '{"a":[{"b":true},{"c":1}]}' "t names no a[].b" -
+run 2 "fixed required []: a null item blocks" $FT '{"a":[{"b":true},null]}' "t names no a[].b" -
+run 0 "fixed required []: every item carrying the key passes" $FT '{"a":[{"b":true},{"b":true}]}' "" -
+run 2 "fixed required []: an empty list blocks" $FT '{"a":[]}' "t names no a[].b" -
+run 2 "fixed required []: a null list blocks" $FT '{"a":null}' "t names no a[].b" -
+run 2 "fixed required []: an absent list blocks" $FT '{}' "t names no a[].b" -
+run 2 "fixed required []: a non-object item blocks" $FT '{"a":[5]}' "a[].b: unexpected shape" -
+run 2 "fixed required []: a string where the list is expected blocks" $FT '{"a":"x"}' "a[].b: unexpected shape" -
+run 2 "fixed required []: a variant spelling in one item does not satisfy it" $FT '{"a":[{"b":true},{"B":true}]}' "t names no a[].b" -
+run 2 "fixed required []: a null leaf is present but checked" $FT '{"a":[{"b":null}]}' "t must send a[].b = true (got null)" -
+FU=mcp__apify__u
+run 0 "fixed required a[].b[].c: every inner item passes" $FU '{"a":[{"b":[{"c":true}]},{"b":[{"c":true},{"c":true}]}]}' "" -
+run 2 "fixed required a[].b[].c: one inner item missing c blocks" $FU '{"a":[{"b":[{"c":true}]},{"b":[{"c":true},{"d":1}]}]}' "u names no a[].b[].c" -
+run 2 "fixed required a[].b[].c: an empty inner list blocks" $FU '{"a":[{"b":[{"c":true}]},{"b":[]}]}' "u names no a[].b[].c" -
+run 2 "fixed required a[].b[].c: an item missing b blocks" $FU '{"a":[{"b":[{"c":true}]},{}]}' "u names no a[].b[].c" -
 FX() { policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: [k]' "$@"; }
 FX '    value: false';                          parses 0 "fixed entry parses"
 FX '    value: false' '    required: false';    parses 0 "fixed required: false"
