@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.2. It is in active development: agents track
+The standard is 7.3. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.2"`.
+`agent.yaml`, and the validator requires `standard: "7.3"`.
 
 ## Directory layout
 
@@ -232,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.2"                # the Agent Standard version followed
+standard: "7.3"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -630,7 +630,7 @@ validation error and, at runtime, a block.
   scalar may not contain its own quote character, and a double-quoted
   one may not contain a backslash. A list item is one scalar
   (`["a" "b"]` is an error).
-- The exceptions are `rules:`, `writes:`, `recipients:`, `limits:` and `only_keys:`, whose values
+- The exceptions are `rules:`, `writes:`, `recipients:`, `limits:`, `only_keys:`, `fixed:` and `urls:`, whose values
   are block lists: each item starts with `  - `, with further keys indented four
   spaces. A `rules` item holds `field:` plus any of `create:`,
   `update:`, `any:`, or `field:` plus `forbid: true` or `forbid: update`;
@@ -639,7 +639,14 @@ validation error and, at runtime, a block.
   and `at:`, the last two as flow lists. A `recipients` item
   holds `tools:` and `at:`, as flow lists, and `bound:`, a scalar. A `limits` item
   holds the same and `kind:`, a scalar (`count` or `max`), and optionally `required: true`. An `only_keys` item
-  holds `tools:`, `at:` and `keys:`, all flow lists. A flow list in an item may
+  holds `tools:`, `at:` and `keys:`, all flow lists. A `fixed` item holds
+  `tools:` and `at:`, as flow lists, `value:`, one typed scalar (see Semantics),
+  and optionally `required:` (`true` or `false`). A `urls` item holds
+  `tools:`, `at:` and `schemes:`, as flow lists, `hosts:`, a flow list or
+  the scalar `public`, `path:`, a scalar (`root`, `any` or a prefix
+  starting with `/`, quoted or not: `'/pages'` and `/pages` are the same),
+  and optionally `query:`, `fragment:` (`forbid` or
+  `allow`) and `required: true`. A flow list in an item may
   continue over following lines indented at least four spaces until its
   closing `]`.
 - Tabs, anchors, multi-line strings, nested maps, nested lists,
@@ -662,6 +669,8 @@ validation error and, at runtime, a block.
 | `limits` | no | A list of `{tools, at, bound, kind}` entries (`kind` is `count` or `max`, required; `required` may only be `true`). Caps a size instead of pinning a value: with `count`, the list at each `at` path may be no longer than the one number in the `<bound>` binding line; with `max`, the number there must be at least 1 and no larger. A path the call does not have is allowed, unless the entry says `required: true`, which makes a path that is not supplied block (see Semantics) |
 | `only_keys` | no | A list of `{tools, at, keys}` entries: an allowlist of argument names. Each object at an `at` path (`$` is the whole tool input; otherwise the `writes` path grammar, quoted when it holds `[]`) may hold only the plain names in `keys`, spelled exactly (no case, `_` or `-` folding; the path is walked with exact names too). Recommended over `refuse_args` for restricting arguments |
 | `refuse_args` | no | A deny list of argument names a call may not use (any value but `null` or `""` blocks). An entry is a plain top-level name, or a path in the `writes` path grammar (`proxyConfig.useApifyProxy`, `"startUrls[].payload"`; quote a path containing `[]`) that refuses a nested value. It stops only what it names; prefer `only_keys` |
+| `fixed` | no | A list of `{tools, at, value, required}` entries (`value` required; `required` is `true` or `false`, default `false`). Every value at each `at` path (the `writes` path grammar) must be exactly `value`, in type too: unquoted `true`, `false`, `null` or a number, or a quoted string. For a tool's safety settings, not operator choices: it reads no bindings and `--pins` does not list it. A path the call does not have is allowed, unless the entry says `required: true` (see Semantics) |
+| `urls` | no | A list of `{tools, at, schemes, hosts, path, query, fragment, required}` entries. Every value at each `at` path (the `writes` path grammar) must be a URL string that parses strictly and passes the always-on refusals (see Semantics), with a scheme in `schemes` (a non-empty list from `https`, `http`), a host in `hosts` (a non-empty list of exact hostnames, or the word `public`: any host that passes the always-on checks), and a path that satisfies `path` (`root`: empty or `/`; `any`; or a prefix like `'/pages'`, quoted or not, matched on segment boundaries). `query` and `fragment` are `forbid` (default) or `allow`. `required` may only be `true`. Reads no bindings; `--pins` does not list it |
 
 ### Semantics
 
@@ -674,7 +683,7 @@ validation error and, at runtime, a block.
    `mcp__attio__purge__get-x` cannot ride on `get-*`. Without a
    `server_match` (direct runs, `--check`), every suffix counts.
    Patterns are case-insensitive shell globs.
-2. **Recipients, limits, allowed keys and refused arguments.** These run after `allow` and
+2. **Recipients, limits, allowed keys, fixed values, URL rules and refused arguments.** These run after `allow` and
    `deny`. Every problem they find is reported, and any one blocks the
    call before writes are read.
 
@@ -779,6 +788,124 @@ validation error and, at runtime, a block.
    4. A count above the bound blocks: `<tool> exceeds <bound> at <path>
       (<count> > <bound value>)`.
 
+   *Fixed values.* A `fixed` entry's `value` is one scalar, read as the
+   JSON value it stands for:
+
+   - unquoted `true` or `false`: a boolean;
+   - unquoted `null`: null;
+   - an unquoted number matching `^[+-]?[0-9]+(\.[0-9]+)?$` (ASCII
+     digits, as in Recipients step 4): a number;
+   - a quoted scalar: that string (`'script, style'`, `'false'`, `'5'`).
+
+   Any other unquoted token (`yes`, `False`, `TRUE`, `1e3`, a bare word)
+   is a parse error, so a string must be quoted and its type is never a
+   guess. For each `fixed` entry whose `tools` match the call (a
+   matching call whose input is not an object blocks), for each `at`
+   path:
+
+   1. Collect the values at the path, with segments compared as for
+      nested `refuse_args` (folded, which only makes the check stricter).
+      A `null` where an object or list is expected holds nothing; a
+      `null` value is a value, and is checked. Any other wrong shape on
+      the way blocks: `<path>: unexpected shape`.
+   2. With `required: true`, the path must be supplied under its exact
+      key names, and supplied everywhere: through each `[]` segment,
+      every item the walk reaches must carry the rest of the path down to
+      the end. So for `"a[].b"`, every item of `a` must hold `b`. A
+      missing key, a `null` item or object on the way, or an empty or
+      `null` list blocks: `<tool> names no <path>`. A non-null item or
+      value on the way that is not an object, or a `[]` value that is not
+      a list, blocks: `<path>: unexpected shape`. A variant spelling
+      (`PersonalData` for `personalData`) does not satisfy it, though it
+      is still checked by step 3. A `null` at the end of the path is
+      present (and fails step 3 unless `value` is `null`). Without
+      `required: true`, a path the call does not have is allowed. (This
+      is stricter than `limits`' `required`, which one supplied value
+      satisfies.)
+   3. Each value must equal `value` exactly and in type, else block:
+      `<tool> must send <path> = <value> (got <got>)`, both shown as
+      JSON. Boolean `false` is not `0` and not `"false"`; `null` is not
+      `false`; a number equals a JSON number of the same value, compared
+      exactly as decimals (`5` equals `5.0`; the string `"5"` does not,
+      nor does a non-finite number); a string matches only the identical
+      string, case and spaces included, since these are protocol values,
+      not names.
+
+   Fixed values are a tool's safety settings (a scraper's
+   `personalData: false`), not operator choices: they read no bindings,
+   `--pins` does not list them, and they change only with the agent's
+   release.
+
+   *URL rules.* For each `urls` entry whose `tools` match the call (a
+   matching call whose input is not an object blocks), for each `at`
+   path:
+
+   1. Collect the values at the path, and apply `required: true`,
+      exactly as in Fixed values steps 1 and 2: segments folded for the
+      values; `required` met only under exact key names, by every item
+      of every list on the way (`<tool> names no <path>`, or `<path>:
+      unexpected shape`).
+   2. Each value must be a string, else block: `<path> must be a URL
+      string` (a `null` included).
+   3. Each string is read by the engine's own strict parser, never
+      `urllib.parse`, so the guard can't see a different host than the
+      HTTP client that fetches it. The first failure blocks: `<tool>
+      <path>: <reason>`. A URL is refused when:
+      - it holds a control or format character (Unicode category C,
+        every ASCII control included), whitespace of any kind, or a
+        backslash;
+      - it is longer than 2048 characters;
+      - it is not exactly `scheme://authority[path][?query][#fragment]`:
+        the scheme is the text before the first `://` and must be
+        lowercase ASCII letters (`HTTPS://` is refused, not lowercased;
+        `https:/x`, `https:x` and `//x` are refused); the authority runs
+        to the first `/`, `?` or `#`, the path to the first `?` or `#`,
+        the query to the first `#`;
+      - its scheme is not in `schemes`;
+      - the authority holds `@` (user info);
+      - it has a port that is not the scheme's default, written as plain
+        digits (`:443` for `https`, `:80` for `http`); an empty port
+        (`host:`), a zero-padded one (`:0443`) or one above 65535 is
+        refused too. The port is the text after the authority's last
+        `:`;
+      - the host is empty, or holds `%`, or is not ASCII (a full-width
+        letter, the ideographic full stop `。`, a Kelvin sign: refused
+        before lowercasing, never mapped the way IDNA would);
+      - the host is an IP literal: bracketed IPv6 (`[::1]`,
+        `[::ffff:127.0.0.1]`), or anything a URL parser reads as IPv4,
+        which is a host whose last label is all digits (`1.2.3.4`,
+        `2130706433`, `017700000001`, `127.1`) or that has a label
+        starting `0x` (`0x7f.0.0.1`), or that `ipaddress` accepts;
+      - the host ends with a dot, is longer than 253 characters, has
+        fewer than two labels, or has a label that is not ASCII letters,
+        digits and hyphens, 1 to 63 characters, starting and ending with
+        a letter or digit;
+      - the host (lowercased) is `localhost`, or ends `.localhost`,
+        `.local`, `.internal`, `.lan`, `.home.arpa`, `.test`,
+        `.localdomain`, `.svc`, `.corp`, `.home` or `.intranet`
+        (`localhost.localdomain`, `kubernetes.default.svc`);
+      - with `hosts: public`, a label starts `xn--` (a punycode name is
+        allowed only by listing it in an exact `hosts` list);
+      - with an exact `hosts` list, the lowercased host is not one of
+        them (no wildcards: `m.facebook.com` does not match
+        `facebook.com`);
+      - unless `path` is `any`, the path holds `..`, or `%2F`, `%2E` or
+        `%5C` in any case (an encoded `/`, `.` or `\`, which a client or
+        server may decode into a path step);
+      - with `path: root`, the path is anything but empty or `/`; with a
+        prefix, the path is neither the prefix nor the prefix followed
+        by `/` (`/pages` matches `/pages` and `/pages/x`, not
+        `/pagesx`), compared case-sensitively;
+      - it has a query, a lone `?` included, and `query` is not `allow`;
+      - it has a fragment, a lone `#` included, and `fragment` is not
+        `allow`.
+
+   **Stated limits.** A URL rule checks one URL in one call: it can't
+   tie a host to a lead, or tell what a name resolves to (a public name
+   can point at any address). So with `hosts: public` and `path: root`,
+   data can still ride out in the hostname itself (a subdomain the
+   fetcher's DNS lookup reveals); only an exact `hosts` list closes that.
+
 3. **Writes.** The matching entries are the `writes` entries whose
    `tools` match the call's tool name, using the same suffix matching as
    `allow` and `deny`. For each matching entry, collect the value maps
@@ -866,6 +993,20 @@ Each is an invalid policy, and fails closed.
   `at` or `keys`, an `at` that is neither `$` nor a valid path, or a
   `keys` item that is not a plain argument name; or `only_keys:` has no
   items.
+- A `fixed` entry has an unknown key, a missing or empty `tools` or
+  `at`, a bad `at` path, no `value`, a `value` that is empty, a list, or
+  an unquoted token other than `true`, `false`, `null` or a number (see
+  Semantics), or a `required` other than `true` or `false`; or `fixed:`
+  has no items.
+- A `urls` entry has an unknown key, a missing or empty `tools` or `at`,
+  a bad `at` path, a missing or empty `schemes` list or a scheme other
+  than `https` or `http`, a `hosts` that is an empty list or neither a
+  list nor `public`, a `hosts` item that fails the always-on host checks
+  (`[public]`, `localhost`, an IP, a wildcard), a `path` that is not
+  `root`, `any` or a prefix of `/`-led segments of letters, digits and
+  `. _ ~ -` (no trailing `/`, no `.` or `..` segment, no `%`), a `query`
+  or `fragment` other than `forbid` or `allow`, or a `required` other
+  than `true`; or `urls:` has no items.
 - `refuse_args` is empty, or holds an entry that is neither a plain
   argument name (`^[A-Za-z_][A-Za-z0-9_]*$`) nor a path like `a.b` or
   `a[].b` (the `writes` path grammar).
@@ -1372,7 +1513,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.2"`.
+- `agent.yaml` exists, and its `standard` is `"7.3"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly

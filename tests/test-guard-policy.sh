@@ -469,6 +469,265 @@ policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: []';
 policy 'covers: [x]' 'only_keys:' '  - tools: [s]' '    at: [a]' '    keys: [k]' '    bound: b'; parses 1 "only_keys has no bound"
 policy 'covers: [x]' 'only_keys:';                                                    parses 1 "empty only_keys"
 
+echo "-- fixed"
+policy 'covers: [pinned_inputs]' 'allow: [t, other]' 'fixed:' \
+  '  - tools: [t]' '    at: [personalData]' '    value: false' '    required: true' \
+  '  - tools: [t]' '    at: [onlyTotal]' '    value: true' \
+  '  - tools: [t]' '    at: [n]' '    value: 5' \
+  '  - tools: [t]' '    at: [sel]' "    value: 'script, style'  # a comment" \
+  '  - tools: [t]' '    at: ["a[].b"]' '    value: false'
+parses 0 "fixed parses"
+FT=mcp__apify__t
+run 0 "fixed: false passes" $FT '{"personalData":false}' "" -
+run 2 "fixed: true blocks" $FT '{"personalData":true}' "t must send personalData = false (got true)" -
+run 2 "fixed: 0 is not false" $FT '{"personalData":0}' "t must send personalData = false (got 0)" -
+run 2 'fixed: "false" is not false' $FT '{"personalData":"false"}' 't must send personalData = false (got "false")' -
+run 2 "fixed: null is not false" $FT '{"personalData":null}' "t must send personalData = false (got null)" -
+run 2 "fixed: an object is not false" $FT '{"personalData":{"v":false}}' "t must send personalData = false (got {" -
+run 2 "fixed: a list is not false" $FT '{"personalData":[false]}' "t must send personalData = false (got [false])" -
+run 2 "fixed required: omitted blocks" $FT '{}' "t names no personalData" -
+run 2 "fixed required: a variant spelling does not satisfy it" $FT '{"PersonalData":false}' "t names no personalData" -
+run 2 "fixed: a variant spelling is still checked" $FT '{"personalData":false,"personal_data":true}' "t must send personalData = false (got true)" -
+run 0 "fixed not required: omitted passes" $FT '{"personalData":false}' "" -
+run 0 "fixed: true passes" $FT '{"personalData":false,"onlyTotal":true}' "" -
+run 2 "fixed: false is not true" $FT '{"personalData":false,"onlyTotal":false}' "t must send onlyTotal = true (got false)" -
+run 2 "fixed: 1 is not true" $FT '{"personalData":false,"onlyTotal":1}' "t must send onlyTotal = true (got 1)" -
+run 2 "fixed not required: null is still checked" $FT '{"personalData":false,"onlyTotal":null}' "t must send onlyTotal = true (got null)" -
+run 0 "fixed: 5 passes" $FT '{"personalData":false,"n":5}' "" -
+run 0 "fixed: 5.0 passes" $FT '{"personalData":false,"n":5.0}' "" -
+run 2 'fixed: "5" is not 5' $FT '{"personalData":false,"n":"5"}' 't must send n = 5 (got "5")' -
+run 2 "fixed: 6 is not 5" $FT '{"personalData":false,"n":6}' "t must send n = 5 (got 6)" -
+run 2 "fixed: NaN is not 5" $FT '{"personalData":false,"n":NaN}' "t must send n = 5 (got NaN)" -
+run 0 "fixed: the exact string passes" $FT '{"personalData":false,"sel":"script, style"}' "" -
+run 2 "fixed: strings are case-sensitive" $FT '{"personalData":false,"sel":"Script, style"}' 't must send sel = "script, style" (got "Script, style")' -
+run 2 "fixed: a trailing space blocks" $FT '{"personalData":false,"sel":"script, style "}' "t must send sel" -
+run 0 "fixed: a[].b all false passes" $FT '{"personalData":false,"a":[{"b":false},{"b":false}]}' "" -
+run 2 "fixed: a[].b with one true blocks" $FT '{"personalData":false,"a":[{"b":false},{"b":true}]}' "t must send a[].b = false (got true)" -
+run 2 "fixed: a scalar where the list is expected blocks" $FT '{"personalData":false,"a":"x"}' "a[].b: unexpected shape" -
+run 0 "fixed: null a passes (not required)" $FT '{"personalData":false,"a":null}' "" -
+run 0 "fixed: a tool outside the entries is not checked" mcp__apify__other '{"personalData":true}' "" -
+run 2 "fixed: tool_input that is not an object blocks" $FT '[1]' "cannot check this call" -
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins lists no fixed entries" || _report no "--pins fixed (rc=$rc): $OUT"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: [k]' '    value: null' '    required: true' \
+  '  - tools: [t]' '    at: [s]' "    value: 'null'" '  - tools: [t]' '    at: [z]' '    value: 0' '  - tools: [t]' '    at: [d]' '    value: -1.50'
+run 0 "fixed null: null passes" $FT '{"k":null}' "" -
+run 2 "fixed null required: absent blocks" $FT '{}' "t names no k" -
+run 2 "fixed null: false is not null" $FT '{"k":false}' "t must send k = null (got false)" -
+run 2 "fixed: a quoted 'null' is a string" $FT '{"k":null,"s":null}' 't must send s = "null" (got null)' -
+run 0 "fixed: the string null passes" $FT '{"k":null,"s":"null"}' "" -
+run 2 "fixed: false is not 0" $FT '{"k":null,"z":false}' "t must send z = 0 (got false)" -
+run 0 "fixed: -0 is 0" $FT '{"k":null,"z":-0}' "" -
+run 0 "fixed: -1.5 is -1.50" $FT '{"k":null,"d":-1.5}' "" -
+run 2 "fixed: -1.51 is not -1.50" $FT '{"k":null,"d":-1.51}' "t must send d = -1.50 (got -1.51)" -
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: ["a[].b"]' '    value: true' '    required: true' \
+  '  - tools: [u]' '    at: ["a[].b[].c"]' '    value: true' '    required: true'
+run 2 "fixed required []: an item missing the key blocks" $FT '{"a":[{"b":true},{"c":1}]}' "t names no a[].b" -
+run 2 "fixed required []: a null item blocks" $FT '{"a":[{"b":true},null]}' "t names no a[].b" -
+run 0 "fixed required []: every item carrying the key passes" $FT '{"a":[{"b":true},{"b":true}]}' "" -
+run 2 "fixed required []: an empty list blocks" $FT '{"a":[]}' "t names no a[].b" -
+run 2 "fixed required []: a null list blocks" $FT '{"a":null}' "t names no a[].b" -
+run 2 "fixed required []: an absent list blocks" $FT '{}' "t names no a[].b" -
+run 2 "fixed required []: a non-object item blocks" $FT '{"a":[5]}' "a[].b: unexpected shape" -
+run 2 "fixed required []: a string where the list is expected blocks" $FT '{"a":"x"}' "a[].b: unexpected shape" -
+run 2 "fixed required []: a variant spelling in one item does not satisfy it" $FT '{"a":[{"b":true},{"B":true}]}' "t names no a[].b" -
+run 2 "fixed required []: a null leaf is present but checked" $FT '{"a":[{"b":null}]}' "t must send a[].b = true (got null)" -
+FU=mcp__apify__u
+run 0 "fixed required a[].b[].c: every inner item passes" $FU '{"a":[{"b":[{"c":true}]},{"b":[{"c":true},{"c":true}]}]}' "" -
+run 2 "fixed required a[].b[].c: one inner item missing c blocks" $FU '{"a":[{"b":[{"c":true}]},{"b":[{"c":true},{"d":1}]}]}' "u names no a[].b[].c" -
+run 2 "fixed required a[].b[].c: an empty inner list blocks" $FU '{"a":[{"b":[{"c":true}]},{"b":[]}]}' "u names no a[].b[].c" -
+run 2 "fixed required a[].b[].c: an item missing b blocks" $FU '{"a":[{"b":[{"c":true}]},{}]}' "u names no a[].b[].c" -
+FX() { policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: [k]' "$@"; }
+FX '    value: false';                          parses 0 "fixed entry parses"
+FX '    value: false' '    required: false';    parses 0 "fixed required: false"
+FX "    value: 'yes'";                          parses 0 "fixed quoted word is a string"
+FX '    value: "5"';                            parses 0 "fixed double-quoted number is a string"
+FX "    value: ''";                             parses 0 "fixed quoted empty string"
+FX '    value: +5';                             parses 0 "fixed signed number"
+FX '    value: yes';                            parses 1 "fixed unquoted yes"
+FX '    value: False';                          parses 1 "fixed unquoted False"
+FX '    value: TRUE';                           parses 1 "fixed unquoted TRUE"
+FX '    value: Null';                           parses 1 "fixed unquoted Null"
+FX '    value: abc';                            parses 1 "fixed unquoted word"
+FX '    value: 1e3';                            parses 1 "fixed scientific number"
+FX '    value: 5.';                             parses 1 "fixed number with a bare point"
+FX '    value: 0x10';                           parses 1 "fixed hex number"
+FX '    value: ٥';                              parses 1 "fixed non-ASCII digit"
+FX '    value:';                                parses 1 "fixed empty value"
+FX '    value: [false]';                        parses 1 "fixed list value"
+FX '    value: false' '    required: yes';      parses 1 "fixed required: yes"
+FX '    value: false' '    bound: b';           parses 1 "fixed unknown entry key"
+FX '    value: false' '    value: true';        parses 1 "fixed duplicate value"
+FX;                                             parses 1 "fixed entry without a value"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    value: false';                     parses 1 "fixed entry without at"
+policy 'covers: [x]' 'fixed:' '  - at: [k]' '    value: false';                        parses 1 "fixed entry without tools"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: []' '    value: false';        parses 1 "fixed empty at"
+policy 'covers: [x]' 'fixed:' '  - tools: [t]' '    at: ["bad path!"]' '    value: false'; parses 1 "fixed bad path"
+policy 'covers: [x]' 'fixed:';                                                        parses 1 "empty fixed"
+policy 'covers: [x]' 'fixed: [a]';                                                    parses 1 "fixed given a list"
+FX '    value: yes'
+run 2 "fixed: an invalid policy blocks every call" $FT '{"k":"yes"}' "cannot check this call" -
+
+echo "-- urls"
+policy 'covers: [pinned_inputs]' 'allow: [t, other]' 'urls:' \
+  "  - tools: [t]" "    at: ['startUrls[].url']" '    schemes: [https]' '    hosts: public' '    path: root' '    required: true' \
+  '  - tools: [t]' '    at: [page]' '    schemes: [https]' '    hosts: [facebook.com, www.facebook.com]' '    path: any' \
+  '  - tools: [t]' '    at: [doc]' '    schemes: [https, http]' '    hosts: [docs.example.com]' "    path: '/pages'" '    query: allow' \
+  '  - tools: [t]' '    at: [idn]' '    schemes: [https]' '    hosts: [xn--e1afmkfd.com]' '    path: any' '    fragment: allow'
+parses 0 "urls parses"
+UT=mcp__apify__t; S='"startUrls":[{"url":"https://a.com"}]'
+u1() { run "$1" "urls R1: $2" $UT "{\"startUrls\":[{\"url\":$3}]}" "${4:-}" -; }
+u1 0 "a bare host passes" '"https://example.com"'
+u1 0 "a root / passes" '"https://example.com/"'
+u1 0 "the default port passes" '"https://example.com:443/"'
+u1 0 "an uppercase host is lowercased" '"https://Example.com"'
+u1 0 "a hyphen inside a label passes" '"https://my-shop.co.uk"'
+u1 2 "a path under root" '"https://example.com/contact"' "t startUrls[].url: only the site root is allowed"
+u1 2 "a query" '"https://example.com?a=1"' "t startUrls[].url: a query is not allowed"
+u1 2 "a lone ?" '"https://example.com/?"' "t startUrls[].url: a query is not allowed"
+u1 2 "a fragment" '"https://example.com/#x"' "t startUrls[].url: a fragment is not allowed"
+u1 2 "a lone #" '"https://example.com#"' "t startUrls[].url: a fragment is not allowed"
+u1 2 "http when only https" '"http://example.com"' "t startUrls[].url: scheme http is not allowed"
+u1 2 "an uppercase scheme" '"HTTPS://example.com"' "t startUrls[].url: the scheme must be lowercase"
+u1 2 "a mixed-case scheme" '"Https://example.com"' "t startUrls[].url: the scheme must be lowercase"
+u1 2 "user info" '"https://user@example.com"' "t startUrls[].url: user info (@) is not allowed"
+u1 2 "user info with a password" '"https://example.com:x@evil.com"' "t startUrls[].url: user info (@) is not allowed"
+u1 2 "a non-default port" '"https://example.com:8443"' "t startUrls[].url: port 8443 is not the default for https"
+u1 2 "the http port under https" '"https://example.com:80"' "t startUrls[].url: port 80 is not the default for https"
+u1 2 "an empty port" '"https://example.com:/"' "t startUrls[].url: the port is not a plain number"
+u1 2 "a zero-padded port" '"https://example.com:0443"' "t startUrls[].url: the port is not a plain number"
+u1 2 "a port past 65535" '"https://example.com:65536"' "t startUrls[].url: the port is not a plain number"
+u1 2 "a non-ASCII digit port" '"https://example.com:٤٤٣"' "t startUrls[].url: the port is not a plain number"
+u1 2 "dotted IPv4" '"https://1.2.3.4"' "t startUrls[].url: the host is an IP address"
+u1 2 "decimal IPv4" '"https://2130706433"' "t startUrls[].url: the host is an IP address"
+u1 2 "hex IPv4" '"https://0x7f.0.0.1"' "t startUrls[].url: the host is an IP address"
+u1 2 "octal IPv4" '"https://017700000001"' "t startUrls[].url: the host is an IP address"
+u1 2 "short IPv4" '"https://127.1"' "t startUrls[].url: the host is an IP address"
+u1 2 "a 0x label" '"https://0x7f.example.com"' "t startUrls[].url: the host is an IP address"
+u1 2 "IPv6" '"https://[::1]"' "t startUrls[].url: the host is an IP address"
+u1 2 "IPv4-mapped IPv6" '"https://[::ffff:127.0.0.1]"' "t startUrls[].url: the host is an IP address"
+u1 2 "IPv6 with a port" '"https://[::1]:443"' "t startUrls[].url: the host is an IP address"
+u1 2 "localhost" '"https://localhost"' "t startUrls[].url: host localhost is local"
+u1 2 "a .localhost name" '"https://a.localhost"' "t startUrls[].url: host a.localhost is local"
+u1 2 "a .local name" '"https://foo.local"' "t startUrls[].url: host foo.local is local"
+u1 2 "an .internal name" '"https://x.internal"' "t startUrls[].url: host x.internal is local"
+u1 2 "a .lan name" '"https://a.lan"' "t startUrls[].url: host a.lan is local"
+u1 2 "a .home.arpa name" '"https://a.home.arpa"' "t startUrls[].url: host a.home.arpa is local"
+u1 2 "a .test name" '"https://a.test"' "t startUrls[].url: host a.test is local"
+u1 2 "an uppercase local name" '"https://FOO.LOCAL"' "t startUrls[].url: host foo.local is local"
+u1 2 "localhost.localdomain" '"https://localhost.localdomain"' "t startUrls[].url: host localhost.localdomain is local"
+u1 2 "a cluster .svc name" '"https://kubernetes.default.svc"' "t startUrls[].url: host kubernetes.default.svc is local"
+u1 2 "a .corp name" '"https://a.corp"' "t startUrls[].url: host a.corp is local"
+u1 2 "a .home name" '"https://nas.home"' "t startUrls[].url: host nas.home is local"
+u1 2 "an .intranet name" '"https://wiki.intranet"' "t startUrls[].url: host wiki.intranet is local"
+H253=$(python3 -c 'print(".".join(["a" * 63] * 3) + "." + "b" * 61)')
+H254=$(python3 -c 'print(".".join(["a" * 63] * 3) + "." + "b" * 62)')
+u1 0 "a 253-character host" "\"https://$H253\""
+u1 2 "a 254-character host" "\"https://$H254\"" "t startUrls[].url: the host is longer than 253 characters"
+u1 2 "one label" '"https://intranet"' "t startUrls[].url: the host needs at least two labels"
+u1 2 "a trailing dot" '"https://example.com."' "t startUrls[].url: the host ends with a dot"
+u1 2 "an empty label" '"https://example..com"' "t startUrls[].url: host label '' is not"
+u1 2 "a leading hyphen" '"https://-a.com"' "t startUrls[].url: host label '-a' is not"
+u1 2 "a trailing hyphen" '"https://a-.com"' "t startUrls[].url: host label 'a-' is not"
+u1 2 "an underscore" '"https://a_b.com"' "t startUrls[].url: host label 'a_b' is not"
+u1 2 "a 64-character label" "\"https://$(printf 'a%.0s' $(seq 64)).com\"" "is not 1 to 63"
+u1 0 "a 63-character label" "\"https://$(printf 'a%.0s' $(seq 63)).com\""
+u1 2 "a percent-encoded host" '"https://exa%6dple.com"' "t startUrls[].url: the host has a %"
+u1 2 "an empty host" '"https:///example.com"' "t startUrls[].url: the host is empty"
+u1 2 "a backslash" '"https://example.com\\@evil.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "one slash" '"https:/example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "no scheme" '"//example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "no slashes" '"https:example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "a scheme with a digit" '"h2://example.com"' "t startUrls[].url: is not scheme://host[path][?query][#fragment]"
+u1 2 "a space" '"https://exa mple.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a tab" '"https://exa\tmple.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a newline" '"https://example.com\n"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a NUL" '"https://example.com\u0000"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "a zero-width space" '"https://exa​mple.com"' "t startUrls[].url: has a control character, whitespace or a backslash"
+u1 2 "an ideographic space" '"https://example.com　"' "t startUrls[].url: has a control character, whitespace or a backslash"
+LONG=$(python3 -c 'print("https://example.com/?" + "a" * (2049 - 21))')
+u1 2 "a 2049-character URL" "\"$LONG\"" "t startUrls[].url: is longer than 2048 characters"
+u1 2 "an xn-- label under public" '"https://xn--e1afmkfd.com"' "t startUrls[].url: an xn-- label needs an exact hosts list"
+u1 2 "an uppercase XN-- label under public" '"https://XN--e1afmkfd.com"' "t startUrls[].url: an xn-- label needs an exact hosts list"
+u1 2 "an ideographic full stop" '"https://example。com"' "t startUrls[].url: the host is not ASCII"
+u1 2 "full-width letters" '"https://ｅxample.com"' "t startUrls[].url: the host is not ASCII"
+u1 2 "a Kelvin sign that lowercases to k" '"https://Ka.com"' "t startUrls[].url: the host is not ASCII"
+u1 2 "a number" '5' "startUrls[].url must be a URL string"
+u1 2 "null" 'null' "startUrls[].url must be a URL string"
+u1 2 "a list" '["https://a.com"]' "startUrls[].url must be a URL string"
+run 2 "urls R1 required: omitted blocks" $UT '{}' "t names no startUrls[].url" -
+run 2 "urls R1 required: [] blocks" $UT '{"startUrls":[]}' "t names no startUrls[].url" -
+run 2 "urls R1 required: [null] blocks" $UT '{"startUrls":[null]}' "t names no startUrls[].url" -
+run 2 "urls R1 required: an item without url blocks" $UT '{"startUrls":[{"url":"https://a.com"},{}]}' "t names no startUrls[].url" -
+run 2 "urls R1 required: a variant spelling does not satisfy it" $UT '{"startUrls":[{"URL":"https://a.com"}]}' "t names no startUrls[].url" -
+run 2 "urls R1: a variant spelling is still checked" $UT '{"startUrls":[{"url":"https://a.com","Url":"https://a.com/x"}]}' "t startUrls[].url: only the site root is allowed" -
+run 2 "urls R1: a scalar where the list is expected blocks" $UT '{"startUrls":"https://a.com"}' "startUrls[].url: unexpected shape" -
+run 2 "urls R1: the second item bad blocks" $UT '{"startUrls":[{"url":"https://a.com"},{"url":"https://a.com/x"}]}' "t startUrls[].url: only the site root is allowed" -
+run 0 "urls R1: every item good passes" $UT '{"startUrls":[{"url":"https://a.com"},{"url":"https://b.org/"}]}' "" -
+run 0 "urls R2: an exact host with a page path passes" $UT "{$S,\"page\":\"https://www.facebook.com/somepage\"}" "" -
+run 0 "urls R2: an exact host matches case-insensitively" $UT "{$S,\"page\":\"https://WWW.Facebook.com/somepage\"}" "" -
+run 0 "urls R2: path any allows .." $UT "{$S,\"page\":\"https://facebook.com/a/../b\"}" "" -
+run 2 "urls R2: a host outside the list" $UT "{$S,\"page\":\"https://evil.com/somepage\"}" "t page: host evil.com is not in the hosts list" -
+run 2 "urls R2: a query" $UT "{$S,\"page\":\"https://www.facebook.com/somepage?ref=x\"}" "t page: a query is not allowed" -
+run 2 "urls R2: a subdomain outside the list" $UT "{$S,\"page\":\"https://m.facebook.com/somepage\"}" "t page: host m.facebook.com is not in the hosts list" -
+run 2 "urls R2: a suffix lookalike" $UT "{$S,\"page\":\"https://facebook.com.evil.com/x\"}" "t page: host facebook.com.evil.com is not in the hosts list" -
+run 2 "urls R2: an always-on refusal still applies to an exact host" $UT "{$S,\"page\":\"https://user@www.facebook.com/x\"}" "t page: user info (@) is not allowed" -
+run 0 "urls R3: http with a query under the prefix passes" $UT "{$S,\"doc\":\"http://docs.example.com/pages/x?a=1\"}" "" -
+run 0 "urls R3: the prefix itself passes" $UT "{$S,\"doc\":\"https://docs.example.com/pages\"}" "" -
+run 0 "urls R3: http's default port passes" $UT "{$S,\"doc\":\"http://docs.example.com:80/pages\"}" "" -
+run 2 "urls R3: https on port 80" $UT "{$S,\"doc\":\"https://docs.example.com:80/pages\"}" "t doc: port 80 is not the default for https" -
+run 2 "urls R3: no segment boundary" $UT "{$S,\"doc\":\"https://docs.example.com/pagesx\"}" "t doc: the path is not under /pages" -
+run 2 "urls R3: the root" $UT "{$S,\"doc\":\"https://docs.example.com/\"}" "t doc: the path is not under /pages" -
+run 2 "urls R3: .." $UT "{$S,\"doc\":\"https://docs.example.com/pages/../admin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: %2F" $UT "{$S,\"doc\":\"https://docs.example.com/pages%2Fx\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: %2e%2e" $UT "{$S,\"doc\":\"https://docs.example.com/pages/%2e%2e/admin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: %5C" $UT "{$S,\"doc\":\"https://docs.example.com/pages/%5C..%5Cadmin\"}" "t doc: the path holds .., %2F, %2E or %5C" -
+run 2 "urls R3: a case change in the path" $UT "{$S,\"doc\":\"https://docs.example.com/Pages/x\"}" "t doc: the path is not under /pages" -
+run 2 "urls R3: a fragment (forbidden by default)" $UT "{$S,\"doc\":\"https://docs.example.com/pages#x\"}" "t doc: a fragment is not allowed" -
+L2048=$(python3 -c 'p = "http://docs.example.com/pages?q="; print(p + "a" * (2048 - len(p)))')
+L2049=$(python3 -c 'p = "http://docs.example.com/pages?q="; print(p + "a" * (2049 - len(p)))')
+run 0 "urls R3: exactly 2048 characters passes" $UT "{$S,\"doc\":\"$L2048\"}" "" -
+run 2 "urls R3: 2049 characters blocks" $UT "{$S,\"doc\":\"$L2049\"}" "t doc: is longer than 2048 characters" -
+run 0 "urls R4: an xn-- host in an exact list, with a fragment allowed" $UT "{$S,\"idn\":\"https://xn--e1afmkfd.com/#a\"}" "" -
+run 0 "urls: a tool outside the entries is not checked" mcp__apify__other '{"page":"https://evil.com"}' "" -
+run 2 "urls: tool_input that is not an object blocks" $UT '[1]' "cannot check this call" -
+OUT=$(python3 -B "$E" --pins "$W/guard.yaml" 2>&1); rc=$?; [ "$rc" -eq 0 ] && [ -z "$OUT" ] && _report ok "--pins lists no urls entries" || _report no "--pins urls (rc=$rc): $OUT"
+UX() { policy 'covers: [x]' 'urls:' '  - tools: [t]' '    at: [u]' "$@"; }
+UX '    schemes: [https]' '    hosts: public' '    path: root';                     parses 0 "urls entry parses"
+UX '    schemes: [https, http]' '    hosts: [a.com]' "    path: '/a/b'" '    query: allow' '    fragment: forbid' '    required: true'; parses 0 "urls entry with every key"
+UX '    schemes: [https]' '    hosts: public' '    path: /pages';                   parses 0 "urls unquoted prefix"
+UX '    schemes: []' '    hosts: public' '    path: root';                         parses 1 "urls empty schemes"
+UX '    schemes: [ftp]' '    hosts: public' '    path: root';                        parses 1 "urls unknown scheme"
+UX '    schemes: [HTTPS]' '    hosts: public' '    path: root';                      parses 1 "urls uppercase scheme"
+UX '    schemes: https' '    hosts: public' '    path: root';                        parses 1 "urls schemes given a scalar"
+UX '    hosts: public' '    path: root';                                             parses 1 "urls without schemes"
+UX '    schemes: [https]' '    hosts: []' '    path: root';                          parses 1 "urls empty hosts"
+UX '    schemes: [https]' '    hosts: everyone' '    path: root';                    parses 1 "urls hosts neither a list nor public"
+UX '    schemes: [https]' '    hosts: [public]' '    path: root';                    parses 1 "urls hosts [public] is not the word public"
+UX '    schemes: [https]' '    hosts: [localhost]' '    path: root';                 parses 1 "urls hosts lists a local host"
+UX '    schemes: [https]' '    hosts: [1.2.3.4]' '    path: root';                   parses 1 "urls hosts lists an IP"
+UX '    schemes: [https]' '    hosts: ["*.example.com"]' '    path: root';           parses 1 "urls hosts wildcard"
+UX '    schemes: [https]' '    path: root';                                          parses 1 "urls without hosts"
+UX '    schemes: [https]' '    hosts: public' '    path: rootish';                   parses 1 "urls path rootish"
+UX '    schemes: [https]' '    hosts: public' '    path: pages';                     parses 1 "urls path without a /"
+UX '    schemes: [https]' '    hosts: public' "    path: '/'";                       parses 1 "urls path /"
+UX '    schemes: [https]' '    hosts: public' "    path: '/a/'";                     parses 1 "urls path with a trailing /"
+UX '    schemes: [https]' '    hosts: public' "    path: '/a/../b'";                 parses 1 "urls path with .."
+UX '    schemes: [https]' '    hosts: public' "    path: '/./a'";                    parses 1 "urls path with a . segment"
+UX '    schemes: [https]' '    hosts: public' "    path: '/a%2Fb'";                  parses 1 "urls path with %"
+UX '    schemes: [https]' '    hosts: public' '    path: [root]';                    parses 1 "urls path given a list"
+UX '    schemes: [https]' '    hosts: public';                                       parses 1 "urls without path"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    query: maybe';   parses 1 "urls query maybe"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    fragment: yes';  parses 1 "urls fragment yes"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    required: yes';  parses 1 "urls required yes"
+UX '    schemes: [https]' '    hosts: public' '    path: root' '    bound: b';       parses 1 "urls unknown entry key"
+policy 'covers: [x]' 'urls:' '  - tools: [t]' '    at: []' '    schemes: [https]' '    hosts: public' '    path: root'; parses 1 "urls empty at"
+policy 'covers: [x]' 'urls:' '  - tools: [t]' '    at: ["bad path!"]' '    schemes: [https]' '    hosts: public' '    path: root'; parses 1 "urls bad path"
+policy 'covers: [x]' 'urls:' '  - at: [u]' '    schemes: [https]' '    hosts: public' '    path: root'; parses 1 "urls without tools"
+policy 'covers: [x]' 'urls:';                                                          parses 1 "empty urls"
+policy 'covers: [x]' 'urls: [a]';                                                      parses 1 "urls given a list"
+UX '    schemes: [https]' '    hosts: everyone' '    path: root'
+run 2 "urls: an invalid policy blocks every call" $UT '{"u":"https://a.com"}' "cannot check this call" -
+
 echo "-- agent exempt"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [owner_notify]'; aparses 0 "exempt parses"
 policy 'covers: [no_external_send]' 'deny: ["*send*"]' 'exempt: [Owner-Notify]'; aparses 1 "exempt not snake_case"
