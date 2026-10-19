@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.2. It is in active development: agents track
+The standard is 7.3. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.2"`.
+`agent.yaml`, and the validator requires `standard: "7.3"`.
 
 ## Directory layout
 
@@ -232,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.2"                # the Agent Standard version followed
+standard: "7.3"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -1513,7 +1513,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.2"`.
+- `agent.yaml` exists, and its `standard` is `"7.3"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly

@@ -267,4 +267,24 @@ expect 1 "unpinned run tool refused" "run-other is allowed but no recipients ent
 good_pin; printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps]' > "$PIT/guard.yaml"; run "$PIT" "$PI/contract.md"
 expect 1 "no recipients entry refused" "must pin values (a recipients entry) for pinned_inputs"
 
+echo "-- 7.3: fixed and urls"
+good_pin; printf '%s\n' \
+  'fixed:' '  - tools: [run-maps]' '    at: [personalData]' '    value: false' '    required: true' \
+  'urls:' '  - tools: [run-maps]' '    at: ["startUrls[].url"]' '    schemes: [https]' '    hosts: public' '    path: root' '    required: true' \
+  >> "$PIT/guard.yaml"
+run "$PIT" "$PI/contract.md"; expect 0 "fixed and urls keys are accepted" "OK: "
+good_pin; printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps, list-tools]' \
+  'fixed:' '  - tools: [run-maps]' '    at: [personalData]' '    value: false' > "$PIT/guard.yaml"
+run "$PIT" "$PI/contract.md"; expect 1 "a fixed entry is not a pin" "must pin values (a recipients entry) for pinned_inputs"
+good_pin; printf '%s\n' 'covers: [pinned_inputs]' 'allow: [run-maps, list-tools]' \
+  'urls:' '  - tools: [run-maps]' '    at: [u]' '    schemes: [https]' '    hosts: public' '    path: root' > "$PIT/guard.yaml"
+run "$PIT" "$PI/contract.md"; expect 1 "a urls entry is not a pin" "must pin values (a recipients entry) for pinned_inputs"
+good_pin; sed -i.bak 's/^allow: .*/allow: [run-maps, run-other, list-tools]/' "$PIT/guard.yaml"
+printf '%s\n' 'fixed:' '  - tools: [run-other]' '    at: [personalData]' '    value: false' >> "$PIT/guard.yaml"
+run "$PIT" "$PI/contract.md"; expect 1 "fixed does not pin an allowed tool" "run-other is allowed but no recipients entry pins it"
+good_pin; printf '%s\n' 'fixed:' '  - tools: [run-maps]' '    at: [x]' '    value: maybe' >> "$PIT/guard.yaml"
+run "$PIT" "$PI/contract.md"; expect 1 "a malformed fixed value is refused" "guard.yaml:"
+good_pin; printf '%s\n' 'urls:' '  - tools: [run-maps]' '    at: [u]' '    schemes: [ftp]' '    hosts: public' '    path: root' >> "$PIT/guard.yaml"
+run "$PIT" "$PI/contract.md"; expect 1 "a malformed urls entry is refused" "guard.yaml:"
+
 finish

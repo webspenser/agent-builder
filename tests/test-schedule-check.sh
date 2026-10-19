@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.2"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.3"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
@@ -405,7 +405,7 @@ echo "-- ledger bindings"
 LP="$W/lpkg"; mkdir -p "$LP/hooks" "$LP/capabilities/ledger"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$LP/hooks/"
 cp -R _ledger/contract.md _ledger/tables.md _ledger/tools "$LP/capabilities/ledger/"
-printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.2"' 'catalog: webspenser' \
+printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.3"' 'catalog: webspenser' \
   'catalog_repo: webspenser/agent-library' 'capabilities: ledger' 'activity_log: ledger' > "$LP/agent.yaml"
 LSC="$LP/hooks/schedule_check.py"
 lbind() { # lbind <instance> [schema] [drop-field]: bind ledger to airtable with every writable field
@@ -435,7 +435,7 @@ expect 1 "no bindings file fails" "bindings/ledger.md has no base_id line"
 echo "-- pinned_inputs bindings"
 PP="$W/ppkg"; mkdir -p "$PP/hooks" "$PP/capabilities/scraping/tools/apify"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PP/hooks/"
-printf '%s\n' 'name: pin-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.2"' 'catalog: webspenser' \
+printf '%s\n' 'name: pin-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.3"' 'catalog: webspenser' \
   'catalog_repo: webspenser/agent-library' 'capabilities: scraping' 'activity_scrape: scraping' > "$PP/agent.yaml"
 printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PP/capabilities/scraping/contract.md"
 printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$PP/capabilities/scraping/tools/apify/identity.yaml"
