@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 7.3. Agent Builder 7.3.0, sales-partner 8.1.0 (in review).
+Current: standard 7.3. Agent Builder 7.3.0, sales-partner 8.1.0.
 
 ## In plain words
 
@@ -12,10 +12,12 @@ For a business owner, here is the whole picture in five points. The
 rest of this page is the technical reference behind them.
 
 1. **An agent does one repeating job for your business.** Sales Partner,
-   for example, finds and researches new leads every week and prepares
-   a first message for each one.
-2. **It works in your own tools.** It reads and writes your CRM and
-   creates drafts in your mailbox. Your records stay where they are.
+   for example, finds and researches new leads every week, matches each
+   one to the offer most likely to land, and writes talking points for
+   it.
+2. **It works in your own tools.** Sales Partner reads and writes your
+   CRM and keeps a record of every run in your own Airtable. Your
+   records stay where they are.
 3. **It has rules it can't break.** Each agent lists what it must never
    do, such as sending a message, deleting a record, or contacting
    someone marked Do Not Contact. A guard checks every single action
@@ -57,7 +59,7 @@ offers done-for-you setup and ongoing managed services.
 | Repository | Role |
 |---|---|
 | [`webspenser/agent-builder`](https://github.com/webspenser/agent-builder) | Defines the **Agent Standard** (`STANDARD.md`). It ships the reference files every agent copies (`_template/`), the validator (`bin/validate-agent.sh`), the GitHub Action `webspenser/agent-builder/validate@main`, and the `new-agent` wizard. |
-| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: lead generation and personalization — it finds, scores and researches fresh leads, then prepares each first touch (a recommended channel with a full draft, plus personalized statements for email, LinkedIn and calls). It never sends: once the owner approves a lead, the owner's CRM automations take over. |
+| [`webspenser/sales-partner`](https://github.com/webspenser/sales-partner) | An agent built to the standard: lead generation and research — it finds, scores and researches fresh leads, matches each to a Hero Offer from the owner's catalog, and writes sourced talking points on the company. It stops at `Researched` and never contacts prospects: once the owner approves a lead, the owner's own sequences and automations take over. |
 | [`webspenser/agent-library`](https://github.com/webspenser/agent-library) | The **catalog**, a Claude Code plugin marketplace named `webspenser`, listing which agents can be installed. |
 
 The builder's version and the standard's version move together. The standard is in active development, so there are no version tags yet. An agent's CI uses `validate@main` and always checks against the latest standard. Tags come with the first official release. There is no migration machinery: a change to the standard is made directly in the agents.
@@ -68,9 +70,9 @@ The builder's version and the standard's version move together. The standard is 
 |---|---|---|
 | **Agent (package)** | What gets installed: instructions, skills, subagents, capabilities, hooks. | The agent's repository |
 | **Instance** | One client's copy of the agent's state: their bindings, business context and schedules. It never holds agent code. | The client's own private repository |
-| **Capability** | A kind of tool the agent needs, e.g. `crm`, `email_drafts`. | `capabilities/<cap>/` |
+| **Capability** | A kind of tool the agent needs, e.g. `crm`, `owner_notify`. | `capabilities/<cap>/` |
 | **Contract** | The capability's operations plus its **invariants**, the rules that must always hold (e.g. `no_external_send`: never send email). | `capabilities/<cap>/contract.md` |
-| **Tool** | How the contract maps onto one specific system (Attio, Airtable, HubSpot, Gmail). | `capabilities/<cap>/tools/<tool>/` |
+| **Tool** | How the contract maps onto one specific system (Attio, HubSpot, Resend, Airtable, Apify). | `capabilities/<cap>/tools/<tool>/` |
 | **Guard policy** | The tool's enforcement rules: which tool calls are allowed, which are denied, which field values may be written, and which fields may never be written at all. Its `covers` list names the invariants it enforces. | `…/tools/<tool>/guard.yaml` |
 | **Binding** | The instance's choice of tool for a capability. | `bind_<cap>: <tool>` in `instance.yaml` |
 | **Unattended-safe** | Every invariant of the contract is in the bound tool's `covers`: enforced by code, not only by instructions. | Computed by setup and the schedule checker |
@@ -153,39 +155,38 @@ Either way, the probe runs again and must pass before the tool is bound.
 
 ## CRM tools at a glance
 
-The `crm` capability ships three tools in sales-partner. All three follow
-the same contract, so the pipeline works the same way on each. Only the
+The `crm` capability ships two tools in sales-partner. Both follow the
+same contract, so the pipeline works the same way on each. Only the
 home of each record differs.
 
-| | Attio | Airtable | HubSpot |
-|---|---|---|---|
-| **Lead** | A company record, plus one entry in the list `sales_partner_pipeline` | A row in the Leads table | A Company |
-| **Contact** | A People record | A row in the Contacts table | A Contact, linked to its company |
-| **Research** | An entry in the list `sales_partner_research` | A row in the Research table | A Note on the company |
-| **Activity (a draft or logged interaction)** | An entry in the list `sales_partner_outreach` | A row in the Activities table | A Task on the company (and contact) |
-| **Where draft / sent / voided lives** | The `status` field on the entry | The `Status` field on the row | HubSpot's built-in task status: Not started = draft, Completed = sent, Deferred = voided |
-| **Outbound or inbound** | The `direction` field | The `Direction` field | The built-in task priority: High = outbound, None = inbound |
-| **Review (the approval queue)** | Pipeline entries at `Approach Drafted`, with their draft Outreach entries | Leads at `Approach Drafted`, with their linked Activities | Companies at `Approach Drafted`, with their Not started Tasks |
-| **What setup needs** | An API key, to run `bootstrap.py` (or create the lists and fields by hand) | Create the four tables by hand. No script. Setup's probe records every field ID | 16 custom fields on Companies and Contacts (none on Tasks). Run `bootstrap.py` with a private-app token, or create them by hand |
-| **Guard blocks, on top of the shared rules** | Attribute keys given as IDs | Writes with no recorded field IDs | Writing a pipeline stage, pipeline or completion date on a Task |
+| | Attio | HubSpot |
+|---|---|---|
+| **Lead** | A company record, plus one entry in the list `sales_partner_pipeline` | A Company, with the custom `sp_stage` dropdown |
+| **Contact** | A People record | A Contact, linked to its company |
+| **Research** | The note `Sales Partner · Research` on the company; each run appends a dated section | A Note on the company, one per research run |
+| **Talking points** | The note `Sales Partner · Talking Points` on the company; each run appends a dated section | A Note on the company (and contact), one per section |
+| **Offer match** | `segment`, `industry`, `hero_offer`, `offer_reason`, `offer_evidence` on the pipeline entry | The matching `sp_` properties on the Company |
+| **Review (the approval queue)** | Pipeline entries at `Researched`, sorted by Approach score | Companies at `Researched`, sorted by Approach score |
+| **What setup needs** | An API key, to run `bootstrap.py` (or create the list and attributes by hand) | 25 custom properties on Companies and Contacts. Run `bootstrap.py` with a private-app token, or create them by hand |
+| **Guard blocks, on top of the shared rules** | Attribute keys given as IDs; a note update other than an append | Writing a Company's pipeline or pipeline stage, editing a Note's body or timestamp, and any Task status, body or completion date |
 
 **Lead status vs deal stage.** The lead (the company) has one status:
-New, Scored, Researched, Approach Drafted (the agent's work; it stops
-here) → Ready to Send (the owner approves the lead by moving it; the
-owner's automations, systems or agents take over) → Contacted → Engaged
-→ Open Deal, Nurture (with a Revisit On date) or Customer, or
-Disqualified. Deals, with their own stages, live on the CRM's deal
-object. In every tool the guard stops the agent writing anything past
-Approach Drafted (except Disqualified), so those statuses stay the
-owner's by mechanism. The agent creates drafts and may only void them;
-`sent` is the owner's or their automation's, and no draft is rewritten
-after create. The operator creates the saved views by hand, because
-none of the connectors can create views.
+New, Scored, Researched (the agent's work; it stops here) → Approved
+(the owner approves the lead by moving it; the owner's automations,
+systems or agents take over) → Contacted → Engaged → Open Deal, Nurture
+(with a Revisit On date) or Customer, or Disqualified. Deals, with their
+own stages, live on the CRM's deal object. In both tools the guard stops
+the agent writing anything past Researched (except Disqualified), and
+refuses the owner-only Research Anyway checkbox, so those stay the
+owner's by mechanism. Research and talking points are append-only: each
+run adds a dated section and never rewrites an earlier one. The
+operator creates the saved views by hand, because neither connector can
+create views.
 
 In HubSpot, a lead's location uses HubSpot's own city, state and country
-fields, so it needs no custom field. HubSpot's Tasks work on the free
-tier because drafts use the built-in task status. Each tool's setup list
-and views are in its `usage.md` under `capabilities/crm/tools/` in the
+fields, so it needs no custom field. Notes and custom properties work on
+the free tier, and Tasks are not used. Each tool's setup list and views
+are in its `usage.md` under `capabilities/crm/tools/` in the
 sales-partner repository.
 
 ## The checks
@@ -270,8 +271,8 @@ flowchart TD
   GY -- yes --> E["guard_policy.py with guard.yaml<br/>and bindings/cap.md"]
   E --> E1["tool in allow list,<br/>and not in deny list"]
   E1 --> E2["writes: says where values sit in the call,<br/>and whether it is a create or an update"]
-  E2 --> E3["forbid: fields that may never be written<br/>(HubSpot: pipeline stage, pipeline, completion date)"]
-  E3 --> E4["each other ruled field's value is allowed<br/>(status: draft on create, voided on update;<br/>do_not_contact only to true)"]
+  E2 --> E3["forbid: fields that may never be written<br/>(Research Anyway; HubSpot: pipeline, pipeline stage, Task fields)"]
+  E3 --> E4["each other ruled field's value is allowed<br/>(stage: New on create; Scored, Researched or<br/>Disqualified on update; do_not_contact only to true)"]
   E4 --> E5["Airtable: field IDs from bindings/cap.md;<br/>Attio: refuse uuid keys"]
   E5 --> D{"passes?"}
   D -- no --> BL2["BLOCK: Blocked by … guard policy"]
@@ -351,7 +352,7 @@ Behavior verified in acceptance on 2026-09-29:
 - The routine form takes the browser's local time and stores a fixed UTC
   cron, so the time shifts by an hour when daylight saving changes.
 - `next_run_at` carries about a minute of jitter. `verify` allows for it.
-- Connectors appear as `mcp__Attio__…` and `mcp__Gmail__…`.
+- Connectors appear as `mcp__Attio__…`, for example.
 - The agent loads only through the environment's setup script. Routines
   ignore plugins that the repository's `.claude/settings.json` enables.
 
@@ -410,10 +411,9 @@ declaration: *"this workflow step may run with no one watching, and it only
 touches these capabilities."* For sales-partner:
 
 ```yaml
-activity_prospect: crm
-activity_prepare: crm
-activity_approach: crm
-activity_digest: crm, email_drafts
+activity_prospect: crm, owner_notify, ledger, scraping
+activity_prepare: crm, owner_notify, ledger, scraping
+activity_digest: crm, owner_notify, ledger
 ```
 
 - **The author** declares which steps can be scheduled. Undeclared steps can
@@ -433,31 +433,30 @@ them.
 Each tool writes to its CRM in a different way, and the guard has to
 recognise a protected field in each of them.
 
-- **Attio** writes fields by **name** (`status`, `do_not_contact`), so
+- **Attio** writes fields by **name** (`stage`, `do_not_contact`), so
   its guard policy can check those names directly. It also refuses any
   key that looks like an Attio ID, because an ID could hide a protected
   field.
-- **HubSpot** writes properties by **name** too (`hs_task_status`,
+- **HubSpot** writes properties by **name** too (`sp_stage`,
   `sp_do_not_contact`). Its binding holds no field IDs, only the
   account's `hub_id`.
-- **Airtable** writes fields by **ID** (`fldXXXXXXXX`). A policy that said
-  "field Status" would never match a call, and renaming the column in
-  Airtable would also get around a rule keyed on the name.
+- **Airtable** (the ledger tool) writes fields by **ID** (`fldXXXXXXXX`).
+  A policy that said "field Event" would never match a call, and renaming
+  the column in Airtable would also get around a rule keyed on the name.
 
-So setup's probe records the ID of every field in the agent's Airtable
-tables in `bindings/crm.md`, one plain line each (a name used in two
-tables gets two lines):
+So setup's probe records the ID of every field in the ledger's Airtable
+tables in `bindings/ledger.md`, one plain line each:
 
 ```
-field_status: fldAbc123
-field_do_not_contact: fldDef456
-field_lead: fldGhi789
-field_lead: fldJkl012
+field_run_id: fldAbc123
+field_event: fldDef456
+field_outcome: fldGhi789
 ```
 
 The Airtable policy says `bound_keys_only: true`: a write may use only
-those recorded IDs. The rules for `Status` and `Do Not Contact` match
-their IDs, and any other key is refused. That closes two holes. A
+those recorded IDs. Its rules (for example, `Event` and `Outcome` may
+never change after create) match those IDs, and any other key is
+refused. That closes two holes. A
 column deleted and recreated in Airtable gets a new ID, and that ID is
 refused until the probe runs again, so the rule can't be dodged. And
 with no IDs recorded, every Airtable write is blocked. Both fail safe:
@@ -468,18 +467,18 @@ these things:
 
 - **Limit its values.** The field may be written only as the listed
   values, and the list can differ for a create and an update. Example:
-  `status` may be created only as `draft` and updated only to `voided`.
+  `stage` may be created only as `New` and updated only to `Scored`,
+  `Researched` or `Disqualified`.
 - **Forbid it.** With `forbid: true`, the field may never be written, on
-  create or update, whatever the value. HubSpot uses this for
-  `hs_pipeline_stage`, `hs_pipeline` and `hs_task_completion_date`. A
-  Task's pipeline stages mirror its statuses, so these fields would be
-  another way to change a draft's status.
+  create or update, whatever the value. Both CRM tools use this for the
+  owner-only Research Anyway checkbox. HubSpot also forbids
+  `hs_pipeline`, `hs_pipeline_stage` and the Task fields, so neither a
+  Company pipeline nor a Task becomes a back door to a status.
 - **Freeze it after create.** With `forbid: update`, the field can be set
-  when the record is created and never changed after. Every CRM tool
-  uses this for the draft's body (`draft_body`, `Draft Body`,
-  `hs_task_body`), so an approved draft can't be rewritten before it
-  goes out. HubSpot records a voided draft's outcome as a Note instead
-  of editing the Task.
+  when the record is created and never changed after. HubSpot uses this
+  for a Note's body and timestamp, so talking points the owner approved
+  can't be rewritten; Attio allows a note update only as an append. The
+  ledger uses it for most Events fields.
 
 **One deny list for the whole agent.** A tool's policy only fires for
 calls to its own server. An agent can also ship a `guard.yaml` at its
@@ -518,10 +517,13 @@ engine would not know which values to check.
 **The balance.** The guard enforces only the few invariants that would do
 real harm if broken:
 
-- never approve or send outreach (`draft_only`);
+- never approve a lead, and never rewrite talking points (`approval_only`);
 - never clear Do Not Contact (`dnc_one_way`);
 - never delete or merge (`no_delete`);
-- never send email (`no_external_send`).
+- never contact anyone outside the business (`no_external_send`);
+- message only the owner (`owner_only_send`);
+- never change or delete a ledger row (`append_only_events`);
+- send scrapers only the pinned, safe inputs (`pinned_inputs`).
 
 Everything else is left to the agent's instructions.
 
@@ -529,7 +531,7 @@ Everything else is left to the agent's instructions.
 
 Some rules can't be checked by the guard at all, because the guard sees
 one tool call at a time and never reads another system. For example,
-"enroll only leads the owner moved to Ready to Send", in an agent that
+"enroll only leads the owner moved to Approved", in an agent that
 enrolls leads into an email sequence, depends on the lead's stage in the
 CRM, which the call to the sending platform doesn't carry. A contract marks such an invariant `(acceptable)`.
 
@@ -591,8 +593,6 @@ These are still open. Everything else that used to be on this list is done.
   the rule "use the exact time".
 - **Source-mode instances** still need the `catalog` keys to schedule, and
   they get install lines they don't need.
-- **Airtable without field IDs.** A binding with no field IDs passes the
-  schedule gate but blocks every write.
 - **Catalog version pinning before go-live.** When the setup script's
   cache refreshes, the cloud environment installs the latest catalog
   version. Nothing pins a version yet, so a client could get a new
@@ -603,10 +603,8 @@ These are still open. Everything else that used to be on this list is done.
   catch binding or version drift that happens afterwards.
 - **Compliance.** CAN-SPAM, GDPR and TCPA are not yet a first-class
   track in the standard.
-- **More CRMs.** Attio, Airtable and HubSpot ship today. Which tool to
-  build next is undecided.
-- **A scraping capability.** Scheduled prospecting uses web search only.
-  A service such as Apify would need its own capability.
+- **More CRMs.** Attio and HubSpot ship today. Which tool to build next
+  is undecided.
 - **Connector-driven field setup.** Fields are created by hand or with
   `bootstrap.py` and the person's own API key, because the connectors
   can't create fields or views. If connectors gain that ability, setup
