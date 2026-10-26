@@ -115,7 +115,7 @@ In CI, from any agent repo:
 
 ## Agents built with this
 
-- [Sales Partner](https://github.com/webspenser/sales-partner) — fresh, researched leads every week, each with its first touch ready for you to approve. It never sends.
+- [Sales Partner](https://github.com/webspenser/sales-partner) — fresh, researched leads every week, each matched to the offer most likely to land, with sourced talking points ready for you to approve. It never contacts prospects.
 
 ## Developing the builder
 

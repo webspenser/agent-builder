@@ -6,7 +6,7 @@
 # tool policy then still enforces); then every bound tool whose server_match appears in the tool name gets its
 # guard policy (guard.yaml) enforced by hooks/guard_policy.py. A bound tool whose
 # policy pins values, and the exempted owner_only_send tool, also need their
-# bindings file to equal its pushed (git upstream) copy. Exit 2 blocks the
+# bindings file to equal its pushed copy (git upstream, else origin/HEAD). Exit 2 blocks the
 # call and shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
@@ -26,20 +26,30 @@ ablock() { printf 'Blocked by %s agent guard policy: %s\n' "$name" "$1" >&2; exi
 # GIT_ALLOW_PROTOCOL overrides every protocol.* config key, on any git
 # version); blobs are read directly (no diff drivers or clean filters).
 ugit() { GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false -c protocol.allow=never "$@" </dev/null; }
+# pushed_ref: the ref holding the pushed copy, in $pref. The branch's
+# upstream (@{u}); on a branch with none (a cloud routine clones the default
+# branch, then works on a new branch), the remote's default branch
+# (refs/remotes/origin/HEAD). Both are bytes that were actually pushed.
+pushed_ref() {
+  pref='@{u}'
+  ugit rev-parse --verify --quiet "$pref" >/dev/null 2>&1 && return 0
+  pref=$(ugit symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || return 1
+  ugit rev-parse --verify --quiet "$pref" >/dev/null 2>&1
+}
 # pushed <cap>: the agent can write bindings/, so values a tool policy pins
-# must equal the upstream (pushed) copy. This stops edits and unpushed
-# commits. It does not stop an agent that edits .git itself (tracking refs,
-# upstream/remote config, core.worktree, a .git gitfile, alternates). The
-# engine is then given the verified upstream bytes, not the working file.
+# must equal the pushed copy. This stops edits and unpushed commits. It does
+# not stop an agent that edits .git itself (tracking refs, upstream/remote
+# config, core.worktree, a .git gitfile, alternates). The engine is then
+# given the verified pushed bytes, not the working file.
 pushed() {
   _bp="bindings/$1.md"
   [ -f "$instance/$_bp" ] && [ ! -L "$instance/$_bp" ] || return 1
   command -v git >/dev/null 2>&1 || return 1
-  ugit rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 || return 1
-  ugit cat-file -e "@{u}:$_bp" >/dev/null 2>&1 || return 1
-  ugit cat-file blob "@{u}:$_bp" 2>/dev/null | cmp -s - "$instance/$_bp"
+  pushed_ref || return 1
+  ugit cat-file -e "$pref:$_bp" >/dev/null 2>&1 || return 1
+  ugit cat-file blob "$pref:$_bp" 2>/dev/null | cmp -s - "$instance/$_bp"
 }
-pushed_msg() { printf '%s' "bindings/$1.md must be committed and pushed before $1 can run (it differs from the upstream copy, is untracked, or the instance has no git upstream); re-run setup's tools step, then commit and push"; }
+pushed_msg() { printf '%s' "bindings/$1.md must be committed and pushed before $1 can run (it differs from the pushed copy, is untracked, or the instance has neither a git upstream nor an origin/HEAD); re-run setup's tools step, then commit and push"; }
 
 # Private scratch for the bind loop (policy snapshot, verified bindings copy);
 # removed on every exit path, including the early exit 2 blocks.
@@ -174,7 +184,7 @@ while IFS= read -r line || [ -n "$line" ]; do
   [ -f "$bfile" ] || bfile=-
   if [ -n "$pins" ]; then
     pushed "$cap" || pblock "$(pushed_msg "$cap")"
-    ugit cat-file blob "@{u}:bindings/$cap.md" > "$tmp/bindings" 2>/dev/null || pblock "$(pushed_msg "$cap")"
+    ugit cat-file blob "$pref:bindings/$cap.md" > "$tmp/bindings" 2>/dev/null || pblock "$(pushed_msg "$cap")"
     bfile="$tmp/bindings"
   fi
   printf '%s' "$input" | python3 "$engine" "$tmp/policy" "$bfile" "$name guard policy ($cap/$provider)" "$match"; rc=$?

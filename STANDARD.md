@@ -1197,12 +1197,16 @@ shipped in the package, never `custom`; a valid `server_match`; a regular
 `owner_only_send`. An exempt capability's server then skips the deny list
 (`--exempt <server_match>`), and its own tool policy still decides the call.
 The call is also blocked unless `bindings/<capability>.md` is a regular
-file, not a symlink, whose bytes equal the upstream (`@{u}`) copy at
+file, not a symlink, whose bytes equal the pushed copy at
 `bindings/<capability>.md`, root-relative, so the instance must be the
-repository root: `bindings/<capability>.md must be committed and pushed
-before <capability> can run (it differs from the upstream copy, is
-untracked, or the instance has no git upstream); re-run setup's tools
-step, then commit and push`. The block is prefixed `Blocked by <agent>
+repository root. The pushed copy is the current branch's upstream
+(`@{u}`); on a branch with no upstream (a cloud routine clones the
+default branch, then works on a new branch) it is the remote's default
+branch, `refs/remotes/origin/HEAD`. Both are bytes that were actually
+pushed. Otherwise: `bindings/<capability>.md must be committed and pushed
+before <capability> can run (it differs from the pushed copy, is
+untracked, or the instance has neither a git upstream nor an
+origin/HEAD); re-run setup's tools step, then commit and push`. The block is prefixed `Blocked by <agent>
 agent guard policy:`.
 
 **Pinned values.** The same pushed-copy check, with the same message,
