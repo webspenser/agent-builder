@@ -220,6 +220,14 @@ run_guard "$N" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com
 G="$W/notify-noup"; mkdir -p "$G/bindings"; cp "$X/instance.yaml" "$G/"; cp "$X/bindings/owner_notify.md" "$G/bindings/"
 git -C "$G" init -q; git -C "$G" add .; git -C "$G" commit -q -m init
 run_guard "$G" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "committed, no upstream: blocked" "$PINMSG"
+# A cloud routine clones the default branch, then works on a new branch with no
+# upstream: the pushed copy is then the remote's default branch (origin/HEAD).
+C="$W/notify-cloud"; git clone -q "$W/notify-remote.git" "$C" 2>/dev/null; git -C "$C" checkout -q -b claude/run-1
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "no upstream, matches origin/HEAD: passes"
+echo 'recipient_email: lead@x.com' >> "$C/bindings/owner_notify.md"; git -C "$C" commit -q -am "widen"
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "no upstream, committed edit differs from origin/HEAD: blocked" "$PINMSG"
+git -C "$C" reset -q --hard origin/HEAD; git -C "$C" remote set-head origin -d
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no upstream and no origin/HEAD: blocked" "$PINMSG"
 rm "$X/bindings/owner_notify.md"; ln -s "$N/bindings/owner_notify.md" "$X/bindings/owner_notify.md"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "symlinked bindings file: blocked" "$PINMSG"
 rm "$X/bindings/owner_notify.md"; git -C "$X" checkout -q -- bindings/owner_notify.md
@@ -324,6 +332,10 @@ run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";          exp
 git -C "$S" reset -q --hard origin/HEAD 2>/dev/null || git -C "$S" reset -q --hard HEAD~1
 run_guard "$S" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";            expect 0 "restored: passes"
 run_guard "$S" "$(call mcp__claude_ai_Attio__list-records '{}')";             expect 0 "other servers are unaffected"
+SCL="$W/scrape-cloud"; git clone -q "$W/scrape-remote.git" "$SCL" 2>/dev/null; git -C "$SCL" checkout -q -b claude/run-1
+run_guard "$SCL" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";          expect 0 "pinned: no upstream, matches origin/HEAD: passes"
+printf '%s\n' 'max_places: 5000' > "$SCL/bindings/scraping.md"; git -C "$SCL" commit -q -am raise
+run_guard "$SCL" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";        expect 2 "pinned: no upstream, raised limit committed: blocked" "$SMSG"
 
 echo "-- pinned values: snapshots, symlinks, custom tools"
 cp "$ST/guard.yaml" "$W/apify-guard.good"

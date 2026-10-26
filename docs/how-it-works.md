@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 7.3. Agent Builder 7.3.0, sales-partner 8.1.0.
+Current: standard 7.3. Agent Builder 7.3.1, sales-partner 8.1.1.
 
 ## In plain words
 
