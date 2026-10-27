@@ -319,6 +319,13 @@ run check "$I";                                    expect 0 "check shows the rec
 ENV="$W/badenv"; instance "$ENV" good mail 'timezone: UTC' 'environment: env-01!' 'schedule_prospect: "Monday 07:00"' 'schedule_research: "daily 06:30"'
 run check "$ENV";                                  expect 1 "bad environment charset fails every entry" "schedules.yaml environment 'env-01!' is not env_<letters and digits>"
 expect 1 "bad environment: research fails too" "FAIL  demo-agent: research (badenv)"
+run check "$I";                                    expect 0 "no agent_version recorded: shown, passes" "agent_version: (none recorded in schedules.yaml)"
+AV="$W/agentver"; instance "$AV" good mail 'timezone: UTC' 'agent_version: 3.0.0' 'schedule_prospect: "Monday 07:00"'
+run check "$AV";                                   expect 0 "agent_version equal to agent.yaml: passes" "agent_version: 3.0.0"
+AO="$W/agentold"; instance "$AO" good mail 'timezone: UTC' 'agent_version: 2.9.0' 'schedule_prospect: "Monday 07:00"' 'schedule_research: "daily 06:30"'
+run check "$AO";                                   expect 1 "stale agent_version fails every entry" "schedules.yaml agent_version '2.9.0' is not this agent's version '3.0.0': change the version comment in the environment's setup script to '# demo-agent 3.0.0', then set agent_version: 3.0.0"
+expect 1 "stale agent_version: research fails too" "FAIL  demo-agent: research (agentold)"
+run check "$AO" --json;                            expect 1 "json carries agent_version" '"agent_version": "2.9.0"'
 EE="$W/emptyenv"; instance "$EE" good mail 'timezone: UTC' 'environment:' 'schedule_prospect: "Monday 07:00"'
 run check "$EE";                                   expect 1 "empty environment fails" "schedules.yaml environment '' is not env_<letters and digits>"
 NE="$W/noenv"; instance "$NE" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"' 'then_prospect: research'
