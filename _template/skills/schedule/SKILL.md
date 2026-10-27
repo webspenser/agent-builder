@@ -56,7 +56,14 @@ instance's GitHub repository as `owner/name`.
    line has an empty value), merged with any other agents'
    lines. Every time this agent is updated, change the version comment
    so the environment reinstalls it. Every routine for this agent uses
-   that environment.
+   that environment. When the user confirms the setup script's version
+   comment names this agent's version, set `agent_version: <version>`
+   in `schedules.yaml` (plugin mode only), then commit and push. In a
+   cloud run, the guard blocks every MCP call while the loaded agent is
+   any other version, and its message says which line to change. If the
+   checker reports `agent_version ... is not this agent's version`, the
+   agent was updated: have the user change the comment, then update
+   `agent_version`.
    In source mode (`mode: source` in `instance.yaml`) the instance
    already carries the agent and its guard as a repository-level hook
    (setup's tools step), so routine runs load both from the cloned

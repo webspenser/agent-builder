@@ -226,8 +226,24 @@ C="$W/notify-cloud"; git clone -q "$W/notify-remote.git" "$C" 2>/dev/null; git -
 run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "no upstream, matches origin/HEAD: passes"
 echo 'recipient_email: lead@x.com' >> "$C/bindings/owner_notify.md"; git -C "$C" commit -q -am "widen"
 run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "no upstream, committed edit differs from origin/HEAD: blocked" "$PINMSG"
-git -C "$C" reset -q --hard origin/HEAD; git -C "$C" remote set-head origin -d
-run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no upstream and no origin/HEAD: blocked" "$PINMSG"
+git -C "$C" reset -q --hard origin/HEAD
+# The routine's real clone sets no origin/HEAD; its default branch still
+# tracks the remote's (here: whatever the bare remote's HEAD names).
+DEF=$(git -C "$C" symbolic-ref --short refs/remotes/origin/HEAD); DEF=${DEF#origin/}
+git -C "$C" remote set-head origin -d
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "no origin/HEAD, default branch tracks its remote: passes"
+git -C "$C" checkout -q --detach
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 0 "detached HEAD, default branch tracks its remote: passes"
+git -C "$C" checkout -q claude/run-1
+echo 'recipient_email: lead@x.com' >> "$C/bindings/owner_notify.md"; git -C "$C" commit -q -am "widen"
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["lead@x.com"]}')";      expect 2 "no origin/HEAD, committed edit differs from the tracked copy: blocked" "$PINMSG"
+git -C "$C" reset -q --hard HEAD~1
+git -C "$C" update-ref refs/remotes/origin/other HEAD; git -C "$C" branch -q --track other origin/other
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "two branches track remote branches: blocked" "$PINMSG"
+git -C "$C" branch -q -D other "$DEF"
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no upstream, no origin/HEAD, no tracking branch: blocked" "$PINMSG"
+git -C "$C" branch -q --track local-copy claude/run-1
+run_guard "$C" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "a branch tracking a local branch does not count: blocked" "$PINMSG"
 rm "$X/bindings/owner_notify.md"; ln -s "$N/bindings/owner_notify.md" "$X/bindings/owner_notify.md"
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "symlinked bindings file: blocked" "$PINMSG"
 rm "$X/bindings/owner_notify.md"; git -C "$X" checkout -q -- bindings/owner_notify.md
@@ -309,6 +325,28 @@ printf '%s\n' 'covers: [no_external_send]' 'deny: ["*send*", "*publish*"]' > "$P
 run_guard "$X" "$(call mcp__claude_ai_Mailer__send-email '{"to":["owner@acme.com"]}')"; expect 2 "no exempt key: no exemption" "agent guard policy: send-email is denied"
 rm -rf "$PKG/capabilities/owner_notify"
 
+echo "-- cloud session: loaded version must match agent_version"
+cloud_guard() { # cloud_guard <project dir> <input> [CLAUDE_CODE_REMOTE value]
+  OUT=$(printf '%s' "$2" | CLAUDE_CODE_REMOTE="${3-true}" CLAUDE_PLUGIN_ROOT="$PKG" CLAUDE_PROJECT_DIR="$1" bash "$GUARD" 2>&1); RC=$?
+}
+V="$W/version"; mkdir -p "$V"; cp "$I/instance.yaml" "$V/"
+cloud_guard "$V" "$(call mcp__democrm__list-records)";                   expect 0 "no schedules.yaml: no version check"
+printf '%s\n' 'timezone: UTC' > "$V/schedules.yaml"
+cloud_guard "$V" "$(call mcp__democrm__list-records)";                   expect 0 "no agent_version: no version check"
+printf '%s\n' 'timezone: UTC' 'agent_version: "1.0.0"  # set by the schedule skill' > "$V/schedules.yaml"
+cloud_guard "$V" "$(call mcp__democrm__list-records)";                   expect 0 "agent_version equals the loaded version: passes"
+printf '%s\n' 'timezone: UTC' 'agent_version: 1.1.0' > "$V/schedules.yaml"
+VMSG="this cloud environment loaded demo-agent 1.0.0, but schedules.yaml expects 1.1.0"
+cloud_guard "$V" "$(call mcp__democrm__list-records)";                   expect 2 "stale environment: every MCP call blocked" "$VMSG"
+expect 2 "the block names the setup script line" "'# demo-agent 1.1.0'"
+cloud_guard "$V" "$(call mcp__someother__anything)";                     expect 2 "unbound servers blocked too" "$VMSG"
+cloud_guard "$V" "$(call Bash '{"command":"ls"}')";                     expect 0 "non-MCP tools unaffected"
+cloud_guard "$V" "$(call mcp__democrm__list-records)" "";                expect 0 "local session (no CLAUDE_CODE_REMOTE): no version check"
+cloud_guard "$V" "$(call mcp__democrm__list-records)" "false";           expect 0 "CLAUDE_CODE_REMOTE=false: no version check"
+cloud_guard "$O" "$(call mcp__democrm__delete-record)";                  expect 0 "another agent's instance: no version check"
+printf 'timezone: UTC\nagent_version: 9\033[2J.0\n' > "$V/schedules.yaml"
+cloud_guard "$V" "$(call mcp__democrm__list-records)";                   expect 2 "control characters stripped from the shown version" "expects 9[2J.0"
+
 echo "-- pinned values need the pushed copy (non-exempt capability)"
 ST="$PKG/capabilities/scraping/tools/apify"; mkdir -p "$ST"
 printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PKG/capabilities/scraping/contract.md"
@@ -336,6 +374,10 @@ SCL="$W/scrape-cloud"; git clone -q "$W/scrape-remote.git" "$SCL" 2>/dev/null; g
 run_guard "$SCL" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";          expect 0 "pinned: no upstream, matches origin/HEAD: passes"
 printf '%s\n' 'max_places: 5000' > "$SCL/bindings/scraping.md"; git -C "$SCL" commit -q -am raise
 run_guard "$SCL" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";        expect 2 "pinned: no upstream, raised limit committed: blocked" "$SMSG"
+git -C "$SCL" reset -q --hard HEAD~1; git -C "$SCL" remote set-head origin -d
+run_guard "$SCL" "$(call mcp__apify__run-maps '{"maxPlaces":60}')";          expect 0 "pinned: no origin/HEAD, default branch tracks its remote: passes"
+printf '%s\n' 'max_places: 5000' > "$SCL/bindings/scraping.md"; git -C "$SCL" commit -q -am raise
+run_guard "$SCL" "$(call mcp__apify__run-maps '{"maxPlaces":5000}')";        expect 2 "pinned: no origin/HEAD, raised limit committed: blocked" "$SMSG"
 
 echo "-- pinned values: snapshots, symlinks, custom tools"
 cp "$ST/guard.yaml" "$W/apify-guard.good"

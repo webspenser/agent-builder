@@ -6,7 +6,8 @@
 # tool policy then still enforces); then every bound tool whose server_match appears in the tool name gets its
 # guard policy (guard.yaml) enforced by hooks/guard_policy.py. A bound tool whose
 # policy pins values, and the exempted owner_only_send tool, also need their
-# bindings file to equal its pushed copy (git upstream, else origin/HEAD). Exit 2 blocks the
+# bindings file to equal its pushed copy (git upstream, else origin/HEAD,
+# else the one tracked remote branch). Exit 2 blocks the
 # call and shows stderr to the model; exit 0 hands it to the normal permission flow.
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
@@ -27,13 +28,20 @@ ablock() { printf 'Blocked by %s agent guard policy: %s\n' "$name" "$1" >&2; exi
 # version); blobs are read directly (no diff drivers or clean filters).
 ugit() { GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 git -C "$instance" -c core.fsmonitor=false -c protocol.allow=never "$@" </dev/null; }
 # pushed_ref: the ref holding the pushed copy, in $pref. The branch's
-# upstream (@{u}); on a branch with none (a cloud routine clones the default
-# branch, then works on a new branch), the remote's default branch
-# (refs/remotes/origin/HEAD). Both are bytes that were actually pushed.
+# upstream (@{u}); on a branch with none, or a detached HEAD (a cloud routine
+# clones the default branch, then works off it), the remote's default branch
+# (refs/remotes/origin/HEAD); with no origin/HEAD (the routine's clone sets
+# none), the upstream of the only local branch that tracks a remote branch.
+# Each is bytes that were actually pushed.
 pushed_ref() {
   pref='@{u}'
   ugit rev-parse --verify --quiet "$pref" >/dev/null 2>&1 && return 0
-  pref=$(ugit symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || return 1
+  if pref=$(ugit symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null); then
+    ugit rev-parse --verify --quiet "$pref" >/dev/null 2>&1
+    return
+  fi
+  pref=$(ugit for-each-ref --format='%(upstream)' refs/heads/ 2>/dev/null | grep '^refs/remotes/' | sort -u)
+  [ -n "$pref" ] && [ "$(printf '%s\n' "$pref" | grep -c .)" -eq 1 ] || return 1
   ugit rev-parse --verify --quiet "$pref" >/dev/null 2>&1
 }
 # pushed <cap>: the agent can write bindings/, so values a tool policy pins
@@ -49,7 +57,7 @@ pushed() {
   ugit cat-file -e "$pref:$_bp" >/dev/null 2>&1 || return 1
   ugit cat-file blob "$pref:$_bp" 2>/dev/null | cmp -s - "$instance/$_bp"
 }
-pushed_msg() { printf '%s' "bindings/$1.md must be committed and pushed before $1 can run (it differs from the pushed copy, is untracked, or the instance has neither a git upstream nor an origin/HEAD); re-run setup's tools step, then commit and push"; }
+pushed_msg() { printf '%s' "bindings/$1.md must be committed and pushed before $1 can run (it differs from the pushed copy, is untracked, or the instance has no git upstream, no origin/HEAD and no single branch tracking a remote branch); re-run setup's tools step, then commit and push"; }
 
 # Private scratch for the bind loop (policy snapshot, verified bindings copy);
 # removed on every exit path, including the early exit 2 blocks.
@@ -88,6 +96,19 @@ names=$(printf '%s' "$input" | tr '\n' ' ' \
 tool=$names
 case "$tool" in mcp__?*__?*) ;; *) exit 0 ;; esac
 [ -z "${unnamed:-}" ] || block "instance.yaml has bindings but no agent: line; fix it or re-run setup"
+
+# A cloud session loads the agent the environment's setup script installed,
+# reinstalled only when that script changes. When schedules.yaml records the
+# version the script names (agent_version), any other loaded version stops
+# every MCP call, so a stale or drifted environment never runs.
+if [ "${CLAUDE_CODE_REMOTE:-}" = true ] && [ -f "$instance/schedules.yaml" ]; then
+  want=$(yaml_get "$instance/schedules.yaml" agent_version)
+  have=$(yaml_get "$root/agent.yaml" version)
+  if [ -n "$want" ] && [ "$want" != "$have" ]; then
+    want=$(printf '%s' "$want" | tr -d '\000-\037' | cut -c1-40)
+    block "this cloud environment loaded $name $have, but schedules.yaml expects $want. If $want is newer, change the version comment in the environment's setup script (claude.ai/code, environment settings) to '# $name $want' so it reinstalls, then run again. If $have is newer, update $name where you run the schedule skill and re-run it"
+  fi
+fi
 rest_lc=$(lower "${tool#mcp__}")  # server and tool may both contain __: match on the whole
 
 # The agent guard policy (package-root guard.yaml) applies to every MCP call,

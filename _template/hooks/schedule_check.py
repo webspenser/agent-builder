@@ -348,15 +348,23 @@ def expected(instance, repo=None):
     env_problem = None
     if env is not None and not ENVIRONMENT.fullmatch(env):
         env_problem = f"schedules.yaml environment {env!r} is not env_<letters and digits>"
+    version = meta.get("version", "")
+    recorded = sched.get("agent_version")
+    version_problem = None
+    if recorded is not None and recorded != version:
+        version_problem = (f"schedules.yaml agent_version {recorded!r} is not this agent's version {version!r}: "
+                           f"change the version comment in the environment's setup script to "
+                           f"'# {name} {version}', then set agent_version: {version}")
     orphans = [{"activity": k[len("routine_"):], "routine_id": v} for k, v in sched.items()
                if k.startswith("routine_") and f"schedule_{k[len('routine_'):]}" not in sched]
     repo_name = default_repo(instance, repo).split("/")[-1]
     result = {
-        "agent": name, "version": meta.get("version", ""), "timezone": tzname,
-        "env_setup": [f"# {name} {meta.get('version', '')}",
+        "agent": name, "version": version, "timezone": tzname,
+        "env_setup": [f"# {name} {version}",
                       f"claude plugin marketplace add {meta.get('catalog_repo', '')}",
                       f"claude plugin install {name}@{meta.get('catalog', '')}"],
         "environment": env,  # None when schedules.yaml records none
+        "agent_version": recorded,  # None when schedules.yaml records none
         "entries": [], "orphans": orphans,
     }
     for key in sched:
@@ -371,6 +379,8 @@ def expected(instance, repo=None):
                 entry["problems"].append(f"{k} appears more than once")
         if env_problem:
             entry["problems"].append(env_problem)
+        if version_problem:
+            entry["problems"].append(version_problem)
         if bad_line is not None:
             entry["problems"].append(f"instance.yaml has a binding line the guard cannot read ({bad_line})")
         if not meta.get("catalog") or not meta.get("catalog_repo"):
@@ -641,6 +651,7 @@ def _text(result):
            "Cloud environment setup script (merge with other agents' lines; keep the version comment current):"]
     out += ["    " + line for line in result["env_setup"]]
     out.append(f"environment: {'(none recorded in schedules.yaml)' if result['environment'] is None else result['environment']}")
+    out.append(f"agent_version: {'(none recorded in schedules.yaml)' if result['agent_version'] is None else result['agent_version']}")
     for o in result["orphans"]:
         out += ["", f"FAIL  {_orphan(o)}"]
     for e in result["entries"]:

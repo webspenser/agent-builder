@@ -1200,14 +1200,31 @@ The call is also blocked unless `bindings/<capability>.md` is a regular
 file, not a symlink, whose bytes equal the pushed copy at
 `bindings/<capability>.md`, root-relative, so the instance must be the
 repository root. The pushed copy is the current branch's upstream
-(`@{u}`); on a branch with no upstream (a cloud routine clones the
-default branch, then works on a new branch) it is the remote's default
-branch, `refs/remotes/origin/HEAD`. Both are bytes that were actually
-pushed. Otherwise: `bindings/<capability>.md must be committed and pushed
-before <capability> can run (it differs from the pushed copy, is
-untracked, or the instance has neither a git upstream nor an
-origin/HEAD); re-run setup's tools step, then commit and push`. The block is prefixed `Blocked by <agent>
+(`@{u}`). On a branch with no upstream, or a detached HEAD (a cloud
+routine clones the default branch, then works off it), it is the
+remote's default branch, `refs/remotes/origin/HEAD`. When there is no
+`origin/HEAD` (a routine's clone sets none), it is the upstream of the
+only local branch whose upstream is a remote-tracking branch
+(`refs/remotes/...`); none, or more than one, blocks. Each is bytes that
+were actually pushed. Otherwise: `bindings/<capability>.md must be
+committed and pushed before <capability> can run (it differs from the
+pushed copy, is untracked, or the instance has no git upstream, no
+origin/HEAD and no single branch tracking a remote branch); re-run
+setup's tools step, then commit and push`. The block is prefixed `Blocked by <agent>
 agent guard policy:`.
+
+**Cloud version check.** In a cloud session (`CLAUDE_CODE_REMOTE` is
+`true`), before any policy runs, when the instance's `schedules.yaml`
+records an `agent_version` and it is not the loaded `agent.yaml`
+`version`, every MCP call is blocked: `Blocked by <agent> guard: this
+cloud environment loaded <agent> <loaded>, but schedules.yaml expects
+<recorded>. ...`. The message tells the user to change the version
+comment in the environment's setup script when the recorded version is
+the newer one, and to update the agent and re-run the schedule skill
+when the loaded one is. The environment reinstalls the agent only when
+that script changes or its cache expires, so without this check a run
+can use a stale agent, or a newer one the instance was not set up for.
+Local sessions and instances with no `agent_version` are not checked.
 
 **Pinned values.** The same pushed-copy check, with the same message,
 also runs for every bound tool whose policy pins values (a `recipients`
@@ -1342,6 +1359,7 @@ The instance holds `schedules.yaml` at its root, as flat keys:
 ```yaml
 timezone: America/New_York
 environment: env_01...
+agent_version: 5.0.0
 schedule_prospect: "Monday 07:00"
 then_prospect: prepare
 schedule_digest: "Monday 08:00"
@@ -1352,6 +1370,12 @@ routine_digest: trig_01...
 - `environment` (optional): the id of the cloud environment the
   agent's routines use, `env_` then letters and digits. The schedule
   skill writes it after the user confirms the id `verify` reports.
+- `agent_version` (optional, plugin mode): the agent version the
+  environment's setup script names in its version comment. The schedule
+  skill writes it after the user confirms the comment. `check` fails
+  every entry when it is not the agent's `version`, and in a cloud
+  session the guard blocks every MCP call when the loaded agent is not
+  this version (Guard hook, Cloud version check).
 - `schedule_<activity>`: a weekday or `daily`, then a 24-hour time, in
   that timezone.
 - `then_<activity>` (optional): activities to run after it in the same
@@ -1442,6 +1466,8 @@ The gate also fails an entry when:
 - an `activity_`, `schedule_`, or `then_` key is repeated;
 - `schedules.yaml` has an `environment` that is not `env_` then letters
   and digits;
+- `schedules.yaml` has an `agent_version` that is not the agent's
+  `version`;
 - the time is not `<weekday|daily> HH:MM`;
 - `accept_instruction_only` lists an invariant of one of the entry's
   capabilities that its contract does not mark `(acceptable)`.
