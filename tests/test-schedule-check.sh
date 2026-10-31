@@ -8,7 +8,7 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 PKG="$W/pkg"; mkdir -p "$PKG/hooks"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PKG/hooks/"
 SC="$PKG/hooks/schedule_check.py"
-printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.3"' \
+printf '%s\n' 'name: demo-agent' 'version: 3.0.0' 'description: Demo' 'standard: "7.4"' \
   'catalog: webspenser' 'catalog_repo: webspenser/agent-library' 'capabilities: crm, email_drafts' \
   'activity_research: none' 'activity_prospect: crm' 'activity_digest: crm, email_drafts' > "$PKG/agent.yaml"
 mkdir -p "$PKG/capabilities/crm/tools/good" "$PKG/capabilities/crm/tools/half" "$PKG/capabilities/crm/tools/bare" "$PKG/capabilities/email_drafts/tools/mail"
@@ -412,7 +412,7 @@ echo "-- ledger bindings"
 LP="$W/lpkg"; mkdir -p "$LP/hooks" "$LP/capabilities/ledger"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$LP/hooks/"
 cp -R _ledger/contract.md _ledger/tables.md _ledger/tools "$LP/capabilities/ledger/"
-printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.3"' 'catalog: webspenser' \
+printf '%s\n' 'name: led-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.4"' 'catalog: webspenser' \
   'catalog_repo: webspenser/agent-library' 'capabilities: ledger' 'activity_log: ledger' > "$LP/agent.yaml"
 LSC="$LP/hooks/schedule_check.py"
 lbind() { # lbind <instance> [schema] [drop-field]: bind ledger to airtable with every writable field
@@ -442,7 +442,7 @@ expect 1 "no bindings file fails" "bindings/ledger.md has no base_id line"
 echo "-- pinned_inputs bindings"
 PP="$W/ppkg"; mkdir -p "$PP/hooks" "$PP/capabilities/scraping/tools/apify"
 cp _template/hooks/schedule_check.py _template/hooks/guard_policy.py _template/hooks/tool_check.py "$PP/hooks/"
-printf '%s\n' 'name: pin-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.3"' 'catalog: webspenser' \
+printf '%s\n' 'name: pin-agent' 'version: 1.0.0' 'description: Demo' 'standard: "7.4"' 'catalog: webspenser' \
   'catalog_repo: webspenser/agent-library' 'capabilities: scraping' 'activity_scrape: scraping' > "$PP/agent.yaml"
 printf '%s\n' '# Scraping' '' '## Operations' '' '| `find_businesses` | x |' '' '## Invariants' '' '- `pinned_inputs` — x' > "$PP/capabilities/scraping/contract.md"
 printf '%s\n' 'capability: scraping' 'provider: apify' 'server_match: apify' > "$PP/capabilities/scraping/tools/apify/identity.yaml"
@@ -471,5 +471,42 @@ expect 1 "a non-numeric limits bound fails" "bindings/scraping.md max_sites must
 printf '%s\n' 'max_places: 60' 'max_sites: 2' > "$PI2/bindings/scraping.md"
 OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
 expect 0 "both bound lines present passes" "PASS  pin-agent: scrape (pin)"
+
+echo "-- optional capabilities"
+mkdir -p "$W/pkg4/hooks"; cp "$PKG/hooks/"*.py "$W/pkg4/hooks/"; cp -R "$PKG/capabilities" "$PKG/guard.yaml" "$W/pkg4/"
+{ cat "$A3"; echo 'optional_prospect: email_drafts'; } > "$W/pkg4/agent.yaml"
+OT="$W/pkg4/capabilities/email_drafts/tools/open"; mkdir -p "$OT"
+printf '%s\n' 'capability: email_drafts' 'provider: open' 'server_match: openmail' > "$OT/identity.yaml"
+printf '%s\n' 'covers: []' 'deny: ["*delete*"]' > "$OT/guard.yaml"
+printf '%s\n' '`draft`' '## Probe' 'x' > "$OT/usage.md"
+run4() { OUT=$(python3 -B "$W/pkg4/hooks/schedule_check.py" "$@" 2>&1); RC=$?; }
+OU="$W/optunbound"; instance "$OU" good - 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run4 check "$OU";  expect 0 "unbound optional: passes" "PASS  demo-agent: prospect (optunbound)"
+expect 0 "unbound optional: shown" "optional, not bound: email_drafts"
+expect 0 "unbound optional: no connector listed" 'connectors: good (matches "goodcrm")'
+run4 check "$OU" --json
+printf '%s' "$OUT" | python3 -c 'import json,sys; e=json.load(sys.stdin)["entries"][0]; assert e["optional"]==["email_drafts"] and e["optional_unbound"]==["email_drafts"] and e["connectors"]==["good"]' \
+  && _report ok "unbound optional: json" || _report no "unbound optional: json: $OUT"
+OB="$W/optbound"; instance "$OB" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run4 check "$OB";  expect 0 "bound optional: listed as a connector" 'connectors: good (matches "goodcrm"), mail (matches "mail")'
+if printf '%s' "$OUT" | grep -qF 'optional, not bound'; then _report no "bound optional: not reported unbound"; else _report ok "bound optional: not reported unbound"; fi
+OX="$W/optuncovered"; instance "$OX" good open 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run4 check "$OX";  expect 1 "bound optional, uncovered invariant" "email_drafts: the open tool is not valid"
+OC="$W/optchain"; instance "$OC" good - 'timezone: UTC' 'schedule_research: "daily 06:30"' 'then_research: prospect'
+run4 check "$OC";  expect 0 "optional via then_" "optional, not bound: email_drafts"
+P1='Scheduled run of `prospect` (unattended). Follow this agent'"'"'s instructions for each activity, in order. Do not ask questions and do not edit or commit files in this repository. If something needs the operator, stop and say exactly what.'
+python3 -B - "$W/r4.json" "$P1" <<'PY'
+import json, sys
+f, prompt = sys.argv[1:3]
+json.dump({"enabled": True, "next_run_at": "2026-10-05T07:00:00Z",
+           "job_config": {"ccr": {"environment_id": "env_01Abc",
+                                  "session_context": {"sources": [{"git_repository": {"url": "https://github.com/acme/optunbound"}}]},
+                                  "events": [{"data": {"message": {"role": "user", "content": prompt}}}]}},
+           "mcp_connections": [{"name": "GoodCRM"}, {"name": "Mail"}]}, open(f, "w"))
+PY
+printf '%s\n' 'environment: env_01Abc' >> "$OU/schedules.yaml"
+run4 verify "$OU" prospect "$W/r4.json" --repo acme/optunbound;  expect 1 "unbound optional, extra connector" 'connector "Mail" matches no bound server_match'
+{ cat "$A3"; echo 'optional_prospect: email_drafts'; echo 'optional_prospect: email_drafts'; } > "$W/pkg4/agent.yaml"
+run4 check "$OU";  expect 1 "repeated optional key" "agent.yaml declares optional_prospect more than once"
 
 finish

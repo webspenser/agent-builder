@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.3. It is in active development: agents track
+The standard is 7.4. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.3"`.
+`agent.yaml`, and the validator requires `standard: "7.4"`.
 
 ## Directory layout
 
@@ -232,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.3"                # the Agent Standard version followed
+standard: "7.4"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -1352,6 +1352,34 @@ stop conditions unattended. An activity whose capabilities are not all
 covered by guard policies is refused by the gate. An empty
 `activity_x:` fails validation; write `none`.
 
+An activity may also use capabilities only when they are bound, for a
+system some businesses have and others do not. They go in a second flat
+key, `optional_<activity>`, next to the activity's own:
+
+```yaml
+activity_prepare: crm, scraping
+optional_prepare: web_search
+```
+
+`optional_<activity>` needs its `activity_<activity>`, lists names from
+`capabilities` (never `none`), and never names a capability the
+activity already requires. The gate treats an optional capability by
+whether the instance binds it:
+
+- **Not bound:** the entry passes as if the capability were not listed.
+  `check` prints it under the entry as `optional, not bound: <names>`.
+  No connector is expected for it, and `verify` still refuses a
+  connector that matches no bound `server_match`, so its connector
+  attached without the binding stays refused: nothing would guard it.
+- **Bound:** exactly the rules for a required capability: every
+  contract invariant covered by its tool's `guard.yaml`, and its
+  connector attached to the routine.
+
+The guard needs nothing more: it applies a tool's policy only when the
+capability is bound. A skill that uses an optional capability checks
+`instance.yaml` for its `bind_` line first, and skips the step (not an
+error) when there is none.
+
 ### schedules.yaml
 
 The instance holds `schedules.yaml` at its root, as flat keys:
@@ -1385,8 +1413,8 @@ routine_digest: trig_01...
 
 Every activity named must be an `activity_*` in `agent.yaml`. The
 interview writes `timezone`, `schedule_*`, and `then_*`; nothing else in
-the instance declares schedules. A repeated `schedule_`, `then_`, or
-`activity_` key is an error.
+the instance declares schedules. A repeated `schedule_`, `then_`, `activity_` or
+`optional_` key is an error.
 
 ### Scheduled runs
 
@@ -1428,9 +1456,10 @@ lines for it.
 ### The unattended gate
 
 An entry may be scheduled only if it passes the gate. For the entry's
-activity and its `then` activities, every capability used must be
+activity and its `then` activities, every required capability, and every optional one that is bound, must be
 bound, and every invariant of each capability's contract must be in the
-bound tool's `guard.yaml` `covers`. These further rules apply to
+bound tool's `guard.yaml` `covers` (an unbound optional capability is
+skipped: see Activities and schedules). These further rules apply to
 the send and pinning invariants:
 
 - A `no_external_send` invariant must also be in the agent guard policy's
@@ -1463,7 +1492,7 @@ The gate also fails an entry when:
   guard cannot read;
 - an `identity.yaml` it uses holds control characters;
 - a bound tool fails `tool_check.py`;
-- an `activity_`, `schedule_`, or `then_` key is repeated;
+- an `activity_`, `optional_`, `schedule_`, or `then_` key is repeated;
 - `schedules.yaml` has an `environment` that is not `env_` then letters
   and digits;
 - `schedules.yaml` has an `agent_version` that is not the agent's
@@ -1543,7 +1572,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.3"`.
+- `agent.yaml` exists, and its `standard` is `"7.4"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly
@@ -1605,6 +1634,13 @@ The validator checks:
 - Each `activity_<name>` key in `agent.yaml` has a kebab-case name and
   is declared once; its value is `none` or names only listed
   capabilities, and does not mix `none` with capabilities.
+- Each `optional_<name>` key is declared once and needs its
+  `activity_<name>` (`agent.yaml: optional_<name> has no
+  activity_<name>`); it lists at least one capability (`lists no
+  capabilities`), never `none` (`may not list none`), only listed
+  capabilities (`uses <cap>, which is not in capabilities`), and none
+  the activity requires (`lists <cap>, which activity_<name> already
+  requires`).
 - An agent with any `activity_*` key ships `skills/schedule/SKILL.md`.
 
 ### CI

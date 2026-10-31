@@ -338,6 +338,7 @@ def expected(instance, repo=None):
     dups = []
     sched = flat_yaml(instance / "schedules.yaml", dups, guard=False)
     activities = {k[len("activity_"):]: listed(v) for k, v in meta.items() if k.startswith("activity_")}
+    optionals = {k[len("optional_"):]: listed(v) for k, v in meta.items() if k.startswith("optional_")}
     tzname = sched.get("timezone", "")
     try:
         tz = zoneinfo.ZoneInfo(tzname)
@@ -391,6 +392,8 @@ def expected(instance, repo=None):
                 entry["problems"].append(f"{a} is not an activity of {name} (agent.yaml activity_*)")
             elif f"activity_{a}" in agent_dups:
                 entry["problems"].append(f"agent.yaml declares activity_{a} more than once")
+            if f"optional_{a}" in agent_dups:
+                entry["problems"].append(f"agent.yaml declares optional_{a} more than once")
         if not WHEN.match(entry["schedule"].strip()):
             entry["problems"].append(f"schedule {entry['schedule']!r} is not '<weekday|daily> HH:MM'")
         caps = []
@@ -398,13 +401,25 @@ def expected(instance, repo=None):
             for cap in activities.get(a, []):
                 if cap != "none" and cap not in caps:
                     caps.append(cap)
+        required = list(caps)
+        # An optional capability is used only when bound; required by any activity in the chain wins.
+        optional = []
+        for a in chain:
+            for cap in optionals.get(a, []):
+                if cap != "none" and cap not in required and cap not in optional:
+                    optional.append(cap)
+        caps = required + optional
         entry["capabilities"] = caps
+        entry["optional"], entry["optional_unbound"] = optional, []
         connectors, matches, binds = [], [], []
         for cap in caps:
             if not CAP.fullmatch(cap):
                 entry["problems"].append(f"capability name {cap!r} in agent.yaml is not [a-z0-9_]+")
                 continue
             providers = bound.get(cap, [])
+            if not providers and cap in optional:
+                entry["optional_unbound"].append(cap)
+                continue
             if not providers:
                 entry["problems"].append(f"{cap} is not bound (run setup's tools step or the add-tool skill)")
                 continue
@@ -667,6 +682,8 @@ def _text(result):
                 out.append(f"  ACCEPTED (instruction-only): {a}")
             if e["routine_id"]:
                 out.append(f"  recorded routine: {e['routine_id']}")
+        if e.get("optional_unbound"):
+            out.append(f"  optional, not bound: {', '.join(e['optional_unbound'])}")
     return "\n".join(out)
 
 

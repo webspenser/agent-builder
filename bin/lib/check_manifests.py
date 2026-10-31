@@ -21,7 +21,7 @@ sys.dont_write_bytecode = True
 REQUIRED_KEYS = ("name", "version", "description", "standard")
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-CURRENT_STANDARD = "7.3"
+CURRENT_STANDARD = "7.4"
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 AGENT_MD_INLINE_MAX = 9000  # bytes; the entry hook inlines AGENT.md only up to this size
 SETUP_PLACEHOLDERS = ("<interview-skill>", "<context-files>")
@@ -327,9 +327,11 @@ def check_agent_policy(root, caps):
 
 
 def check_activities(root, meta, caps):
-    """activity_<name>: capabilities (or none); a schedule skill when any exist."""
+    """activity_<name>: capabilities (or none); optional_<name>: capabilities the
+    activity uses only when bound; a schedule skill when any activity exists."""
     fails = []
     acts = {k[len("activity_"):]: v for k, v in meta.items() if k.startswith("activity_")}
+    opts = {k[len("optional_"):]: v for k, v in meta.items() if k.startswith("optional_")}
     try:
         raw = read_text(root / "agent.yaml").splitlines()
     except ReadError:
@@ -339,7 +341,7 @@ def check_activities(root, meta, caps):
         if not line.strip() or line.lstrip().startswith("#") or line[0] in " \t" or ":" not in line:
             continue
         key = line.split(":", 1)[0].strip()
-        if not key.startswith("activity_"):
+        if not key.startswith(("activity_", "optional_")):
             continue
         if key in seen:
             fails.append(f"agent.yaml: {key} is declared more than once")
@@ -357,6 +359,21 @@ def check_activities(root, meta, caps):
         for cap in names:
             if cap != "none" and cap not in caps:
                 fails.append(f"agent.yaml: activity_{act} uses {cap}, which is not in capabilities")
+    for act, value in sorted(opts.items()):
+        if act not in acts:
+            fails.append(f"agent.yaml: optional_{act} has no activity_{act}")
+            continue
+        names = [c.strip() for c in value.split(",") if c.strip()]
+        required = [c.strip() for c in acts[act].split(",") if c.strip()]
+        if not names:
+            fails.append(f"agent.yaml: optional_{act} lists no capabilities")
+        for cap in names:
+            if cap == "none":
+                fails.append(f"agent.yaml: optional_{act} may not list none")
+            elif cap not in caps:
+                fails.append(f"agent.yaml: optional_{act} uses {cap}, which is not in capabilities")
+            elif cap in required:
+                fails.append(f"agent.yaml: optional_{act} lists {cap}, which activity_{act} already requires")
     if acts and not (root / "skills" / "schedule" / "SKILL.md").is_file():
         fails.append("missing skills/schedule/SKILL.md (agent.yaml declares activities)")
     return fails

@@ -24,7 +24,7 @@ for d in */; do  # _template/ is matched here
 done
 
 echo "== template standard"
-if ! grep -q '^standard: "7.3"' _template/agent.yaml; then echo "FAIL: _template is not 7.3"; STATUS=1; fi
+if ! grep -q '^standard: "7.4"' _template/agent.yaml; then echo "FAIL: _template is not 7.4"; STATUS=1; fi
 if ! grep -qF '**Tools.**' _template/skills/setup/SKILL.md; then echo "FAIL: setup has no tools step"; STATUS=1; fi
 if grep -qE 'permissions\.deny|host-deny|enforce_|standard: "1' _template/skills/setup/SKILL.md; then echo "FAIL: setup still describes removed mechanisms"; STATUS=1; fi
 if ! python3 _template/hooks/guard_policy.py --check _capability-template/tools/example-provider/guard.yaml; then echo "FAIL: skeleton guard.yaml does not parse"; STATUS=1; fi
@@ -51,6 +51,14 @@ for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'ser
   grep -qF -- "$want" _template/skills/add-tool/SKILL.md || { echo "FAIL: add-tool skill does not mention $want"; STATUS=1; }
 done
 grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }
+
+echo "== optional capability text"
+grep -qF 'leave it unbound' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not offer to leave a not-unattended-safe optional capability unbound"; STATUS=1; }
+grep -qF 'remove its `bind_` line' _template/skills/schedule/SKILL.md || { echo "FAIL: schedule skill does not offer unbinding a failing optional capability"; STATUS=1; }
+grep -qF 'optional_<activity>' docs/how-it-works.md || { echo "FAIL: how-it-works does not describe optional_<activity>"; STATUS=1; }
+grep -qF 'Web search and file reads are not capabilities' docs/how-it-works.md && { echo "FAIL: how-it-works still says web search is never a capability"; STATUS=1; }
+grep -qF 'every required capability, and every optional one that is bound' STANDARD.md || { echo "FAIL: the gate rule in STANDARD.md ignores optional capabilities"; STATUS=1; }
+grep -qF 'A repeated `schedule_`, `then_`, `activity_` or' STANDARD.md || { echo "FAIL: STANDARD.md does not list optional_ among repeated keys"; STATUS=1; }
 
 echo "== setup and guard text"
 for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup' 'read -rs <VAR> && export <VAR>'; do
