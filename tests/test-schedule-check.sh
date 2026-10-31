@@ -472,4 +472,41 @@ printf '%s\n' 'max_places: 60' 'max_sites: 2' > "$PI2/bindings/scraping.md"
 OUT=$(python3 -B "$PP/hooks/schedule_check.py" check "$PI2" --repo acme/pin 2>&1); RC=$?
 expect 0 "both bound lines present passes" "PASS  pin-agent: scrape (pin)"
 
+echo "-- optional capabilities"
+mkdir -p "$W/pkg4/hooks"; cp "$PKG/hooks/"*.py "$W/pkg4/hooks/"; cp -R "$PKG/capabilities" "$PKG/guard.yaml" "$W/pkg4/"
+{ cat "$A3"; echo 'optional_prospect: email_drafts'; } > "$W/pkg4/agent.yaml"
+OT="$W/pkg4/capabilities/email_drafts/tools/open"; mkdir -p "$OT"
+printf '%s\n' 'capability: email_drafts' 'provider: open' 'server_match: openmail' > "$OT/identity.yaml"
+printf '%s\n' 'covers: []' 'deny: ["*delete*"]' > "$OT/guard.yaml"
+printf '%s\n' '`draft`' '## Probe' 'x' > "$OT/usage.md"
+run4() { OUT=$(python3 -B "$W/pkg4/hooks/schedule_check.py" "$@" 2>&1); RC=$?; }
+OU="$W/optunbound"; instance "$OU" good - 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run4 check "$OU";  expect 0 "unbound optional: passes" "PASS  demo-agent: prospect (optunbound)"
+expect 0 "unbound optional: shown" "optional, not bound: email_drafts"
+expect 0 "unbound optional: no connector listed" 'connectors: good (matches "goodcrm")'
+run4 check "$OU" --json
+printf '%s' "$OUT" | python3 -c 'import json,sys; e=json.load(sys.stdin)["entries"][0]; assert e["optional"]==["email_drafts"] and e["optional_unbound"]==["email_drafts"] and e["connectors"]==["good"]' \
+  && _report ok "unbound optional: json" || _report no "unbound optional: json: $OUT"
+OB="$W/optbound"; instance "$OB" good mail 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run4 check "$OB";  expect 0 "bound optional: listed as a connector" 'connectors: good (matches "goodcrm"), mail (matches "mail")'
+if printf '%s' "$OUT" | grep -qF 'optional, not bound'; then _report no "bound optional: not reported unbound"; else _report ok "bound optional: not reported unbound"; fi
+OX="$W/optuncovered"; instance "$OX" good open 'timezone: UTC' 'schedule_prospect: "Monday 07:00"'
+run4 check "$OX";  expect 1 "bound optional, uncovered invariant" "email_drafts: the open tool is not valid"
+OC="$W/optchain"; instance "$OC" good - 'timezone: UTC' 'schedule_research: "daily 06:30"' 'then_research: prospect'
+run4 check "$OC";  expect 0 "optional via then_" "optional, not bound: email_drafts"
+P1='Scheduled run of `prospect` (unattended). Follow this agent'"'"'s instructions for each activity, in order. Do not ask questions and do not edit or commit files in this repository. If something needs the operator, stop and say exactly what.'
+python3 -B - "$W/r4.json" "$P1" <<'PY'
+import json, sys
+f, prompt = sys.argv[1:3]
+json.dump({"enabled": True, "next_run_at": "2026-10-05T07:00:00Z",
+           "job_config": {"ccr": {"environment_id": "env_01Abc",
+                                  "session_context": {"sources": [{"git_repository": {"url": "https://github.com/acme/optunbound"}}]},
+                                  "events": [{"data": {"message": {"role": "user", "content": prompt}}}]}},
+           "mcp_connections": [{"name": "GoodCRM"}, {"name": "Mail"}]}, open(f, "w"))
+PY
+printf '%s\n' 'environment: env_01Abc' >> "$OU/schedules.yaml"
+run4 verify "$OU" prospect "$W/r4.json" --repo acme/optunbound;  expect 1 "unbound optional, extra connector" 'connector "Mail" matches no bound server_match'
+{ cat "$A3"; echo 'optional_prospect: email_drafts'; echo 'optional_prospect: email_drafts'; } > "$W/pkg4/agent.yaml"
+run4 check "$OU";  expect 1 "repeated optional key" "agent.yaml declares optional_prospect more than once"
+
 finish
