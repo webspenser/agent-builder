@@ -137,7 +137,11 @@ skill, if this agent has one.
       whether the tool's guard policy covers it. A capability is
       **unattended-safe** when every invariant is covered. Scheduled
       runs may use only unattended-safe capabilities. An optional
-      capability left unbound does not stop any schedule.
+      capability left unbound does not stop any schedule; a bound one
+      follows the same rule as a required one. So when the tool chosen
+      for an optional capability is not unattended-safe, name the
+      activities whose schedules it would block and offer to
+      leave it unbound instead.
    8. If the agent declares activities (`activity_*` in `agent.yaml`)
       and the interview wrote `schedule_*` lines to `schedules.yaml`,
       offer to run the `schedule` skill next.

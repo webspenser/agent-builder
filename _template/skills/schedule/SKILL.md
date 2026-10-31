@@ -48,7 +48,10 @@ instance's GitHub repository as `owner/name`.
    For an unbound capability or an uncovered invariant, the fix is to
    bind a tool whose `guard.yaml` covers it (setup's tools step).
    An `optional, not bound:` line is information, not a problem: that
-   capability is simply not used until it is bound.
+   capability is simply not used until it is bound. When a failing
+   capability is optional for that entry (an `optional_<activity>` key
+   in `agent.yaml`), a second fix is to remove its `bind_` line from
+   `instance.yaml`; the activity then runs without it.
    Continue only with `PASS` entries. Never offer to schedule a failing
    entry.
 4. **Environment.** Show the "Cloud environment setup script" lines the

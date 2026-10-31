@@ -1413,8 +1413,8 @@ routine_digest: trig_01...
 
 Every activity named must be an `activity_*` in `agent.yaml`. The
 interview writes `timezone`, `schedule_*`, and `then_*`; nothing else in
-the instance declares schedules. A repeated `schedule_`, `then_`, or
-`activity_` key is an error.
+the instance declares schedules. A repeated `schedule_`, `then_`, `activity_` or
+`optional_` key is an error.
 
 ### Scheduled runs
 
@@ -1456,9 +1456,10 @@ lines for it.
 ### The unattended gate
 
 An entry may be scheduled only if it passes the gate. For the entry's
-activity and its `then` activities, every capability used must be
+activity and its `then` activities, every required capability, and every optional one that is bound, must be
 bound, and every invariant of each capability's contract must be in the
-bound tool's `guard.yaml` `covers`. These further rules apply to
+bound tool's `guard.yaml` `covers` (an unbound optional capability is
+skipped: see Activities and schedules). These further rules apply to
 the send and pinning invariants:
 
 - A `no_external_send` invariant must also be in the agent guard policy's
@@ -1491,7 +1492,7 @@ The gate also fails an entry when:
   guard cannot read;
 - an `identity.yaml` it uses holds control characters;
 - a bound tool fails `tool_check.py`;
-- an `activity_`, `schedule_`, or `then_` key is repeated;
+- an `activity_`, `optional_`, `schedule_`, or `then_` key is repeated;
 - `schedules.yaml` has an `environment` that is not `env_` then letters
   and digits;
 - `schedules.yaml` has an `agent_version` that is not the agent's

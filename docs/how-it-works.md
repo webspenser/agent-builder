@@ -83,7 +83,7 @@ The builder's version and the standard's version move together. The standard is 
 ## What an agent package holds
 
 ```
-agent.yaml                  name, version, description, standard, capabilities, catalog, activity_* lines
+agent.yaml                  name, version, description, standard, capabilities, catalog, activity_* and optional_* lines
 AGENT.md                    the agent's instructions (loaded at session start)
 skills/  subagents/  templates/  samples/  evals/
 hosts/                      host pointer files (CLAUDE.md, GEMINI.md, AGENTS.md)
@@ -221,6 +221,7 @@ flowchart TD
   AC --> A1["activity names kebab-case, not repeated"]
   AC --> A2["capabilities exist; none is not mixed with others"]
   AC --> A3["skills/schedule present;<br/>catalog and catalog_repo set"]
+  AC --> A4["optional_ needs its activity_, lists real capabilities,<br/>not none, none already required"]
 ```
 
 The validator checks the **package** only. It never sees a client's instance,
@@ -299,7 +300,7 @@ flowchart TD
   K["/sales-partner:schedule"] --> G1["Step 1: schedules.yaml has schedule_ lines"]
   G1 --> G2["Step 2: repository<br/>fetched; nothing uncommitted or unpushed;<br/>on the default branch;<br/>instance is the repo root"]
   G2 --> G3["Step 3: gate, schedule_check.py check"]
-  G3 --> C1{"per activity, and each then_ activity:<br/>every capability bound?"}
+  G3 --> C1{"per activity, and each then_ activity:<br/>every required capability bound,<br/>and every optional one bound or skipped?"}
   C1 -- no --> FAIL["FAIL: cannot schedule"]
   C1 -- yes --> C2{"bound tool's guard.yaml<br/>covers every invariant?"}
   C2 -- no --> FAIL
@@ -425,8 +426,16 @@ activity_digest: crm, owner_notify, ledger
   client's bindings.
 - `none` means the step touches no capability, e.g. a pure-research step.
 
-Web search and file reads are not capabilities, so activities don't list
-them.
+`optional_<activity>: <capabilities>` names capabilities the step uses
+only when the client has bound them, for a system some businesses have
+and others don't. sales-partner 8.2.0 declares `optional_prepare:
+web_search`: a client with the Exa connector gets decision-maker
+searches in its scheduled research runs, and one without it runs exactly
+as before. Unbound, the gate skips it; bound, it follows the same rules
+as a required capability.
+
+The host's built-in web search and file reads are not capabilities, so
+activities don't list them.
 
 ## Field names and IDs, in detail
 

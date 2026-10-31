@@ -52,6 +52,14 @@ for want in 'custom-tools/<cap>/' 'capabilities/<cap>/tools/<tool>/' 'stop' 'ser
 done
 grep -qF 'add-tool' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not hand off to add-tool"; STATUS=1; }
 
+echo "== optional capability text"
+grep -qF 'leave it unbound' _template/skills/setup/SKILL.md || { echo "FAIL: setup does not offer to leave a not-unattended-safe optional capability unbound"; STATUS=1; }
+grep -qF 'remove its `bind_` line' _template/skills/schedule/SKILL.md || { echo "FAIL: schedule skill does not offer unbinding a failing optional capability"; STATUS=1; }
+grep -qF 'optional_<activity>' docs/how-it-works.md || { echo "FAIL: how-it-works does not describe optional_<activity>"; STATUS=1; }
+grep -qF 'Web search and file reads are not capabilities' docs/how-it-works.md && { echo "FAIL: how-it-works still says web search is never a capability"; STATUS=1; }
+grep -qF 'every required capability, and every optional one that is bound' STANDARD.md || { echo "FAIL: the gate rule in STANDARD.md ignores optional capabilities"; STATUS=1; }
+grep -qF 'A repeated `schedule_`, `then_`, `activity_` or' STANDARD.md || { echo "FAIL: STANDARD.md does not list optional_ among repeated keys"; STATUS=1; }
+
 echo "== setup and guard text"
 for want in 'Create them yourself' 'Use an API key' 'your own terminal' '## Setup' 'read -rs <VAR> && export <VAR>'; do
   grep -qF -- "$want" _template/skills/setup/SKILL.md || { echo "FAIL: setup does not say: $want"; STATUS=1; }
