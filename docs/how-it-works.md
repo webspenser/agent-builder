@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 7.3. Agent Builder 7.3.2, sales-partner 8.1.2.
+Current: standard 7.4. Agent Builder 7.4.0, sales-partner 8.2.0.
 
 ## In plain words
 
@@ -207,7 +207,7 @@ different moment.
 flowchart TD
   S["Push or pull request<br/>in an agent repo"] --> V["validate@main<br/>bin/validate-agent.sh"]
   V --> ST["Structure<br/>AGENT.md headings, install.sh, evals/,<br/>hosts/ has CLAUDE.md, GEMINI.md, AGENTS.md,<br/>skill and subagent format"]
-  V --> MF["Manifests<br/>agent.yaml name, version, standard 7.3<br/>four host manifests agree"]
+  V --> MF["Manifests<br/>agent.yaml name, version, standard 7.4<br/>four host manifests agree"]
   V --> RT["Runtime<br/>SessionStart hook wired, setup skill,<br/>catalog keys"]
   V --> TL["Tools"]
   V --> AC["Activities"]

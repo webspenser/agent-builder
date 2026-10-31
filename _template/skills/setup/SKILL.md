@@ -69,7 +69,12 @@ skill, if this agent has one.
    `schedule_*` lines) when the agent declares activities.
 9. **Tools.** Skip if `agent.yaml` lists no `capabilities`. For each
    capability listed there:
-   1. List the shipped tools (`capabilities/<capability>/tools/`
+   1. If the capability appears only in `optional_*` keys of
+      `agent.yaml` (an activity uses it when bound), first ask whether
+      the business uses such a system at all. On no, bind nothing for
+      it and continue with the next capability: every activity still
+      runs without it. On yes, go on.
+      List the shipped tools (`capabilities/<capability>/tools/`
       in the package) and ask which system the user uses. If none
       fits, run the `add-tool` skill for this capability. In plugin mode
       it binds the tool itself; continue with the next capability. In
@@ -131,7 +136,8 @@ skill, if this agent has one.
    7. Tell the user, for each capability, each contract invariant and
       whether the tool's guard policy covers it. A capability is
       **unattended-safe** when every invariant is covered. Scheduled
-      runs may use only unattended-safe capabilities.
+      runs may use only unattended-safe capabilities. An optional
+      capability left unbound does not stop any schedule.
    8. If the agent declares activities (`activity_*` in `agent.yaml`)
       and the interview wrote `schedule_*` lines to `schedules.yaml`,
       offer to run the `schedule` skill next.
