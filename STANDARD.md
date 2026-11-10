@@ -11,10 +11,10 @@ bug.
 
 ## Development phase
 
-The standard is 7.4. It is in active development: agents track
+The standard is 7.5. It is in active development: agents track
 agent-builder's main branch, and version tags come with the first
 official release. An agent declares the standard it follows in
-`agent.yaml`, and the validator requires `standard: "7.4"`.
+`agent.yaml`, and the validator requires `standard: "7.5"`.
 
 ## Directory layout
 
@@ -232,7 +232,7 @@ Every agent has `agent.yaml` at its root:
 name: sales-partner            # kebab-case; the plugin / extension name
 version: 1.3.0                 # MAJOR.MINOR.PATCH — the agent's own version
 description: One sentence, what the agent does
-standard: "7.4"                # the Agent Standard version followed
+standard: "7.5"                # the Agent Standard version followed
 ```
 
 All four keys are required, one `key: value` per line; quotes and
@@ -604,12 +604,50 @@ limits:
     kind: max
 ```
 
-An allowlist (`only_keys`) is the recommended way to restrict arguments:
-a deny list (`refuse_args`) only stops the keys it names, so any other
+An allowlist (`only_keys`) is the recommended way to restrict arguments,
+except under the retrieval profile below: a deny list (`refuse_args`) only stops the keys it names, so any other
 key the vendor accepts (a `requestsFromUrl` that loads a whole URL list,
 `headers`, `userData`) passes. Use `refuse_args` for a value that must
 never appear in an argument the tool otherwise takes. A cap that must
 not be skipped by leaving the argument out takes `required: true`.
+
+### Retrieval profile
+
+A capability whose contract claims `no_external_send`, and whose tools
+only read (a scraper: it fetches public pages or listings and returns
+data), may use the retrieval profile instead of a key allowlist. It
+trades a little strictness for resilience: a vendor that adds an
+optional input no longer breaks every call. Its rules:
+
+- Tools are allowed by name (`allow`), and the provider's generic
+  run-anything tools (run any actor, call any API, webhooks, schedules)
+  are denied (`deny`) or left outside `allow`.
+- One shared `refuse_args` list names the code and request-control keys
+  no research call needs (page functions, navigation hooks, headers,
+  cookies, proxies, webhooks, `requestsFromUrl` and the request fields
+  nested in a start URL).
+- A key that widens one tool's scope or cost, but that another tool in
+  the same policy needs, is refused on that tool alone with a `fixed`
+  entry whose `value` is `null` and that has no `required`: the call
+  passes when the key is absent or null, and is blocked with
+  `must send <key> = null` otherwise.
+- Every size key the tool's probe found (a result count, a page count,
+  a list length) is pinned (`recipients`) or capped (`limits` with
+  `required: true`), so leaving it out never falls back to a vendor
+  default.
+- Every argument that takes a URL has a `urls` rule. A tool that fetches
+  arbitrary public pages takes `https` on public hosts with `query` and
+  `fragment` left at `forbid`.
+
+A retrieval profile does not satisfy pinned_inputs by key allowlist; it satisfies it by capping every size key its probe found.
+A size key the probe did not find, or a cap key sent again under another
+spelling beside the real one, is not checked: that is the profile's
+documented residual, bounded by the agent sending only the inputs its
+`usage.md` names and by the provider's own account usage limit, which
+setup asks the operator to set. Under `no_external_send`, data riding
+in a fetched URL's path or hostname is the same documented residual as
+the hostname note above. `tool_check`'s rule is unchanged: every allowed
+tool is pinned, or named as a read in `usage.md` `## Probe`.
 
 ### Grammar
 
@@ -1572,7 +1610,7 @@ only thing that catches it before a host does.
 
 The validator checks:
 
-- `agent.yaml` exists, and its `standard` is `"7.4"`.
+- `agent.yaml` exists, and its `standard` is `"7.5"`.
 - `hooks/hooks.json` has a `SessionStart` command hook running
   `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"` and a `PreToolUse`
   entry with matcher `mcp__.*` whose command is exactly

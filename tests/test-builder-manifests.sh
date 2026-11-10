@@ -15,7 +15,7 @@ c = json.load(open(".claude-plugin/plugin.json"))
 m = json.load(open(".claude-plugin/marketplace.json"))
 g = json.load(open("gemini-extension.json"))
 x = json.load(open(".codex-plugin/plugin.json"))
-ok = (c["name"] == "agent-builder" and c["version"] == "7.4.0"
+ok = (c["name"] == "agent-builder" and c["version"] == "7.5.0"
       and all(d.get(k) == c.get(k) for d in (g, x) for k in ("name", "version", "description"))
       and m["name"] == "agent-builder" and m["owner"]["name"]
       and len(m["plugins"]) == 1 and m["plugins"][0]["name"] == "agent-builder" and m["plugins"][0]["source"] == "./"
@@ -31,6 +31,8 @@ for s in skills/*/SKILL.md; do
     && [ -z "$(echo "$fm" | grep -vE '^(name|description):' | grep -vE '^[[:space:]]*$')" ] \
     && _report ok "$s frontmatter" || _report no "$s frontmatter"
 done
+
+if grep -q '^### Retrieval profile$' STANDARD.md && grep -qF 'A retrieval profile does not satisfy pinned_inputs by key allowlist; it satisfies it by capping every size key its probe found.' STANDARD.md; then _report ok "STANDARD defines the retrieval profile"; else _report no "STANDARD lacks the retrieval profile"; fi
 
 if grep -q 'Apache License' LICENSE 2>/dev/null; then _report ok "LICENSE is Apache-2.0"; else _report no "LICENSE not Apache-2.0"; fi
 
