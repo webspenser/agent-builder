@@ -52,6 +52,10 @@ except Exception:  # missing, unreadable or broken: never a traceback
     sys.exit(2)
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+# The cloud scheduler starts each routine a fixed few minutes after its cron
+# time (about 3 to 10 minutes, the same every week), so verify accepts a next
+# run up to this long after the scheduled minute.
+START_DELAY = datetime.timedelta(minutes=15)
 WHEN = re.compile(r"^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|daily) ([01]\d|2[0-3]):([0-5]\d)$", re.I)
 INVARIANT = re.compile(r"^[-*]\s+`([^`]+)`")
 CAP = re.compile(r"[a-z0-9_]+")
@@ -656,7 +660,10 @@ def verify(instance, activity, routine, repo=None):
             problems.append(f"the routine has no readable next_run_at ({nxt!r})")
         else:
             day, hh, mm = m.group(1).lower(), int(m.group(2)), int(m.group(3))
-            if (when.hour, when.minute) != (hh, mm) or (day != "daily" and DAYS[when.weekday()] != day):
+            start = when.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if start > when:
+                start -= datetime.timedelta(days=1)
+            if when - start > START_DELAY or (day != "daily" and DAYS[start.weekday()] != day):
                 problems.append(f"next run is {when:%A %H:%M} local, not {exp['schedule']}")
     return problems
 

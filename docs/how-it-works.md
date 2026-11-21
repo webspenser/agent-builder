@@ -4,7 +4,7 @@ A product overview of the moving parts: what they are, where they live, and
 every check that runs, and when. Keep this page current: when a release
 changes one of these parts, update the page in the same pull request.
 
-Current: standard 7.5. Agent Builder 7.5.0, sales-partner 8.2.0.
+Current: standard 7.5. Agent Builder 7.5.1, sales-partner 8.2.0.
 
 ## In plain words
 
@@ -310,7 +310,7 @@ flowchart TD
   PASS --> G4["Step 4: user pastes setup script<br/>into a cloud environment"]
   G4 --> G5["Step 5: user creates routine in web UI"]
   G5 --> G6["Step 6: verify, schedule_check.py verify<br/>against the routines API JSON"]
-  G6 --> V1{"enabled, one source = this repo,<br/>exact prompt, environment = recorded one,<br/>a connector per binding and no extras,<br/>next run = scheduled day and time"}
+  G6 --> V1{"enabled, one source = this repo,<br/>exact prompt, environment = recorded one,<br/>a connector per binding and no extras,<br/>next run = scheduled day and time,<br/>up to 15 minutes late"}
   V1 -- mismatch --> FIX["MISMATCH: user fixes, re-verify"]
   FIX --> G6
   V1 -- ok --> REC["record routine_activity in schedules.yaml"]
@@ -352,7 +352,11 @@ Behavior verified in acceptance on 2026-09-29:
 
 - The routine form takes the browser's local time and stores a fixed UTC
   cron, so the time shifts by an hour when daylight saving changes.
-- `next_run_at` carries about a minute of jitter. `verify` allows for it.
+- `next_run_at` is a few minutes after the cron time (about 3 to 10
+  minutes), and the delay is the same for a routine every week. `verify`
+  accepts a next run up to 15 minutes after the scheduled minute on the
+  scheduled day (builder 7.5.1). Moving the cron earlier does not help:
+  the delay moves with it.
 - Connectors appear as `mcp__Attio__…`, for example.
 - The agent loads only through the environment's setup script. Routines
   ignore plugins that the repository's `.claude/settings.json` enables.

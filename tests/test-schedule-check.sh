@@ -155,6 +155,16 @@ routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 
 run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "wrong time" "next run is Monday 08:00 local, not Monday 07:00"
 routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-06T07:00:00Z
 run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "wrong day" "next run is Tuesday 07:00 local"
+routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-05T07:09:57Z
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 0 "a start a few minutes late is the scheduler's delay" "OK: the routine matches schedule_prospect"
+routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-05T07:15:00Z
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 0 "a start 15 minutes late is accepted" "OK:"
+routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-05T07:15:01Z
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "a start over 15 minutes late is a mismatch" "next run is Monday 07:15 local, not Monday 07:00"
+routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-05T06:59:00Z
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "an early start is a mismatch" "next run is Monday 06:59 local, not Monday 07:00"
+routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-06T07:05:00Z
+run verify "$I" prospect "$W/r.json" --repo acme/sales;  expect 1 "a late start on the wrong day is a mismatch" "next run is Tuesday 07:05 local"
 routine "$W/r.json" true https://github.com/acme/sales "$PROMPT" "GoodCRM Mail" 2026-10-05T07:00:00Z
 run verify "$N" digest "$W/r.json";                      expect 1 "gate failure reported by verify" "does not pass the unattended gate"
 run verify "$I" nothing "$W/r.json";                     expect 2 "unknown entry" "no schedule_nothing"
