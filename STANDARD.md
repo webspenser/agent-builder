@@ -1589,7 +1589,9 @@ every agent and executable. It needs only `python3`.
   with what `check` expects (exactly one repository source, and it is
   this repository; enabled; exact prompt; a connector per bound
   capability and no connector that matches no bound `server_match`;
-  next run time; the cloud environment) and prints one `MISMATCH` line
+  next run on the scheduled day, at the scheduled minute or up to 15
+  minutes after it, the cloud scheduler's start delay; the cloud
+  environment) and prints one `MISMATCH` line
   per difference, or `OK`. Without `--repo` only the repository name is
   compared. The routine's `environment_id` must equal `environment` in
   `schedules.yaml`; when `schedules.yaml` has none, `verify` names the
